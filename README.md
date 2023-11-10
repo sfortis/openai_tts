@@ -14,6 +14,10 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 - Customizable speech model and speed (check https://platform.openai.com/docs/guides/speech-to-text for supported voices and models)
 - Integration with Home Assistant's assistant, automations and scripts
 
+## Sample
+
+  https://www.youtube.com/watch?v=oeeypI_X0qs
+
 ## Installation Instructions
 
 1. Ensure you have a `custom_components` folder within your Home Assistant configuration directory.
