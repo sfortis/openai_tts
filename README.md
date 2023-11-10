@@ -1,0 +1,3 @@
+# openai_tts
+
+The custom component for Home Assistant enables the integration of OpenAI's Text-to-Speech (TTS) service. Once installed, it allows users to convert text messages into spoken words in a chosen language and voice, directly from Home Assistant's automation and scripting environment. The component is configurable, allowing the user to set parameters such as language, voice model, and speech speed. It uses OpenAI's API to generate audio from text and requires a valid API key for operation. The audio is returned in MP3 format and can be played through Home Assistant's media player or other connected devices.
