@@ -11,8 +11,8 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 
 - Text-to-Speech conversion using OpenAI's API
 - Support for multiple languages and voices
-- Customizable speech model and speed
-- Integration with Home Assistant's automation and scripting
+- Customizable speech model and speed (check https://platform.openai.com/docs/guides/speech-to-text for supported voices and models)
+- Integration with Home Assistant's assistant, automations and scrips
 
 ## Installation Instructions
 
