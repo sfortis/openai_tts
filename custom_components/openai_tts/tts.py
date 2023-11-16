@@ -21,7 +21,7 @@ PLATFORM_SCHEMA = PLATFORM_SCHEMA.extend({
     vol.Required(CONF_API_KEY): cv.string,
     vol.Optional(CONF_LANG, default=DEFAULT_LANG): cv.string,
     vol.Optional(CONF_MODEL, default='tts-1'): cv.string,
-    vol.Optional(CONF_VOICE, default='Shimmer'): cv.string,
+    vol.Optional(CONF_VOICE, default='shimmer'): cv.string,
     vol.Optional(CONF_SPEED, default=1): cv.string,
 })
 
