@@ -79,9 +79,6 @@ class OpenAITTSProvider(Provider):
             response.raise_for_status()  # Raises an HTTPError if the HTTP request returned an unsuccessful status code
 
             # The response should contain the audio file content
-            # The exact key in the response that contains the audio file content may vary
-            # You need to inspect the actual response from the API and extract the audio content accordingly
-            # Here's an example if the content is directly in the response body as binary data
             return "mp3", response.content
         except requests.exceptions.HTTPError as http_err:
             _LOGGER.error("HTTP error from OpenAI: %s", http_err)
