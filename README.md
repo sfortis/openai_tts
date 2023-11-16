@@ -37,5 +37,5 @@ tts:
     # Optional parameters:
     language: "en-US"
     model: "tts-1"
-    voice: "Shimmer"
+    voice: "shimmer"
     speed: "1"
