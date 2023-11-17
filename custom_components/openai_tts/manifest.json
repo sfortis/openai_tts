@@ -3,7 +3,8 @@
   "name": "OpenAI TTS",
   "documentation": "https://github.com/sfortis/openai_tts/",
   "dependencies": [],
-  "codeowners": ["sfortis"],
+  "codeowners": ["@sfortis"],
+  "issue_tracker": "https://github.com/sfortis/openai_tts/issues",
   "iot_class": "cloud_polling",
   "requirements": ["requests>=2.25.1"],
   "version": "0.1.0"
