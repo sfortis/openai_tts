@@ -16,7 +16,7 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 
 ## Sample
 
-  https://www.youtube.com/watch?v=oeeypI_X0qs
+  [https://www.youtube.com/watch?v=oeeypI_X0qs](https://www.youtube.com/shorts/otTe6-YkQjI)
 
 ## Installation Instructions
 
