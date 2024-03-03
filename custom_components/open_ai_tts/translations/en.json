@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Add text-to-speech engine",
+        "description": "Provide configuration data. See documentation for further info.",
+        "data": {
+          "api_key": "Enter OpenAI API key.",
+          "speed": "Enter speed of the speech",
+          "model": "Select model to be used.",
+          "voice": "Select voice."
+        }
+      }
+    },
+    "error": {
+      "wrong_api_key": "Connection was not authorized. Wrong or no API key provided."
+    }
+  }
+}
