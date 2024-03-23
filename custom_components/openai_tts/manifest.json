@@ -1,6 +1,7 @@
 {
   "domain": "openai_tts",
   "name": "OpenAI TTS",
+  "config_flow": true,
   "codeowners": ["@sfortis"],
   "dependencies": [],
   "documentation": "https://github.com/sfortis/openai_tts/",
