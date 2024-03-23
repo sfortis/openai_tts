@@ -1,5 +1,5 @@
 """
-Support for OpenAI TTS.
+Setting up TTS entity.
 """
 import logging
 from homeassistant.components.tts import TextToSpeechEntity
@@ -48,7 +48,6 @@ class OpenAITTSEntity(TextToSpeechEntity):
     @property
     def supported_languages(self):
         """Return the list of supported languages."""
-        # Ideally, this list should be dynamically fetched from OpenAI, if supported.
         return self._engine.get_supported_langs()
 
     @property

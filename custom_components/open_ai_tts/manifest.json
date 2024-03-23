@@ -1,12 +1,11 @@
 {
-  "domain": "open_ai_tts",
+  "domain": "openai_tts",
   "name": "OpenAI TTS",
-  "codeowners": ["@dvejsada"],
+  "codeowners": ["@sfortis", "@dvejsada"],
   "dependencies": [],
-  "documentation": "https://github.com/dvejsada/openai_tts/",
+  "documentation": "https://github.com/sfortis/openai_tts/",
   "iot_class": "cloud_polling",
-  "config_flow": true,
-  "issue_tracker": "https://github.com/dvejsada/openai_tts/issues",
+  "issue_tracker": "https://github.com/sfortis/openai_tts/issues",
   "requirements": ["requests>=2.25.1"],
-  "version": "0.1.0"
+  "version": "0.2.0"
 }
