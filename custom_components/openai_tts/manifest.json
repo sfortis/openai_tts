@@ -1,7 +1,7 @@
 {
   "domain": "openai_tts",
   "name": "OpenAI TTS",
-  "codeowners": ["@sfortis", "@dvejsada"],
+  "codeowners": ["@sfortis"],
   "dependencies": [],
   "documentation": "https://github.com/sfortis/openai_tts/",
   "iot_class": "cloud_polling",
