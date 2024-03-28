@@ -18,6 +18,18 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 
   [https://www.youtube.com/watch?v=oeeypI_X0qs](https://www.youtube.com/shorts/otTe6-YkQjI)
 
+## Sample Home Assistant service
+
+```
+service: tts.speak
+target:
+  entity_id: tts.openai_nova_engine
+data:
+  cache: true
+  media_player_entity_id: media_player.bedroom_speaker
+  message: My speech has improved now!
+```
+
 ## Installation Instructions
 
 1. Ensure you have a `custom_components` folder within your Home Assistant configuration directory.
