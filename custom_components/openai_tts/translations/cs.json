@@ -1,0 +1,19 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Přidej engine pro převod textu na řeč",
+        "description": "Vlož konfigurační data. Pro detaily se podívej na dokumentaci",
+        "data": {
+          "api_key": "Vlož OpenAI API klíč.",
+          "speed": "Vlož rychlost řeči.",
+          "model": "Vyber model k použití.",
+          "voice": "Vyber hlas."
+        }
+      }
+    },
+    "error": {
+      "wrong_api_key": "Nebyl poskytnut správný API klíč."
+    }
+  }
+}

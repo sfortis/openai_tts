@@ -1,7 +1,7 @@
 # openai_tts
 # OpenAI TTS Custom Component for Home Assistant
 
-This custom component integrates OpenAI's Text-to-Speech (TTS) service with Home Assistant, allowing users to convert text into spoken audio. The service supports various languages and voices, offering customizable options such as voice model and speed.
+This custom component integrates OpenAI's Text-to-Speech (TTS) service with Home Assistant, allowing users to convert text into spoken audio. The service supports various languages and voices, offering customizable options such as voice model.
 
 ## Description
 
@@ -11,7 +11,7 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 
 - Text-to-Speech conversion using OpenAI's API
 - Support for multiple languages and voices
-- Customizable speech model and speed (check https://platform.openai.com/docs/guides/text-to-speech for supported voices and models)
+- Customizable speech model (check https://platform.openai.com/docs/guides/text-to-speech for supported voices and models)
 - Integration with Home Assistant's assistant, automations and scripts
 
 ## Sample
@@ -28,14 +28,4 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 
 4. Restart Home Assistant
 
-5. Configure the component in your `configuration.yaml` file:
-
-```yaml
-tts:
-  - platform: openai_tts
-    api_key: "your_api_key_here"
-    # Optional parameters:
-    language: "en-US"
-    model: "tts-1"
-    voice: "shimmer"
-    speed: "1"
+5. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
