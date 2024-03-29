@@ -1,12 +1,12 @@
 {
-  "domain": "openai_tts",
-  "name": "OpenAI TTS",
-  "config_flow": true,
   "codeowners": ["@sfortis"],
+  "config_flow": true,
   "dependencies": [],
   "documentation": "https://github.com/sfortis/openai_tts/",
+  "domain": "openai_tts",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/sfortis/openai_tts/issues",
+  "name": "OpenAI TTS",
   "requirements": ["requests>=2.25.1"],
   "version": "0.2.0"
 }
