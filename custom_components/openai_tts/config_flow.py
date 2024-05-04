@@ -17,7 +17,8 @@ _LOGGER = logging.getLogger(__name__)
 
 async def validate_input(user_input: dict):
     """ Function to validate provided  data"""
-    if len(user_input[CONF_API_KEY]) != 51:
+    api_key_length = len(user_input['CONF_API_KEY'])
+    if not (51 <= api_key_length <= 56):
         raise WrongAPIKey
 
 
