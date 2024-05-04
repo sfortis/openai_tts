@@ -31,7 +31,7 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
         """Handle the initial step."""
 
         data_schema = {vol.Required(CONF_API_KEY): str,
-                       vol.Optional(CONF_SPEED, default=1): int,
+                       vol.Optional(CONF_SPEED, default=1.0): float,  # default to 1.0 (float)
                        CONF_MODEL: selector({
                            "select": {
                                "options": MODELS,
