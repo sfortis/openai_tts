@@ -13,7 +13,11 @@
       }
     },
     "error": {
-      "wrong_api_key": "Nebyl poskytnut správný API klíč."
+      "wrong_api_key": "Nebyl poskytnut správný API klíč.",
+      "already_configured": "Tento hlas je již nastaven."
+    },
+    "abort": {
+      "already_configured": "Tento hlas je již nastaven."
     }
   }
 }

@@ -6,7 +6,8 @@ from homeassistant.components.tts import TextToSpeechEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from .const import CONF_API_KEY,CONF_MODEL, CONF_SPEED, CONF_VOICE, DOMAIN
+from homeassistant.helpers.entity import generate_entity_id
+from .const import CONF_API_KEY, CONF_MODEL, CONF_SPEED, CONF_VOICE, DOMAIN
 from .openaitts_engine import OpenAITTSEngine
 from homeassistant.exceptions import MaxLengthExceeded
 
@@ -38,7 +39,8 @@ class OpenAITTSEntity(TextToSpeechEntity):
         self.hass = hass
         self._engine = engine
         self._config = config
-        self._attr_unique_id = self._config.data[CONF_VOICE]
+        self._attr_unique_id = f"{config.data[CONF_VOICE]}_{config.data[CONF_MODEL]}"
+        self.entity_id = generate_entity_id("tts.openai_tts_{}", config.data[CONF_VOICE], hass=hass)
 
     @property
     def default_language(self):
@@ -52,16 +54,19 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
     @property
     def device_info(self):
-        return {"identifiers": {(DOMAIN, self._attr_unique_id)}, "name": f"OpenAI {self._config.data[CONF_VOICE]}", "manufacturer": "OpenAI"}
+        return {
+            "identifiers": {(DOMAIN, self._attr_unique_id)},
+            "model": f"{self._config.data[CONF_VOICE]}",
+            "manufacturer": "OpenAI"
+        }
 
     @property
     def name(self):
         """Return name of entity"""
-        return " engine"
+        return f"{self._config.data[CONF_VOICE]}"
 
     def get_tts_audio(self, message, language, options=None):
         """Convert a given text to speech and return it as bytes."""
-
         try:
             if len(message) > 4096:
                 raise MaxLengthExceeded
@@ -70,10 +75,9 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
             # The response should contain the audio file content
             return "mp3", speech.content
-        except Exception as e:
-            _LOGGER.error("Unknown Error: %s", e)
-
         except MaxLengthExceeded:
             _LOGGER.error("Maximum length of the message exceeded")
+        except Exception as e:
+            _LOGGER.error("Unknown Error: %s", e)
 
         return None, None

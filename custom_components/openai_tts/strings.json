@@ -13,7 +13,11 @@
       }
     },
     "error": {
-      "wrong_api_key": "Connection was not authorized. Wrong or no API key provided."
+      "wrong_api_key": "Invalid API key. Please enter a valid API key.",
+      "already_configured": "This voice is already configured."
+    },
+    "abort": {
+      "already_configured": "This voice is already configured."
     }
   }
 }
