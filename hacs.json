@@ -1,5 +1,5 @@
 {
-    "name": "OpenAI TTS for HACS",
-    "homeassistant": "2023.9.0",
+    "name": "OpenAI TTS Speech Service",
+    "homeassistant": "2024.5.3",
     "render_readme": true
 }
