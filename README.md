@@ -30,7 +30,19 @@ data:
   message: My speech has improved now!
 ```
 
-## Installation Instructions
+## HACS installation ( *preferred!* ) 
+
+1. Go to the sidebar HACS menu 
+
+2. Click on the 3-dot overflow menu in the upper right and select the "Custom Repositories" item.
+
+3. Copy/paste https://github.com/sfortis/openai_tts into the "Repository" textbox and select "Integration" for the category entry.
+
+4. Click on "Add" to add the custom repository.
+
+5. You can then click on the "OpenAI TTS Speech Services" repository entry and download it. Restart Home Assistant to apply the component.
+
+## Manual installation
 
 1. Ensure you have a `custom_components` folder within your Home Assistant configuration directory.
 
