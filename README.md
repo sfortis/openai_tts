@@ -42,6 +42,8 @@ data:
 
 5. You can then click on the "OpenAI TTS Speech Services" repository entry and download it. Restart Home Assistant to apply the component.
 
+6. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
+
 ## Manual installation
 
 1. Ensure you have a `custom_components` folder within your Home Assistant configuration directory.
