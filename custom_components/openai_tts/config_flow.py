@@ -42,7 +42,7 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 "options": MODELS,
                 "mode": "dropdown",
                 "sort": True,
-                "custom_value": False
+                "custom_value": True
             }
         }),
         vol.Required(CONF_VOICE, default="shimmer"): selector({
@@ -50,7 +50,7 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 "options": VOICES,
                 "mode": "dropdown",
                 "sort": True,
-                "custom_value": False
+                "custom_value": True
             }
         })
     })
