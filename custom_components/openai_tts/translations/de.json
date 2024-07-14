@@ -1,0 +1,24 @@
+{
+  "config": {
+    "step": {
+      "user": {
+        "title": "Füge eine Text zu Sprache Engine hinzu",
+        "description": "Gib Konfigurationsdaten ein. Schau in die Dokumentation für weitere Informationen.",
+        "data": {
+          "api_key": "Gib den OpenAI API Schlüssel ein.",
+          "speed": "Gib die Geschwindigkeit der Sprache ein",
+          "model": "Wähle das zu verwendende Modell.",
+          "voice": "Wähle eine Stimme.",
+          "url": "Gib den OpenAI-kompatiblen Endpunkt ein. Optional kann eine Portnummer angegeben werden."
+        }
+      }
+    },
+    "error": {
+      "wrong_api_key": "Ungültiger API Schlüssel. Bitte gib einen gültigen API Schlüssel ein.",
+      "already_configured": "Diese Stimme und Endpunkt sind bereits konfiguriert."
+    },
+    "abort": {
+      "already_configured": "Diese Stimme und Endpunkt sind bereits konfiguriert."
+    }
+  }
+}
