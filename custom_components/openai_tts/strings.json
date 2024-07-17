@@ -8,16 +8,17 @@
           "api_key": "Enter OpenAI API key.",
           "speed": "Enter speed of the speech",
           "model": "Select model to be used.",
-          "voice": "Select voice."
+          "voice": "Select voice.",
+          "url": "Enter the OpenAI-compatible endpoint. Optionally include a port number."
         }
       }
     },
     "error": {
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
-      "already_configured": "This voice is already configured."
+      "already_configured": "This voice and endpoint are already configured."
     },
     "abort": {
-      "already_configured": "This voice is already configured."
+      "already_configured": "This voice and endpoint are already configured."
     }
   }
 }
