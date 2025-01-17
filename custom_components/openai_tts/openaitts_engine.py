@@ -10,8 +10,9 @@ class OpenAITTSEngine:
         self._speed = speed
         self._url = url
 
-    def get_tts(self, text: str):
-        """ Makes request to OpenAI TTS engine to convert text into audio"""
+    def get_tts(self, text: str) -> bytes:
+        """ Makes request to OpenAI TTS engine to convert text into audio.
+        Returns audio file content. Raises an exception if the status code is other than 200."""
         headers: dict = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         data: dict = {
             "model": self._model,
