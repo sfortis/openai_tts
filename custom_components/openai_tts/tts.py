@@ -80,10 +80,9 @@ class OpenAITTSEntity(TextToSpeechEntity):
             if len(message) > 4096:
                 raise MaxLengthExceeded
 
-            speech = self._engine.get_tts(message)
+            audio_file_content = self._engine.get_tts(message)
 
-            # The response should contain the audio file content
-            return "wav", speech
+            return "wav", audio_file_content
         except MaxLengthExceeded:
             _LOGGER.error("Maximum length of the message exceeded")
         except Exception as e:
