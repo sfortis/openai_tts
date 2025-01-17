@@ -1,5 +1,6 @@
 import requests
 
+
 class OpenAITTSEngine:
 
     def __init__(self, api_key: str, voice: str, model: str, speed: int, url: str):
@@ -19,9 +20,18 @@ class OpenAITTSEngine:
             "response_format": "wav",
             "speed": self._speed
         }
-        return requests.post(self._url, headers=headers, json=data)
+        response = requests.post(self._url, headers=headers, json=data)
+        if response.status_code != 200:
+            raise Exception(
+                f"Failed to convert text to speech [{response.status_code}]: {response.text}")
+        else:
+            return response.content
 
     @staticmethod
     def get_supported_langs() -> list:
         """Returns list of supported languages. Note: the model determines the provides language automatically."""
-        return ["af", "ar", "hy", "az", "be", "bs", "bg", "ca", "zh", "hr", "cs", "da", "nl", "en", "et", "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "is", "id", "it", "ja", "kn", "kk", "ko", "lv", "lt", "mk", "ms", "mr", "mi", "ne", "no", "fa", "pl", "pt", "ro", "ru", "sr", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th", "tr", "uk", "ur", "vi", "cy"]
+        return ["af", "ar", "hy", "az", "be", "bs", "bg", "ca", "zh", "hr", "cs", "da", "nl",
+                "en", "et", "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "is", "id", "it",
+                "ja", "kn", "kk", "ko", "lv", "lt", "mk", "ms", "mr", "mi", "ne", "no", "fa",
+                "pl", "pt", "ro", "ru", "sr", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th",
+                "tr", "uk", "ur", "vi", "cy"]
