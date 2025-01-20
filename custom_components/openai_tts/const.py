@@ -8,4 +8,4 @@ CONF_SPEED = 'speed'
 CONF_URL = 'url'
 UNIQUE_ID = 'unique_id'
 MODELS = ["tts-1", "tts-1-hd"]
-VOICES = ["alloy", "echo", "fable", "onyx", "nova", "shimmer"]
+VOICES = ["alloy", "ash", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
