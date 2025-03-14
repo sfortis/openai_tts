@@ -2,23 +2,35 @@
   "config": {
     "step": {
       "user": {
-        "title": "Přidej engine pro převod textu na řeč",
-        "description": "Vlož konfigurační data. Pro detaily se podívej na dokumentaci",
+        "title": "Přidat TTS engine",
+        "description": "Více informací naleznete v dokumentaci.",
         "data": {
-          "api_key": "Vlož OpenAI API klíč.",
-          "speed": "Vlož rychlost řeči.",
-          "model": "Vyber model k použití.",
-          "voice": "Vyber hlas.",
-          "url": "Zadejte koncový bod kompatibilní s OpenAI. Volitelně uveďte číslo portu."
+          "api_key": "Zadejte OpenAI API klíč",
+          "speed": "Rychlost (0,25 až 4,0, kde 1,0 je výchozí)",
+          "model": "Vyberte model",
+          "voice": "Vyberte hlas",
+          "url": "Zadejte OpenAI-kompatibilní endpoint (Volitelně uveďte číslo portu)"
         }
       }
     },
     "error": {
-      "wrong_api_key": "Nebyl poskytnut správný API klíč.",
-      "already_configured": "Tento hlas je již nastaven."
+      "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč.",
+      "already_configured": "Tento hlas a tento endpoint jsou již nakonfigurovány."
     },
     "abort": {
-      "already_configured": "Tento hlas je již nastaven."
+      "already_configured": "Tento hlas a tento endpoint jsou již nakonfigurovány."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Nastavení TTS možností",
+        "data": {
+          "chime": "Povolit zvukový signál před řečí (užitečné pro oznámení)",
+          "speed": "Nastavit rychlost (0,25 až 4,0)",
+          "voice": "Vyberte hlas"
+        }
+      }
     }
   }
 }

@@ -3,12 +3,12 @@
     "step": {
       "user": {
         "title": "Add text-to-speech engine",
-        "description": "Provide configuration data. See documentation for further info.",
+        "description": "See documentation for further info.",
         "data": {
-          "api_key": "Enter OpenAI API key.",
-          "speed": "Enter speed of the speech",
-          "model": "Select model to be used.",
-          "voice": "Select voice.",
+          "api_key": "Enter OpenAI API key",
+          "speed": "Speed (0.25 to 4.0, where 1.0 is default)",
+          "model": "Select model",
+          "voice": "Select voice",
           "url": "Enter the OpenAI-compatible endpoint. Optionally include a port number."
         }
       }
@@ -19,6 +19,18 @@
     },
     "abort": {
       "already_configured": "This voice and endpoint are already configured."
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Configure TTS options",
+        "data": {
+          "chime": "Enable chime before speech (useful for announcements)",
+          "speed": "Set speed (0.25 to 4.0)",
+          "voice": "Select voice"
+        }
+      }
     }
   }
 }
