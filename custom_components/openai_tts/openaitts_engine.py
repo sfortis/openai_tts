@@ -1,10 +1,14 @@
 """
 TTS Engine for OpenAI TTS.
 """
-import asyncio
-import threading
+import json
 import logging
-import aiohttp
+import time
+from urllib.request import Request, urlopen
+from urllib.error import HTTPError, URLError
+from asyncio import CancelledError
+
+from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -21,64 +25,66 @@ class OpenAITTSEngine:
         self._speed = speed
         self._url = url
 
-        # Create a dedicated event loop running in a background thread.
-        self._loop = asyncio.new_event_loop()
-        self._session = None
-        self._thread = threading.Thread(target=self._start_loop, daemon=True)
-        self._thread.start()
-        # Initialize the aiohttp session in the background event loop.
-        asyncio.run_coroutine_threadsafe(self._init_session(), self._loop).result()
+    def get_tts(self, text: str, speed: float = None, voice: str = None) -> AudioResponse:
+        """Synchronous TTS request using urllib.request
+        If the API call fails, waits for 1 second and retries once.
+        """
+        if speed is None:
+            speed = self._speed
+        if voice is None:
+            voice = self._voice
 
-    def _start_loop(self):
-        asyncio.set_event_loop(self._loop)
-        self._loop.run_forever()
+        headers = {"Content-Type": "application/json"}
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
 
-    async def _init_session(self):
-        # Create a persistent aiohttp session for reuse.
-        self._session = aiohttp.ClientSession()
-
-    async def _async_get_tts(self, text: str, speed: float, voice: str) -> AudioResponse:
-        headers = {"Authorization": f"Bearer {self._api_key}"} if self._api_key else {}
         data = {
             "model": self._model,
             "input": text,
             "voice": voice,
             "response_format": "wav",
-            "speed": speed,
-            "stream": True
+            "speed": speed
         }
-        # Use separate timeouts for connecting and reading.
-        timeout = aiohttp.ClientTimeout(total=None, sock_connect=5, sock_read=25)
-        async with self._session.post(self._url, headers=headers, json=data, timeout=timeout) as resp:
-            resp.raise_for_status()
-            audio_chunks = []
-            # Optimize the chunk size to 4096 bytes.
-            async for chunk in resp.content.iter_chunked(4096):
-                if chunk:
-                    audio_chunks.append(chunk)
-            audio_data = b"".join(audio_chunks)
-            return AudioResponse(audio_data)
 
-    def get_tts(self, text: str, speed: float = None, voice: str = None) -> AudioResponse:
-        """Synchronous wrapper that runs the asynchronous TTS request on a dedicated event loop.
-           If 'speed' or 'voice' are provided, they override the stored values.
-        """
-        try:
-            if speed is None:
-                speed = self._speed
-            if voice is None:
-                voice = self._voice
-            future = asyncio.run_coroutine_threadsafe(self._async_get_tts(text, speed, voice), self._loop)
-            return future.result()
-        except Exception as e:
-            _LOGGER.error("Error in asynchronous get_tts: %s", e)
-            raise e
+        max_retries = 1
+        attempt = 0
+        while True:
+            try:
+                req = Request(
+                    self._url,
+                    data=json.dumps(data).encode("utf-8"),
+                    headers=headers,
+                    method="POST"
+                )
+                # Set a timeout of 30 seconds for the entire request.
+                with urlopen(req, timeout=30) as response:
+                    content = response.read()
+                return AudioResponse(content)
+            except CancelledError as ce:
+                _LOGGER.exception("TTS request cancelled")
+                raise  # Propagate cancellation.
+            except (HTTPError, URLError) as net_err:
+                _LOGGER.exception("Network error in synchronous get_tts on attempt %d", attempt + 1)
+                if attempt < max_retries:
+                    attempt += 1
+                    time.sleep(1)  # Wait for 1 second before retrying.
+                    _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
+                    continue
+                else:
+                    raise HomeAssistantError("Network error occurred while fetching TTS audio") from net_err
+            except Exception as exc:
+                _LOGGER.exception("Unknown error in synchronous get_tts on attempt %d", attempt + 1)
+                if attempt < max_retries:
+                    attempt += 1
+                    time.sleep(1)
+                    _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
+                    continue
+                else:
+                    raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
 
     def close(self):
-        """Clean up the aiohttp session and event loop on shutdown."""
-        if self._session:
-            asyncio.run_coroutine_threadsafe(self._session.close(), self._loop).result()
-        self._loop.call_soon_threadsafe(self._loop.stop())
+        """Nothing to close in the synchronous version."""
+        pass
 
     @staticmethod
     def get_supported_langs() -> list:

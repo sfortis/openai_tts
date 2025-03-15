@@ -4,10 +4,10 @@ Setting up TTS entity.
 from __future__ import annotations
 import io
 import math
-import re
 import struct
 import wave
 import logging
+from asyncio import CancelledError
 
 from homeassistant.components.tts import TextToSpeechEntity
 from homeassistant.config_entries import ConfigEntry
@@ -20,16 +20,22 @@ from homeassistant.exceptions import MaxLengthExceeded
 
 _LOGGER = logging.getLogger(__name__)
 
-# --- Helper Functions - Chime & silence synthesis --
+# --- Helper Functions - Chime & Silence Synthesis ---
 
 def synthesize_chime(sample_rate: int = 44100, channels: int = 1, sampwidth: int = 2, duration: float = 1.0) -> bytes:
-    _LOGGER.debug("Synthesizing chime: sample_rate=%d, channels=%d, sampwidth=%d, duration=%.2f", sample_rate, channels, sampwidth, duration)
-    frequency1 = 440.0   # Note A
+    _LOGGER.debug(
+        "Synthesizing chime: sample_rate=%d, channels=%d, sampwidth=%d, duration=%.2f",
+        sample_rate,
+        channels,
+        sampwidth,
+        duration,
+    )
+    frequency1 = 440.0  # Note A
     frequency2 = 587.33  # Note D
     amplitude = 0.8
     num_samples = int(sample_rate * duration)
     output = io.BytesIO()
-    with wave.open(output, 'wb') as wf:
+    with wave.open(output, "wb") as wf:
         wf.setnchannels(channels)
         wf.setsampwidth(sampwidth)
         wf.setframerate(sample_rate)
@@ -40,33 +46,43 @@ def synthesize_chime(sample_rate: int = 44100, channels: int = 1, sampwidth: int
             sample2 = math.sin(2 * math.pi * frequency2 * t)
             sample = amplitude * fade * ((sample1 + sample2) / 2)
             int_sample = int(sample * 32767)
-            wf.writeframes(struct.pack('<h', int_sample))
+            wf.writeframes(struct.pack("<h", int_sample))
     chime_data = output.getvalue()
     _LOGGER.debug("Chime synthesized, length: %d bytes", len(chime_data))
     return chime_data
 
 def synthesize_silence(sample_rate: int, channels: int, sampwidth: int, duration: float = 0.3) -> bytes:
-    _LOGGER.debug("Synthesizing silence: sample_rate=%d, channels=%d, sampwidth=%d, duration=%.2f", sample_rate, channels, sampwidth, duration)
+    _LOGGER.debug(
+        "Synthesizing silence: sample_rate=%d, channels=%d, sampwidth=%d, duration=%.2f",
+        sample_rate,
+        channels,
+        sampwidth,
+        duration,
+    )
     num_samples = int(sample_rate * duration)
     output = io.BytesIO()
-    with wave.open(output, 'wb') as wf:
+    with wave.open(output, "wb") as wf:
         wf.setnchannels(channels)
         wf.setsampwidth(sampwidth)
         wf.setframerate(sample_rate)
         for _ in range(num_samples):
-            wf.writeframes(struct.pack('<h', 0))
+            wf.writeframes(struct.pack("<h", 0))
     silence_data = output.getvalue()
     _LOGGER.debug("Silence synthesized, length: %d bytes", len(silence_data))
     return silence_data
 
 def combine_wav_files(chime_bytes: bytes, pause_bytes: bytes, tts_bytes: bytes) -> bytes:
-    _LOGGER.debug("Combining WAV files: chime (%d bytes), pause (%d bytes), TTS (%d bytes)",
-                  len(chime_bytes), len(pause_bytes), len(tts_bytes))
+    _LOGGER.debug(
+        "Combining WAV files: chime (%d bytes), pause (%d bytes), TTS (%d bytes)",
+        len(chime_bytes),
+        len(pause_bytes),
+        len(tts_bytes),
+    )
     chime_io = io.BytesIO(chime_bytes)
     pause_io = io.BytesIO(pause_bytes)
     tts_io = io.BytesIO(tts_bytes)
-    
-    with wave.open(chime_io, 'rb') as w1, wave.open(pause_io, 'rb') as w2, wave.open(tts_io, 'rb') as w3:
+
+    with wave.open(chime_io, "rb") as w1, wave.open(pause_io, "rb") as w2, wave.open(tts_io, "rb") as w3:
         params1 = w1.getparams()
         params2 = w2.getparams()
         params3 = w3.getparams()
@@ -75,9 +91,9 @@ def combine_wav_files(chime_bytes: bytes, pause_bytes: bytes, tts_bytes: bytes) 
         frames_chime = w1.readframes(w1.getnframes())
         frames_pause = w2.readframes(w2.getnframes())
         frames_tts = w3.readframes(w3.getnframes())
-    
+
     output = io.BytesIO()
-    with wave.open(output, 'wb') as wout:
+    with wave.open(output, "wb") as wout:
         wout.setparams(params1)
         wout.writeframes(frames_chime)
         wout.writeframes(frames_pause)
@@ -110,7 +126,7 @@ async def async_setup_entry(
         config_entry.data[CONF_VOICE],
         config_entry.data[CONF_MODEL],
         config_entry.data.get(CONF_SPEED, 1.0),
-        config_entry.data[CONF_URL]
+        config_entry.data[CONF_URL],
     )
     async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
 
@@ -142,14 +158,16 @@ class OpenAITTSEntity(TextToSpeechEntity):
         return {
             "identifiers": {(DOMAIN, self._attr_unique_id)},
             "model": self._config.data.get(CONF_MODEL),
-            "manufacturer": "OpenAI"
+            "manufacturer": "OpenAI",
         }
 
     @property
     def name(self) -> str:
         return _map_model(self._config.data.get(CONF_MODEL, "")).upper()
 
-    def get_tts_audio(self, message: str, language: str, options: dict | None = None) -> tuple[str, bytes] | tuple[None, None]:
+    def get_tts_audio(
+        self, message: str, language: str, options: dict | None = None
+    ) -> tuple[str, bytes] | tuple[None, None]:
         try:
             if len(message) > 4096:
                 raise MaxLengthExceeded("Message exceeds maximum allowed length")
@@ -167,13 +185,18 @@ class OpenAITTSEntity(TextToSpeechEntity):
             if chime_enabled:
                 _LOGGER.debug("Chime option enabled; synthesizing chime and pause.")
                 tts_io = io.BytesIO(audio_content)
-                with wave.open(tts_io, 'rb') as tts_wave:
+                with wave.open(tts_io, "rb") as tts_wave:
                     sample_rate = tts_wave.getframerate()
                     channels = tts_wave.getnchannels()
                     sampwidth = tts_wave.getsampwidth()
                     tts_frames = tts_wave.getnframes()
-                _LOGGER.debug("TTS parameters: sample_rate=%d, channels=%d, sampwidth=%d, frames=%d",
-                              sample_rate, channels, sampwidth, tts_frames)
+                _LOGGER.debug(
+                    "TTS parameters: sample_rate=%d, channels=%d, sampwidth=%d, frames=%d",
+                    sample_rate,
+                    channels,
+                    sampwidth,
+                    tts_frames,
+                )
                 chime_audio = synthesize_chime(sample_rate=sample_rate, channels=channels, sampwidth=sampwidth, duration=1.0)
                 pause_audio = synthesize_silence(sample_rate=sample_rate, channels=channels, sampwidth=sampwidth, duration=0.3)
                 try:
@@ -181,13 +204,16 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     _LOGGER.debug("Combined audio generated (chime -> pause -> TTS).")
                     return "wav", combined_audio
                 except Exception as ce:
-                    _LOGGER.error("Error combining audio: %s", ce)
+                    _LOGGER.exception("Error combining audio")
                     return "wav", audio_content
             else:
                 _LOGGER.debug("Chime option disabled; returning TTS audio only.")
                 return "wav", audio_content
+        except CancelledError as ce:
+            _LOGGER.exception("TTS task cancelled")
+            return None, None
         except MaxLengthExceeded as mle:
-            _LOGGER.error("Maximum message length exceeded: %s", mle)
+            _LOGGER.exception("Maximum message length exceeded")
         except Exception as e:
-            _LOGGER.error("Unknown error in get_tts_audio: %s", e)
+            _LOGGER.exception("Unknown error in get_tts_audio")
         return None, None
