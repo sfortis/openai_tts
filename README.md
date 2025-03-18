@@ -7,10 +7,6 @@ This custom component integrates OpenAI's Text-to-Speech (TTS) service with Home
 
 The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI API to generate spoken audio from text. This can be used in automations, assistants, scripts, or any other component that supports TTS within Home Assistant. 
 
-### *Caution! You need an OpenAI API key and some balance available in your OpenAI account!* ###
-visit: (https://platform.openai.com/docs/pricing)
-
-
 ## Features  
 
 - 🗣️ **Text-to-Speech** conversion using OpenAI's API  
@@ -21,6 +17,9 @@ visit: (https://platform.openai.com/docs/pricing)
 - 🎙️ **Customizable speech model** ([Check supported voices and models](https://platform.openai.com/docs/guides/text-to-speech))  
 - 🏡 **Integration with Home Assistant** – Works with assistant, automations, and scripts.  
 
+
+### *Caution! You need an OpenAI API key and some balance available in your OpenAI account!* ###
+visit: (https://platform.openai.com/docs/pricing)
 
 ## YouTube sample video (its not a tutorial!)
 
