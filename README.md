@@ -1,21 +1,18 @@
-# openai_tts
 # OpenAI TTS Custom Component for Home Assistant
-
-This custom component integrates OpenAI's Text-to-Speech (TTS) service with Home Assistant, allowing users to convert text into spoken audio. The service supports various languages and voices, offering customizable options such as voice model.
-
-## Description
 
 The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI API to generate spoken audio from text. This can be used in automations, assistants, scripts, or any other component that supports TTS within Home Assistant. 
 
 ## Features  
 
-- 🗣️ **Text-to-Speech** conversion using OpenAI's API  
-- 🌍 **Support for multiple languages and voices** No special configuration is needed. The AI model will auto-recognize the language.
-- ⭐🔔 **(New!) Chime option** – Useful for announcements on speakers. (See Devices --> OpenAI TTS --> CONNFIGURE button)
-- ⭐🔔 **(New!) User configurable chime sounds** – Drop your own chime sound into config/custom_components/openai_tts/chime folder (mp3).
-- ⭐🎛️ **(New!) Audio normalization option** – Uses more CPU but provides better audible sound on mobile phones and small speakers. (See Devices --> OpenAI TTS --> CONNFIGURE button)
-- 🎙️ **Customizable speech model** ([Check supported voices and models](https://platform.openai.com/docs/guides/text-to-speech))  
-- 🏡 **Integration with Home Assistant** – Works with assistant, automations, and scripts.  
+- **Text-to-Speech** conversion using OpenAI's API  
+- **Support for multiple languages and voices** – No special configuration needed; the AI model auto-recognizes the language.  
+- **Customizable speech model** – [Check supported voices and models](https://platform.openai.com/docs/guides/text-to-speech).  
+- **Integration with Home Assistant** – Works seamlessly with assistants, automations, and scripts.  
+- **Custom endpoint option** – Allows you to use your own OpenAI compatible API endpoint.
+- ⭐(New!) **Chime option** – Useful for announcements on speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*  
+- ⭐(New!) **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/openai_tts/chime` folder (MP3).  
+- ⭐(New!) **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*  
+
 
 
 ### *Caution! You need an OpenAI API key and some balance available in your OpenAI account!* ###
