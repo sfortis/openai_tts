@@ -26,7 +26,7 @@ class OpenAITTSEngine:
         self._url = url
 
     def get_tts(self, text: str, speed: float = None, voice: str = None) -> AudioResponse:
-        """Synchronous TTS request using urllib.request
+        """Synchronous TTS request using urllib.request.
         If the API call fails, waits for 1 second and retries once.
         """
         if speed is None:
@@ -42,7 +42,7 @@ class OpenAITTSEngine:
             "model": self._model,
             "input": text,
             "voice": voice,
-            "response_format": "wav",
+            "response_format": "mp3",
             "speed": speed
         }
 

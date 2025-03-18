@@ -11,13 +11,16 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 visit: (https://platform.openai.com/docs/pricing)
 
 
-## Features
+## Features  
 
-- Text-to-Speech conversion using OpenAI's API
-- Support for multiple languages and voices
-- Chime option. Usefull for announcements.
-- Customizable speech model (check https://platform.openai.com/docs/guides/text-to-speech for supported voices and models)
-- Integration with Home Assistant's assistant, automations and scripts
+- 🗣️ **Text-to-Speech** conversion using OpenAI's API  
+- 🌍 **Support for multiple languages and voices** No special configuration is needed. The AI model will auto-recognize the language.
+- ⭐🔔 **(New!) Chime option** – Useful for announcements on speakers. (See Devices --> OpenAI TTS --> CONNFIGURE button)
+- ⭐🔔 **(New!) User configurable chime sounds** – Drop your own chime sound into config/custom_components/openai_tts/chime folder (mp3).
+- ⭐🎛️ **(New!) Audio normalization option** – Uses more CPU but provides better audible sound on mobile phones and small speakers. (See Devices --> OpenAI TTS --> CONNFIGURE button)
+- 🎙️ **Customizable speech model** ([Check supported voices and models](https://platform.openai.com/docs/guides/text-to-speech))  
+- 🏡 **Integration with Home Assistant** – Works with assistant, automations, and scripts.  
+
 
 ## YouTube sample video (its not a tutorial!)
 

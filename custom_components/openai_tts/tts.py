@@ -3,10 +3,11 @@ Setting up TTS entity.
 """
 from __future__ import annotations
 import io
-import math
-import struct
-import wave
 import logging
+import os
+import subprocess
+import tempfile
+import time
 from asyncio import CancelledError
 
 from homeassistant.components.tts import TextToSpeechEntity
@@ -14,106 +15,22 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import generate_entity_id
-from .const import CONF_API_KEY, CONF_MODEL, CONF_SPEED, CONF_VOICE, CONF_URL, DOMAIN, UNIQUE_ID
+from .const import (
+    CONF_API_KEY,
+    CONF_MODEL,
+    CONF_SPEED,
+    CONF_VOICE,
+    CONF_URL,
+    DOMAIN,
+    UNIQUE_ID,
+    CONF_CHIME_ENABLE,
+    CONF_CHIME_SOUND,
+    CONF_NORMALIZE_AUDIO,
+)
 from .openaitts_engine import OpenAITTSEngine
 from homeassistant.exceptions import MaxLengthExceeded
 
 _LOGGER = logging.getLogger(__name__)
-
-# --- Helper Functions - Chime & Silence Synthesis ---
-
-def synthesize_chime(sample_rate: int = 44100, channels: int = 1, sampwidth: int = 2, duration: float = 1.0) -> bytes:
-    _LOGGER.debug(
-        "Synthesizing chime: sample_rate=%d, channels=%d, sampwidth=%d, duration=%.2f",
-        sample_rate,
-        channels,
-        sampwidth,
-        duration,
-    )
-    frequency1 = 440.0  # Note A
-    frequency2 = 587.33  # Note D
-    amplitude = 0.8
-    num_samples = int(sample_rate * duration)
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wf:
-        wf.setnchannels(channels)
-        wf.setsampwidth(sampwidth)
-        wf.setframerate(sample_rate)
-        for i in range(num_samples):
-            t = i / sample_rate
-            fade = 1.0 - (i / num_samples)
-            sample1 = math.sin(2 * math.pi * frequency1 * t)
-            sample2 = math.sin(2 * math.pi * frequency2 * t)
-            sample = amplitude * fade * ((sample1 + sample2) / 2)
-            int_sample = int(sample * 32767)
-            wf.writeframes(struct.pack("<h", int_sample))
-    chime_data = output.getvalue()
-    _LOGGER.debug("Chime synthesized, length: %d bytes", len(chime_data))
-    return chime_data
-
-def synthesize_silence(sample_rate: int, channels: int, sampwidth: int, duration: float = 0.3) -> bytes:
-    _LOGGER.debug(
-        "Synthesizing silence: sample_rate=%d, channels=%d, sampwidth=%d, duration=%.2f",
-        sample_rate,
-        channels,
-        sampwidth,
-        duration,
-    )
-    num_samples = int(sample_rate * duration)
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wf:
-        wf.setnchannels(channels)
-        wf.setsampwidth(sampwidth)
-        wf.setframerate(sample_rate)
-        for _ in range(num_samples):
-            wf.writeframes(struct.pack("<h", 0))
-    silence_data = output.getvalue()
-    _LOGGER.debug("Silence synthesized, length: %d bytes", len(silence_data))
-    return silence_data
-
-def combine_wav_files(chime_bytes: bytes, pause_bytes: bytes, tts_bytes: bytes) -> bytes:
-    _LOGGER.debug(
-        "Combining WAV files: chime (%d bytes), pause (%d bytes), TTS (%d bytes)",
-        len(chime_bytes),
-        len(pause_bytes),
-        len(tts_bytes),
-    )
-    chime_io = io.BytesIO(chime_bytes)
-    pause_io = io.BytesIO(pause_bytes)
-    tts_io = io.BytesIO(tts_bytes)
-
-    with wave.open(chime_io, "rb") as w1, wave.open(pause_io, "rb") as w2, wave.open(tts_io, "rb") as w3:
-        params1 = w1.getparams()
-        params2 = w2.getparams()
-        params3 = w3.getparams()
-        if params1[:3] != params2[:3] or params1[:3] != params3[:3]:
-            raise Exception("WAV parameters do not match among chime, pause, and TTS audio")
-        frames_chime = w1.readframes(w1.getnframes())
-        frames_pause = w2.readframes(w2.getnframes())
-        frames_tts = w3.readframes(w3.getnframes())
-
-    output = io.BytesIO()
-    with wave.open(output, "wb") as wout:
-        wout.setparams(params1)
-        wout.writeframes(frames_chime)
-        wout.writeframes(frames_pause)
-        wout.writeframes(frames_tts)
-    combined_data = output.getvalue()
-    _LOGGER.debug("Combined WAV file length: %d bytes", len(combined_data))
-    return combined_data
-
-def _map_model(model: str) -> str:
-    """Map the model value to a short label for entity display."""
-    model = model.lower()
-    if model == "tts-1":
-        return "SD"
-    elif model == "tts-1-hd":
-        return "HD"
-    elif model.startswith("tts-"):
-        return model[4:].upper()
-    return model.upper()
-
-# --- End Helper Functions ---
 
 async def async_setup_entry(
     hass: HomeAssistant,
@@ -141,8 +58,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
         self._attr_unique_id = config.data.get(UNIQUE_ID)
         if not self._attr_unique_id:
             self._attr_unique_id = f"{config.data.get(CONF_URL)}_{config.data.get(CONF_MODEL)}"
-        # Use the mapped model as the base for the entity_id.
-        base_name = _map_model(config.data.get(CONF_MODEL, ""))
+        base_name = self._config.data.get(CONF_MODEL, "").upper()
         self.entity_id = generate_entity_id("tts.openai_tts_{}", base_name.lower(), hass=hass)
 
     @property
@@ -163,52 +79,156 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
     @property
     def name(self) -> str:
-        return _map_model(self._config.data.get(CONF_MODEL, "")).upper()
+        return self._config.data.get(CONF_MODEL, "").upper()
 
     def get_tts_audio(
         self, message: str, language: str, options: dict | None = None
     ) -> tuple[str, bytes] | tuple[None, None]:
+        overall_start = time.monotonic()
+
+        _LOGGER.debug(" -------------------------------------------")
+        _LOGGER.debug("|  OpenAI TTS                               |")
+        _LOGGER.debug("|  https://github.com/sfortis/openai_tts    |")
+        _LOGGER.debug(" -------------------------------------------")
+
         try:
             if len(message) > 4096:
                 raise MaxLengthExceeded("Message exceeds maximum allowed length")
-            # Re-read speed and voice from options if available.
+            # Retrieve settings.
             current_speed = self._config.options.get(CONF_SPEED, self._config.data.get(CONF_SPEED, 1.0))
             effective_voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
             _LOGGER.debug("Effective speed: %s", current_speed)
             _LOGGER.debug("Effective voice: %s", effective_voice)
-            # Call get_tts with the current speed and voice.
+
+            _LOGGER.debug("Creating TTS API request")
+            api_start = time.monotonic()
             speech = self._engine.get_tts(message, speed=current_speed, voice=effective_voice)
+            api_duration = (time.monotonic() - api_start) * 1000
+            _LOGGER.debug("TTS API call completed in %.2f ms", api_duration)
             audio_content = speech.content
-            # Determine effective chime setting.
-            chime_enabled = self._config.options.get("chime", self._config.data.get("chime", False))
-            _LOGGER.debug("Effective chime option: %s", chime_enabled)
+
+            # Retrieve options.
+            chime_enabled = self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False))
+            normalize_audio = self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False))
+            _LOGGER.debug("Chime enabled: %s", chime_enabled)
+            _LOGGER.debug("Normalization option: %s", normalize_audio)
+
             if chime_enabled:
-                _LOGGER.debug("Chime option enabled; synthesizing chime and pause.")
-                tts_io = io.BytesIO(audio_content)
-                with wave.open(tts_io, "rb") as tts_wave:
-                    sample_rate = tts_wave.getframerate()
-                    channels = tts_wave.getnchannels()
-                    sampwidth = tts_wave.getsampwidth()
-                    tts_frames = tts_wave.getnframes()
-                _LOGGER.debug(
-                    "TTS parameters: sample_rate=%d, channels=%d, sampwidth=%d, frames=%d",
-                    sample_rate,
-                    channels,
-                    sampwidth,
-                    tts_frames,
-                )
-                chime_audio = synthesize_chime(sample_rate=sample_rate, channels=channels, sampwidth=sampwidth, duration=1.0)
-                pause_audio = synthesize_silence(sample_rate=sample_rate, channels=channels, sampwidth=sampwidth, duration=0.3)
+                # Write TTS audio to a temp file.
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
+                    tts_file.write(audio_content)
+                    tts_path = tts_file.name
+                _LOGGER.debug("TTS audio written to temp file: %s", tts_path)
+
+                # Determine chime file path.
+                chime_file = self._config.options.get(CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
+                chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
+                _LOGGER.debug("Using chime file at: %s", chime_path)
+
+                # Create a temporary output file.
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
+                    merged_output_path = out_file.name
+
+                if normalize_audio:
+                    _LOGGER.debug("Both chime and normalization enabled; " +
+                                  "using filter_complex to normalize TTS audio and merge with chime in one pass.")
+                    # Use filter_complex to normalize the TTS audio and then concatenate with the chime.
+                    # First input: chime audio, second input: TTS audio (to be normalized).
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i", chime_path,
+                        "-i", tts_path,
+                        "-filter_complex", "[1:a]loudnorm=I=-16:TP=-1:LRA=5[tts_norm]; [0:a][tts_norm]concat=n=2:v=0:a=1[out]",
+                        "-map", "[out]",
+                        "-ac", "1",
+                        "-ar", "24000",
+                        "-b:a", "128k",
+                        "-preset", "superfast",
+                        "-threads", "4",
+                        merged_output_path,
+                    ]
+                    _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
+                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                else:
+                    _LOGGER.debug("Chime enabled without normalization; merging using concat method.")
+                    # Create a file list for concatenation.
+                    with tempfile.NamedTemporaryFile(mode="w", delete=False) as list_file:
+                        list_file.write(f"file '{chime_path}'\n")
+                        list_file.write(f"file '{tts_path}'\n")
+                        list_path = list_file.name
+                    _LOGGER.debug("FFmpeg file list created: %s", list_path)
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-f", "concat",
+                        "-safe", "0",
+                        "-i", list_path,
+                        "-ac", "1",
+                        "-ar", "24000",
+                        "-b:a", "128k",
+                        "-preset", "superfast",
+                        "-threads", "4",
+                        merged_output_path,
+                    ]
+                    _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
+                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    try:
+                        os.remove(list_path)
+                    except Exception:
+                        pass
+
+                with open(merged_output_path, "rb") as merged_file:
+                    final_audio = merged_file.read()
+                overall_duration = (time.monotonic() - overall_start) * 1000
+                _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+                # Cleanup temporary files.
                 try:
-                    combined_audio = combine_wav_files(chime_audio, pause_audio, audio_content)
-                    _LOGGER.debug("Combined audio generated (chime -> pause -> TTS).")
-                    return "wav", combined_audio
-                except Exception as ce:
-                    _LOGGER.exception("Error combining audio")
-                    return "wav", audio_content
+                    os.remove(tts_path)
+                    os.remove(merged_output_path)
+                except Exception:
+                    pass
+                return "mp3", final_audio
+
             else:
-                _LOGGER.debug("Chime option disabled; returning TTS audio only.")
-                return "wav", audio_content
+                # Chime disabled.
+                if normalize_audio:
+                    _LOGGER.debug("Normalization enabled without chime; processing TTS audio via ffmpeg.")
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
+                        tts_file.write(audio_content)
+                        norm_input_path = tts_file.name
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
+                        norm_output_path = out_file.name
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i", norm_input_path,
+                        "-ac", "1",
+                        "-ar", "24000",
+                        "-b:a", "128k",
+                        "-preset", "superfast",
+                        "-threads", "4",
+                        "-af", "loudnorm=I=-16:TP=-1:LRA=5",
+                        norm_output_path,
+                    ]
+                    _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
+                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    with open(norm_output_path, "rb") as norm_file:
+                        normalized_audio = norm_file.read()
+                    overall_duration = (time.monotonic() - overall_start) * 1000
+                    _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+                    try:
+                        os.remove(norm_input_path)
+                        os.remove(norm_output_path)
+                    except Exception:
+                        pass
+                    return "mp3", normalized_audio
+                else:
+                    _LOGGER.debug("Chime and normalization disabled; returning TTS MP3 audio only.")
+                    overall_duration = (time.monotonic() - overall_start) * 1000
+                    _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+                    return "mp3", audio_content
+
         except CancelledError as ce:
             _LOGGER.exception("TTS task cancelled")
             return None, None
@@ -217,3 +237,18 @@ class OpenAITTSEntity(TextToSpeechEntity):
         except Exception as e:
             _LOGGER.exception("Unknown error in get_tts_audio")
         return None, None
+
+    async def async_get_tts_audio(
+        self, message: str, language: str, options: dict | None = None,
+    ) -> tuple[str, bytes] | tuple[None, None]:
+        from functools import partial
+        import asyncio
+        try:
+            return await asyncio.shield(
+                self.hass.async_add_executor_job(
+                    partial(self.get_tts_audio, message, language, options=options)
+                )
+            )
+        except asyncio.CancelledError:
+            _LOGGER.exception("async_get_tts_audio cancelled")
+            raise

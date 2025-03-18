@@ -6,29 +6,27 @@
         "description": "Weitere Informationen finden Sie in der Dokumentation.",
         "data": {
           "api_key": "Geben Sie den OpenAI API-Schlüssel ein",
-          "speed": "Geschwindigkeit (0.25 bis 4.0, wobei 1.0 Standard ist)",
-          "model": "Wählen Sie das Modell aus",
-          "voice": "Wählen Sie die Stimme aus",
-          "url": "Geben Sie den OpenAI-kompatiblen Endpunkt ein (Optional können Sie eine Portnummer angeben)"
+          "speed": "Geschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
+          "model": "Modell",
+          "voice": "Stimme",
+          "url": "Geben Sie einen OpenAI-kompatiblen Endpunkt ein (optional können Sie eine Portnummer angeben)."
         }
       }
     },
     "error": {
-      "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein.",
-      "already_configured": "Diese Stimme und dieser Endpunkt sind bereits konfiguriert."
-    },
-    "abort": {
-      "already_configured": "Diese Stimme und dieser Endpunkt sind bereits konfiguriert."
+      "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "TTS-Optionen konfigurieren",
+        "title": "Konfigurieren Sie die TTS-Optionen",
         "data": {
-          "chime": "Chime vor der Sprache aktivieren (nützlich für Ansagen)",
-          "speed": "Geschwindigkeit einstellen (0.25 bis 4.0)",
-          "voice": "Stimme auswählen"
+          "chime": "Aktivieren Sie den Signalton vor der Sprache (nützlich für Ansagen)",
+          "chime_sound": "Signalton",
+          "speed": "Geschwindigkeit (0,25 bis 4,0)",
+          "voice": "Stimme",
+          "normalize_audio": "Aktivieren Sie die Lautstärkeerhöhung für das erzeugte Audio (verwendet mehr CPU)"
         }
       }
     }

@@ -3,6 +3,7 @@ Config flow for OpenAI TTS.
 """
 from __future__ import annotations
 from typing import Any
+import os
 import voluptuous as vol
 import logging
 from urllib.parse import urlparse
@@ -13,7 +14,20 @@ from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.helpers.selector import selector
 from homeassistant.exceptions import HomeAssistantError
 
-from .const import CONF_API_KEY, CONF_MODEL, CONF_VOICE, CONF_SPEED, CONF_URL, DOMAIN, MODELS, VOICES, UNIQUE_ID
+from .const import (
+    CONF_API_KEY,
+    CONF_MODEL,
+    CONF_VOICE,
+    CONF_SPEED,
+    CONF_URL,
+    DOMAIN,
+    MODELS,
+    VOICES,
+    UNIQUE_ID,
+    CONF_CHIME_ENABLE,    # Use constant for chime enable toggle
+    CONF_CHIME_SOUND,
+    CONF_NORMALIZE_AUDIO,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -25,6 +39,26 @@ async def validate_user_input(user_input: dict):
         raise ValueError("Model is required")
     if user_input.get(CONF_VOICE) is None:
         raise ValueError("Voice is required")
+
+def get_chime_options() -> list[dict[str, str]]:
+    """
+    Scans the "chime" folder (located in the same directory as this file)
+    and returns a list of options for the dropdown selector.
+    Each option is a dict with 'value' (the file name) and 'label' (the file name without extension).
+    """
+    chime_folder = os.path.join(os.path.dirname(__file__), "chime")
+    try:
+        files = os.listdir(chime_folder)
+    except Exception as err:
+        _LOGGER.error("Error listing chime folder: %s", err)
+        files = []
+    options = []
+    for file in files:
+        if file.lower().endswith(".mp3"):
+            label = os.path.splitext(file)[0].title()  # e.g. "Signal1.mp3" -> "Signal1"
+            options.append({"value": file, "label": label})
+    options.sort(key=lambda x: x["label"])
+    return options
 
 class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI TTS."""
@@ -63,7 +97,6 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 await validate_user_input(user_input)
-                # Generate a random unique id so multiple integrations can be added.
                 entry_id = generate_entry_id()
                 user_input[UNIQUE_ID] = entry_id
                 await self.async_set_unique_id(entry_id)
@@ -99,11 +132,24 @@ class OpenAITTSOptionsFlow(OptionsFlow):
     async def async_step_init(self, user_input: dict | None = None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
+        # Retrieve chime options using the executor to avoid blocking the event loop.
+        chime_options = await self.hass.async_add_executor_job(get_chime_options)
         options_schema = vol.Schema({
+            # Use constant for chime enable toggle so the label comes from strings.json
             vol.Optional(
-                "chime",
-                default=self.config_entry.options.get("chime", self.config_entry.data.get("chime", False))
+                CONF_CHIME_ENABLE,
+                default=self.config_entry.options.get(CONF_CHIME_ENABLE, self.config_entry.data.get(CONF_CHIME_ENABLE, False))
             ): selector({"boolean": {}}),
+
+            vol.Optional(
+                CONF_CHIME_SOUND,
+                default=self.config_entry.options.get(CONF_CHIME_SOUND, self.config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
+            ): selector({
+                "select": {
+                    "options": chime_options
+                }
+            }),
+
             vol.Optional(
                 CONF_SPEED,
                 default=self.config_entry.options.get(CONF_SPEED, self.config_entry.data.get(CONF_SPEED, 1.0))
@@ -115,6 +161,7 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                     "mode": "slider"
                 }
             }),
+
             vol.Optional(
                 CONF_VOICE,
                 default=self.config_entry.options.get(CONF_VOICE, self.config_entry.data.get(CONF_VOICE, "shimmer"))
@@ -125,6 +172,12 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                     "sort": True,
                     "custom_value": True
                 }
-            })
+            }),
+
+            # Normalization toggle using its constant; label will be picked from strings.json.
+            vol.Optional(
+                CONF_NORMALIZE_AUDIO,
+                default=self.config_entry.options.get(CONF_NORMALIZE_AUDIO, self.config_entry.data.get(CONF_NORMALIZE_AUDIO, False))
+            ): selector({"boolean": {}})
         })
         return self.async_show_form(step_id="init", data_schema=options_schema)

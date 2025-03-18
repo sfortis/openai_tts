@@ -7,28 +7,26 @@
         "data": {
           "api_key": "Zadejte OpenAI API klíč",
           "speed": "Rychlost (0,25 až 4,0, kde 1,0 je výchozí)",
-          "model": "Vyberte model",
-          "voice": "Vyberte hlas",
-          "url": "Zadejte OpenAI-kompatibilní endpoint (Volitelně uveďte číslo portu)"
+          "model": "Model",
+          "voice": "Hlas",
+          "url": "Zadejte endpoint kompatibilní s OpenAI (volitelně uveďte číslo portu)."
         }
       }
     },
     "error": {
-      "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč.",
-      "already_configured": "Tento hlas a tento endpoint jsou již nakonfigurovány."
-    },
-    "abort": {
-      "already_configured": "Tento hlas a tento endpoint jsou již nakonfigurovány."
+      "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Nastavení TTS možností",
+        "title": "Nastavte TTS možnosti",
         "data": {
-          "chime": "Povolit zvukový signál před řečí (užitečné pro oznámení)",
-          "speed": "Nastavit rychlost (0,25 až 4,0)",
-          "voice": "Vyberte hlas"
+          "chime": "Povolte zvukový signál před řečí (užitečné pro oznámení)",
+          "chime_sound": "Zvuk zvukového signálu",
+          "speed": "Rychlost (0,25 až 4,0)",
+          "voice": "Hlas",
+          "normalize_audio": "Povolte zvýšení hlasitosti generovaného audia (vyžaduje více CPU)"
         }
       }
     }

@@ -7,18 +7,14 @@
         "data": {
           "api_key": "Enter OpenAI API key",
           "speed": "Speed (0.25 to 4.0, where 1.0 is default)",
-          "model": "Select model",
-          "voice": "Select voice",
-          "url": "Enter the OpenAI-compatible endpoint. Optionally include a port number."
+          "model": "Model",
+          "voice": "Voice",
+          "url": "Enter an OpenAI-compatible endpoint (optionally include a port number)."
         }
       }
     },
     "error": {
-      "wrong_api_key": "Invalid API key. Please enter a valid API key.",
-      "already_configured": "This voice and endpoint are already configured."
-    },
-    "abort": {
-      "already_configured": "This voice and endpoint are already configured."
+      "wrong_api_key": "Invalid API key. Please enter a valid API key."
     }
   },
   "options": {
@@ -26,9 +22,11 @@
       "init": {
         "title": "Configure TTS options",
         "data": {
-          "chime": "Enable chime before speech (useful for announcements)",
-          "speed": "Set speed (0.25 to 4.0)",
-          "voice": "Select voice"
+          "chime": "Enable chime sound prior speech (useful for announcements)",
+          "chime_sound": "Chime sound",
+          "speed": "Speed (0.25 to 4.0)",
+          "voice": "Voice",
+          "normalize_audio": "Enable loudness for generated audio (uses more CPU)"
         }
       }
     }
