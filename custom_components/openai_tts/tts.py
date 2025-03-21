@@ -20,6 +20,7 @@ from .const import (
     CONF_MODEL,
     CONF_SPEED,
     CONF_VOICE,
+    CONF_INSTRUCTIONS,
     CONF_URL,
     DOMAIN,
     UNIQUE_ID,
@@ -66,6 +67,10 @@ class OpenAITTSEntity(TextToSpeechEntity):
         return "en"
 
     @property
+    def supported_options(self) -> list:
+        return ["instructions", "chime"]
+        
+    @property
     def supported_languages(self) -> list:
         return self._engine.get_supported_langs()
 
@@ -97,18 +102,20 @@ class OpenAITTSEntity(TextToSpeechEntity):
             # Retrieve settings.
             current_speed = self._config.options.get(CONF_SPEED, self._config.data.get(CONF_SPEED, 1.0))
             effective_voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
+            instructions = options.get(CONF_INSTRUCTIONS, self._config.options.get(CONF_INSTRUCTIONS, self._config.data.get(CONF_INSTRUCTIONS)))
             _LOGGER.debug("Effective speed: %s", current_speed)
             _LOGGER.debug("Effective voice: %s", effective_voice)
+            _LOGGER.debug("Instructions: %s", instructions)
 
             _LOGGER.debug("Creating TTS API request")
             api_start = time.monotonic()
-            speech = self._engine.get_tts(message, speed=current_speed, voice=effective_voice)
+            speech = self._engine.get_tts(message, speed=current_speed, voice=effective_voice, instructions=instructions)
             api_duration = (time.monotonic() - api_start) * 1000
             _LOGGER.debug("TTS API call completed in %.2f ms", api_duration)
             audio_content = speech.content
 
             # Retrieve options.
-            chime_enabled = self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False))
+            chime_enabled = options.get(CONF_CHIME_ENABLE,self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)))
             normalize_audio = self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False))
             _LOGGER.debug("Chime enabled: %s", chime_enabled)
             _LOGGER.debug("Normalization option: %s", normalize_audio)
