@@ -45,7 +45,7 @@ class OpenAITTSEngine:
             "response_format": "mp3",
             "speed": speed
         }
-        if instructions is not None:
+        if instructions is not None and self._model == "gpt-4o-mini-tts":
             data["instructions"] = instructions
 
         max_retries = 1
