@@ -25,7 +25,7 @@ class OpenAITTSEngine:
         self._speed = speed
         self._url = url
 
-    def get_tts(self, text: str, speed: float = None, voice: str = None) -> AudioResponse:
+    def get_tts(self, text: str, speed: float = None, instructions: str = None, voice: str = None) -> AudioResponse:
         """Synchronous TTS request using urllib.request.
         If the API call fails, waits for 1 second and retries once.
         """
@@ -45,6 +45,8 @@ class OpenAITTSEngine:
             "response_format": "mp3",
             "speed": speed
         }
+        if instructions is not None and self._model == "gpt-4o-mini-tts":
+            data["instructions"] = instructions
 
         max_retries = 1
         attempt = 0

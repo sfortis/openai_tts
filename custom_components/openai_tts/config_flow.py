@@ -12,6 +12,11 @@ import uuid
 from homeassistant import data_entry_flow
 from homeassistant.config_entries import ConfigFlow, OptionsFlow
 from homeassistant.helpers.selector import selector
+from homeassistant.helpers.selector import (
+    TextSelector,
+    TextSelectorConfig,
+    TextSelectorType,
+)
 from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
@@ -27,6 +32,7 @@ from .const import (
     CONF_CHIME_ENABLE,    # Use constant for chime enable toggle
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
+    CONF_INSTRUCTIONS,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -173,6 +179,14 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                     "custom_value": True
                 }
             }),
+
+
+            vol.Optional(
+                 CONF_INSTRUCTIONS,
+                 default=self.config_entry.options.get(CONF_INSTRUCTIONS, self.config_entry.data.get(CONF_INSTRUCTIONS, None))
+            ): TextSelector(
+                TextSelectorConfig(type=TextSelectorType.TEXT,multiline=True)
+            ),
 
             # Normalization toggle using its constant; label will be picked from strings.json.
             vol.Optional(

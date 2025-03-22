@@ -9,9 +9,11 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 - **Customizable speech model** – [Check supported voices and models](https://platform.openai.com/docs/guides/text-to-speech).  
 - **Integration with Home Assistant** – Works seamlessly with assistants, automations, and scripts.  
 - **Custom endpoint option** – Allows you to use your own OpenAI compatible API endpoint.
-- ⭐(New!) **Chime option** – Useful for announcements on speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*  
-- ⭐(New!) **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/openai_tts/chime` folder (MP3).  
-- ⭐(New!) **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*  
+- **Chime option** – Useful for announcements on speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
+- **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/openai_tts/chime` folder (MP3).
+- **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
+- ⭐(New!) **Support for new gpt-4o-mini-tts model** – A fast and powerful language model.
+- ⭐(New!) **Text-to-Speech Instructions option** – Instruct the text-to-speech model to speak in a specific way (only works with newest gpt-4o-mini-tts model). [OpenAI new generation audio models](https://openai.com/index/introducing-our-next-generation-audio-models/)
 
 
 
@@ -34,6 +36,9 @@ data:
   cache: true
   media_player_entity_id: media_player.bedroom_speaker
   message: My speech has improved now!
+  options:
+    chime: true                          # Enable or disable the chime
+    instructions: "Speak like a pirate"  # Instructions for text-to-speach model on how to speak 
 ```
 
 ## HACS installation ( *preferred!* ) 
