@@ -1,6 +1,11 @@
 {
     "name": "OpenAI TTS Speech Service",
-    "homeassistant": "2024.5.3",
+    "domains": [
+        "tts"
+    ],
+    "homeassistant": "2024.12.0",
     "render_readme": true,
-    "version": "0.2.3"
+    "iot_class": [
+        "Cloud Polling"
+    ]
 }
