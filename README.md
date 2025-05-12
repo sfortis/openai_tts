@@ -12,8 +12,18 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 - **Chime option** – Useful for announcements on speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
 - **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/openai_tts/chime` folder (MP3).
 - **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
-- ⭐(New!) **Support for new gpt-4o-mini-tts model** – A fast and powerful language model.
-- ⭐(New!) **Text-to-Speech Instructions option** – Instruct the text-to-speech model to speak in a specific way (only works with newest gpt-4o-mini-tts model). [OpenAI new generation audio models](https://openai.com/index/introducing-our-next-generation-audio-models/)
+- **Support for new gpt-4o-mini-tts model** – A fast and powerful language model.
+- **Text-to-Speech Instructions option** – Instruct the text-to-speech model to speak in a specific way (only works with newest gpt-4o-mini-tts model). [OpenAI new generation audio models](https://openai.com/index/introducing-our-next-generation-audio-models/)
+
+### ⭐ New Features in v0.3.4 Beta
+
+- **Volume Restoration** – Automatically restores speaker volumes to their original levels after TTS announcements.
+- **Media Pause/Resume** – Pauses currently playing media during announcements and resumes afterward (works with Sonos speakers).
+- **Sonos Integration** – Automatically groups and ungroups Sonos speakers for synchronized announcements.
+- **New `openai_tts.say` Service** – New service parameters including volume control and pause/resume options.
+- **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
+- **Media Player Targeting** – Target speakers using areas, devices, or entity IDs for more flexible automations.
+- **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
 
 
@@ -24,7 +34,24 @@ visit: (https://platform.openai.com/docs/pricing)
 
 [![OpenAI TTS Demo](https://img.youtube.com/vi/oeeypI_X0qs/0.jpg)](https://www.youtube.com/watch?v=oeeypI_X0qs)
 
+## ⭐New TTS say action
 
+```
+service: openai_tts.say
+target:
+  entity_id: media_player.living_room_speaker
+  # OR target by area
+  # area_id: living_room
+  # OR target by device
+  # device_id: 12345abcde
+data:
+  tts_entity: tts.openai_tts_tts_1
+  message: "This is an announcement with volume control and pause/resume!"
+  volume: 0.6  # Temporarily set volume for announcement (0.0-1.0)
+  pause_playback: true  # Pause any music playing during the announcement
+  chime: true  # Add a chime sound before the announcement
+  normalize_audio: true  # Normalize audio (for small speakers)
+```
 
 ## Sample Home Assistant service
 
