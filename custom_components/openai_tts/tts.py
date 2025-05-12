@@ -33,20 +33,45 @@ from homeassistant.exceptions import MaxLengthExceeded
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def get_media_duration(file_path: str) -> float:
+    """Get the duration of a media file in seconds using ffprobe."""
+    try:
+        cmd = [
+            "ffprobe",
+            "-v", "error",
+            "-show_entries", "format=duration",
+            "-of", "default=noprint_wrappers=1:nokey=1",
+            file_path,
+        ]
+        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        duration_str = result.stdout.strip()
+        return float(duration_str) if duration_str else 0.0
+    except Exception as e:
+        _LOGGER.error("Error getting media duration: %s", e)
+        return 0.0
+
+
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     api_key = config_entry.data.get(CONF_API_KEY)
+    # Use options if available, otherwise fall back to the original data.
+    model = config_entry.options.get(CONF_MODEL, config_entry.data.get(CONF_MODEL))
+    voice = config_entry.options.get(CONF_VOICE, config_entry.data.get(CONF_VOICE))
+    speed = config_entry.options.get(CONF_SPEED, config_entry.data.get(CONF_SPEED, 1.0))
+    url = config_entry.data.get(CONF_URL)
     engine = OpenAITTSEngine(
         api_key,
-        config_entry.data[CONF_VOICE],
-        config_entry.data[CONF_MODEL],
-        config_entry.data.get(CONF_SPEED, 1.0),
-        config_entry.data[CONF_URL],
+        voice,
+        model,
+        speed,
+        url,
     )
     async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
+
 
 class OpenAITTSEntity(TextToSpeechEntity):
     _attr_has_entity_name = True
@@ -61,6 +86,12 @@ class OpenAITTSEntity(TextToSpeechEntity):
             self._attr_unique_id = f"{config.data.get(CONF_URL)}_{config.data.get(CONF_MODEL)}"
         base_name = self._config.data.get(CONF_MODEL, "").upper()
         self.entity_id = generate_entity_id("tts.openai_tts_{}", base_name.lower(), hass=hass)
+        # New flags and timing variables.
+        self._engine_active = False
+        self._last_api_time = None
+        self._last_ffmpeg_time = None
+        self._last_total_time = None
+        self._last_media_duration_ms = None  # Store in milliseconds
 
     @property
     def default_language(self) -> str:
@@ -68,8 +99,8 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
     @property
     def supported_options(self) -> list:
-        return ["instructions", "chime"]
-        
+        return ["instructions", "chime", "normalize_audio", "chime_sound"]
+
     @property
     def supported_languages(self) -> list:
         return self._engine.get_supported_langs()
@@ -86,6 +117,34 @@ class OpenAITTSEntity(TextToSpeechEntity):
     def name(self) -> str:
         return self._config.data.get(CONF_MODEL, "").upper()
 
+    @property
+    def extra_state_attributes(self) -> dict:
+        # Retrieve configured values from options or data.
+        model = self._config.data.get(CONF_MODEL)
+        voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
+        speed = self._config.options.get(CONF_SPEED, self._config.data.get(CONF_SPEED, 1.0))
+        chime = self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False))
+        normalization = self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False))
+        
+        # Format media_duration as milliseconds
+        media_duration_display = None
+        if self._last_media_duration_ms is not None:
+            media_duration_display = f"{int(self._last_media_duration_ms)} msec"
+        
+        return {
+            "engine_active": self._engine_active,
+            "last_api_time": f"{int(self._last_api_time)} msec" if self._last_api_time is not None else None,
+            "last_ffmpeg_time": f"{int(self._last_ffmpeg_time)} msec" if self._last_ffmpeg_time is not None else None,
+            "last_total_time": f"{int(self._last_total_time)} msec" if self._last_total_time is not None else None,
+            "media_duration": self._last_media_duration_ms,  # Raw milliseconds value
+            "media_duration_display": media_duration_display,  # Formatted display
+            "model": model,
+            "voice": voice,
+            "speed": speed,
+            "chime_enabled": chime,
+            "normalization_enabled": normalization,
+        }
+
     def get_tts_audio(
         self, message: str, language: str, options: dict | None = None
     ) -> tuple[str, bytes] | tuple[None, None]:
@@ -99,10 +158,18 @@ class OpenAITTSEntity(TextToSpeechEntity):
         try:
             if len(message) > 4096:
                 raise MaxLengthExceeded("Message exceeds maximum allowed length")
+                
+            # Ensure options is not None
+            if options is None:
+                options = {}
+                
             # Retrieve settings.
             current_speed = self._config.options.get(CONF_SPEED, self._config.data.get(CONF_SPEED, 1.0))
             effective_voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
+            
+            # Instructions - checks runtime options first
             instructions = options.get(CONF_INSTRUCTIONS, self._config.options.get(CONF_INSTRUCTIONS, self._config.data.get(CONF_INSTRUCTIONS)))
+            
             _LOGGER.debug("Effective speed: %s", current_speed)
             _LOGGER.debug("Effective voice: %s", effective_voice)
             _LOGGER.debug("Instructions: %s", instructions)
@@ -110,13 +177,18 @@ class OpenAITTSEntity(TextToSpeechEntity):
             _LOGGER.debug("Creating TTS API request")
             api_start = time.monotonic()
             speech = self._engine.get_tts(message, speed=current_speed, voice=effective_voice, instructions=instructions)
-            api_duration = (time.monotonic() - api_start) * 1000
-            _LOGGER.debug("TTS API call completed in %.2f ms", api_duration)
+            self._last_api_time = (time.monotonic() - api_start) * 1000
+            _LOGGER.debug("TTS API call completed in %.2f ms", self._last_api_time)
             audio_content = speech.content
 
-            # Retrieve options.
-            chime_enabled = options.get(CONF_CHIME_ENABLE,self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)))
-            normalize_audio = self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False))
+            # Retrieve options with proper fallback: runtime options → config options → config data
+            
+            # 1. Chime enabled
+            chime_enabled = options.get(CONF_CHIME_ENABLE, self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)))
+            
+            # 2. Normalize audio
+            normalize_audio = options.get(CONF_NORMALIZE_AUDIO, self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False)))
+            
             _LOGGER.debug("Chime enabled: %s", chime_enabled)
             _LOGGER.debug("Normalization option: %s", normalize_audio)
 
@@ -127,8 +199,9 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     tts_path = tts_file.name
                 _LOGGER.debug("TTS audio written to temp file: %s", tts_path)
 
-                # Determine chime file path.
-                chime_file = self._config.options.get(CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
+                # 3. Chime sound file
+                chime_file = options.get(CONF_CHIME_SOUND, self._config.options.get(CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3")))
+                
                 chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
                 _LOGGER.debug("Using chime file at: %s", chime_path)
 
@@ -137,10 +210,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     merged_output_path = out_file.name
 
                 if normalize_audio:
-                    _LOGGER.debug("Both chime and normalization enabled; " +
-                                  "using filter_complex to normalize TTS audio and merge with chime in one pass.")
-                    # Use filter_complex to normalize the TTS audio and then concatenate with the chime.
-                    # First input: chime audio, second input: TTS audio (to be normalized).
+                    _LOGGER.debug("Both chime and normalization enabled; using filter_complex to normalize TTS audio and merge with chime in one pass.")
                     cmd = [
                         "ffmpeg",
                         "-y",
@@ -156,10 +226,11 @@ class OpenAITTSEntity(TextToSpeechEntity):
                         merged_output_path,
                     ]
                     _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
+                    ffmpeg_start = time.monotonic()
                     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self._last_ffmpeg_time = (time.monotonic() - ffmpeg_start) * 1000
                 else:
                     _LOGGER.debug("Chime enabled without normalization; merging using concat method.")
-                    # Create a file list for concatenation.
                     with tempfile.NamedTemporaryFile(mode="w", delete=False) as list_file:
                         list_file.write(f"file '{chime_path}'\n")
                         list_file.write(f"file '{tts_path}'\n")
@@ -179,7 +250,9 @@ class OpenAITTSEntity(TextToSpeechEntity):
                         merged_output_path,
                     ]
                     _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
+                    ffmpeg_start = time.monotonic()
                     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self._last_ffmpeg_time = (time.monotonic() - ffmpeg_start) * 1000
                     try:
                         os.remove(list_path)
                     except Exception:
@@ -189,6 +262,10 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     final_audio = merged_file.read()
                 overall_duration = (time.monotonic() - overall_start) * 1000
                 _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+                self._last_total_time = overall_duration
+                # Compute media duration in milliseconds before cleaning up.
+                duration_seconds = get_media_duration(merged_output_path)
+                self._last_media_duration_ms = int(duration_seconds * 1000)
                 # Cleanup temporary files.
                 try:
                     os.remove(tts_path)
@@ -198,7 +275,6 @@ class OpenAITTSEntity(TextToSpeechEntity):
                 return "mp3", final_audio
 
             else:
-                # Chime disabled.
                 if normalize_audio:
                     _LOGGER.debug("Normalization enabled without chime; processing TTS audio via ffmpeg.")
                     with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
@@ -219,11 +295,17 @@ class OpenAITTSEntity(TextToSpeechEntity):
                         norm_output_path,
                     ]
                     _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
+                    ffmpeg_start = time.monotonic()
                     subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    self._last_ffmpeg_time = (time.monotonic() - ffmpeg_start) * 1000
                     with open(norm_output_path, "rb") as norm_file:
                         normalized_audio = norm_file.read()
                     overall_duration = (time.monotonic() - overall_start) * 1000
                     _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+                    self._last_total_time = overall_duration
+                    # Compute media duration in milliseconds for the normalized file.
+                    duration_seconds = get_media_duration(norm_output_path)
+                    self._last_media_duration_ms = int(duration_seconds * 1000)
                     try:
                         os.remove(norm_input_path)
                         os.remove(norm_output_path)
@@ -232,8 +314,20 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     return "mp3", normalized_audio
                 else:
                     _LOGGER.debug("Chime and normalization disabled; returning TTS MP3 audio only.")
+                    # Write audio_content to a temporary file to compute duration.
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
+                        tmp_file.write(audio_content)
+                        tmp_path = tmp_file.name
+                    duration_seconds = get_media_duration(tmp_path)
+                    self._last_media_duration_ms = int(duration_seconds * 1000)
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
                     overall_duration = (time.monotonic() - overall_start) * 1000
                     _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+                    self._last_total_time = overall_duration
+                    self._last_ffmpeg_time = 0  # No ffmpeg processing used.
                     return "mp3", audio_content
 
         except CancelledError as ce:
@@ -251,6 +345,8 @@ class OpenAITTSEntity(TextToSpeechEntity):
         from functools import partial
         import asyncio
         try:
+            self._engine_active = True
+            self.async_write_ha_state()
             return await asyncio.shield(
                 self.hass.async_add_executor_job(
                     partial(self.get_tts_audio, message, language, options=options)
@@ -259,3 +355,6 @@ class OpenAITTSEntity(TextToSpeechEntity):
         except asyncio.CancelledError:
             _LOGGER.exception("async_get_tts_audio cancelled")
             raise
+        finally:
+            self._engine_active = False
+            self.async_write_ha_state()

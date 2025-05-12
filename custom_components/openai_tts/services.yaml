@@ -1,0 +1,75 @@
+say:
+  name: OpenAI TTS Speak
+  description: Use the OpenAI TTS engine to speak a message with optional features.
+  target:
+    entity:
+      domain: media_player
+  fields:
+    tts_entity:
+      name: TTS Entity
+      description: The TTS entity to use for text-to-speech.
+      required: true
+      example: "tts.openai_tts_tts_1"
+      selector:
+        entity:
+          domain: tts
+    message:
+      name: Message
+      description: The text to be spoken.
+      required: true
+      example: "Hello, this is a test message."
+      selector:
+        text:
+    language:
+      name: Language
+      description: Language code for the speech.
+      required: false
+      default: "en"
+      example: "en"
+      selector:
+        text:
+    chime:
+      name: Chime
+      description: Play a chime sound before speaking.
+      required: false
+      default: false
+      selector:
+        boolean:
+    chime_sound:
+      name: Chime Sound
+      description: Filename of the chime sound to play.
+      required: false
+      example: "threetone.mp3"
+      selector:
+        text:
+    normalize_audio:
+      name: Normalize Audio
+      description: Apply loudness normalization to the generated audio.
+      required: false
+      default: false
+      selector:
+        boolean:
+    instructions:
+      name: Instructions
+      description: Custom instructions for the TTS engine.
+      required: false
+      selector:
+        text:
+          multiline: true
+    volume:
+      name: Volume
+      description: Override speaker volume for this announcement (0.0-1.0).
+      required: false
+      selector:
+        number:
+          min: 0.0
+          max: 1.0
+          step: 0.05
+          mode: slider
+    pause_playback:
+      name: Pause Playback
+      description: Pause any currently playing media (only works with Sonos speakers).
+      required: false
+      default: false
+      selector:
+        boolean:

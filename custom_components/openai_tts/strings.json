@@ -25,9 +25,11 @@
           "chime": "Enable chime sound prior speech (useful for announcements)",
           "chime_sound": "Chime sound",
           "speed": "Speed (0.25 to 4.0)",
+          "model": "Model",
           "voice": "Voice",
-          "instructions": "Instructions",
-          "normalize_audio": "Enable loudness for generated audio (uses more CPU)"
+          "instructions": "Instructions (check https://www.openai.fm/ )",
+          "normalize_audio": "Enable loudness for generated audio (uses more CPU)",
+          "volume_restore": "Restore speaker volumes after TTS playback"
         }
       }
     }
