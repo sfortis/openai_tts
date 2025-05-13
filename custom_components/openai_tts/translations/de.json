@@ -25,8 +25,12 @@
           "chime": "Aktivieren Sie den Signalton vor der Sprache (nützlich für Ansagen)",
           "chime_sound": "Signalton",
           "speed": "Geschwindigkeit (0,25 bis 4,0)",
+          "model": "Modell",
           "voice": "Stimme",
-          "normalize_audio": "Aktivieren Sie die Lautstärkeerhöhung für das erzeugte Audio (verwendet mehr CPU)"
+          "instructions": "Anweisungen (siehe https://www.openai.fm/)",
+          "normalize_audio": "Aktivieren Sie die Lautstärkeerhöhung für das erzeugte Audio (verwendet mehr CPU)",
+          "volume_restore": "Lautstärke der Lautsprecher nach der TTS-Wiedergabe wiederherstellen",
+          "pause_playback": "Medienwiedergabe während TTS pausieren (nur Sonos)"
         }
       }
     }

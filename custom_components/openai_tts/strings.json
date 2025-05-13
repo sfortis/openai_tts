@@ -29,7 +29,8 @@
           "voice": "Voice",
           "instructions": "Instructions (check https://www.openai.fm/ )",
           "normalize_audio": "Enable loudness for generated audio (uses more CPU)",
-          "volume_restore": "Restore speaker volumes after TTS playback"
+          "volume_restore": "Restore speaker volumes after TTS playback",
+          "pause_playback": "Pause media during TTS (Sonos only)"
         }
       }
     }

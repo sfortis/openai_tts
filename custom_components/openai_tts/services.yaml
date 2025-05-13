@@ -68,7 +68,7 @@ say:
           mode: slider
     pause_playback:
       name: Pause Playback
-      description: Pause any currently playing media (only works with Sonos speakers).
+      description: Pause any currently playing media during announcement (only works with Sonos speakers).
       required: false
       default: false
       selector:

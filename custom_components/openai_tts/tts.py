@@ -15,6 +15,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import generate_entity_id
+from homeassistant.helpers.restore_state import RestoreEntity
+
 from .const import (
     CONF_API_KEY,
     CONF_MODEL,
@@ -73,7 +75,7 @@ async def async_setup_entry(
     async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
 
 
-class OpenAITTSEntity(TextToSpeechEntity):
+class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
@@ -92,6 +94,41 @@ class OpenAITTSEntity(TextToSpeechEntity):
         self._last_ffmpeg_time = None
         self._last_total_time = None
         self._last_media_duration_ms = None  # Store in milliseconds
+
+    async def async_added_to_hass(self) -> None:
+        """When entity is added to hass, restore previous state."""
+        await super().async_added_to_hass()
+        
+        # Restore previous state if it exists
+        last_state = await self.async_get_last_state()
+        
+        if last_state is not None and last_state.attributes:
+            # Restore from attributes
+            self._engine_active = last_state.attributes.get("engine_active", False)
+            
+            # Restore time values
+            api_time_str = last_state.attributes.get("last_api_time")
+            if api_time_str and " msec" in api_time_str:
+                self._last_api_time = int(api_time_str.replace(" msec", ""))
+            
+            ffmpeg_time_str = last_state.attributes.get("last_ffmpeg_time")
+            if ffmpeg_time_str and " msec" in ffmpeg_time_str:
+                self._last_ffmpeg_time = int(ffmpeg_time_str.replace(" msec", ""))
+            
+            total_time_str = last_state.attributes.get("last_total_time")
+            if total_time_str and " msec" in total_time_str:
+                self._last_total_time = int(total_time_str.replace(" msec", ""))
+            
+            # Restore media duration directly (stored as raw milliseconds)
+            self._last_media_duration_ms = last_state.attributes.get("media_duration")
+            
+            _LOGGER.debug(
+                "Restored OpenAI TTS entity state: api_time=%s, ffmpeg_time=%s, total_time=%s, media_duration=%s", 
+                self._last_api_time, 
+                self._last_ffmpeg_time, 
+                self._last_total_time,
+                self._last_media_duration_ms
+            )
 
     @property
     def default_language(self) -> str:
@@ -266,6 +303,10 @@ class OpenAITTSEntity(TextToSpeechEntity):
                 # Compute media duration in milliseconds before cleaning up.
                 duration_seconds = get_media_duration(merged_output_path)
                 self._last_media_duration_ms = int(duration_seconds * 1000)
+                
+                # DO NOT call self.async_write_ha_state() here - thread safety issue
+                # It will be called from the async_get_tts_audio method
+                
                 # Cleanup temporary files.
                 try:
                     os.remove(tts_path)
@@ -306,6 +347,10 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     # Compute media duration in milliseconds for the normalized file.
                     duration_seconds = get_media_duration(norm_output_path)
                     self._last_media_duration_ms = int(duration_seconds * 1000)
+                    
+                    # DO NOT call self.async_write_ha_state() here - thread safety issue
+                    # It will be called from the async_get_tts_audio method
+                    
                     try:
                         os.remove(norm_input_path)
                         os.remove(norm_output_path)
@@ -328,6 +373,10 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
                     self._last_total_time = overall_duration
                     self._last_ffmpeg_time = 0  # No ffmpeg processing used.
+                    
+                    # DO NOT call self.async_write_ha_state() here - thread safety issue
+                    # It will be called from the async_get_tts_audio method
+                    
                     return "mp3", audio_content
 
         except CancelledError as ce:
@@ -347,11 +396,17 @@ class OpenAITTSEntity(TextToSpeechEntity):
         try:
             self._engine_active = True
             self.async_write_ha_state()
-            return await asyncio.shield(
+            
+            result = await asyncio.shield(
                 self.hass.async_add_executor_job(
                     partial(self.get_tts_audio, message, language, options=options)
                 )
             )
+            
+            # Update the entity state from within the event loop
+            self.async_write_ha_state()
+            
+            return result
         except asyncio.CancelledError:
             _LOGGER.exception("async_get_tts_audio cancelled")
             raise

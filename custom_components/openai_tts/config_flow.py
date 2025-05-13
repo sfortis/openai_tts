@@ -30,6 +30,7 @@ from .const import (
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
     CONF_VOLUME_RESTORE,
+    CONF_PAUSE_PLAYBACK,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -119,10 +120,15 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
     @staticmethod
     def async_get_options_flow(config_entry):
-        return OpenAITTSOptionsFlow()
+        return OpenAITTSOptionsFlow(config_entry)
 
 class OpenAITTSOptionsFlow(OptionsFlow):
     """Handle options flow for OpenAI TTS."""
+    
+    def __init__(self, config_entry):
+        """Initialize options flow."""
+        self._config_entry = config_entry
+    
     async def async_step_init(self, user_input: dict | None = None):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
@@ -130,28 +136,34 @@ class OpenAITTSOptionsFlow(OptionsFlow):
         chime_opts = await self.hass.async_add_executor_job(get_chime_options)
         options_schema = vol.Schema({
             vol.Optional(
-                CONF_CHIME_ENABLE,
-                default=self.config_entry.options.get(CONF_CHIME_ENABLE, self.config_entry.data.get(CONF_CHIME_ENABLE, False)),
+                "chime",  # Use strings directly here, not constants
+                default=self._config_entry.options.get(CONF_CHIME_ENABLE, self._config_entry.data.get(CONF_CHIME_ENABLE, False)),
             ): selector({"boolean": {}}),
 
             vol.Optional(
-                CONF_CHIME_SOUND,
-                default=self.config_entry.options.get(CONF_CHIME_SOUND, self.config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3")),
+                "chime_sound",  # Use strings directly
+                default=self._config_entry.options.get(CONF_CHIME_SOUND, self._config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3")),
             ): selector({"select": {"options": chime_opts}}),
 
             vol.Optional(
-                CONF_NORMALIZE_AUDIO,
-                default=self.config_entry.options.get(CONF_NORMALIZE_AUDIO, self.config_entry.data.get(CONF_NORMALIZE_AUDIO, False)),
+                "normalize_audio",  # Use strings directly
+                default=self._config_entry.options.get(CONF_NORMALIZE_AUDIO, self._config_entry.data.get(CONF_NORMALIZE_AUDIO, False)),
             ): selector({"boolean": {}}),
 
             vol.Optional(
-                CONF_INSTRUCTIONS,
-                default=self.config_entry.options.get(CONF_INSTRUCTIONS, self.config_entry.data.get(CONF_INSTRUCTIONS, "")),
+                "instructions",  # Use strings directly
+                default=self._config_entry.options.get(CONF_INSTRUCTIONS, self._config_entry.data.get(CONF_INSTRUCTIONS, "")),
             ): TextSelector(TextSelectorConfig(type=TextSelectorType.TEXT, multiline=True)),
 
             vol.Optional(
-                CONF_VOLUME_RESTORE,
-                default=self.config_entry.options.get(CONF_VOLUME_RESTORE, self.config_entry.data.get(CONF_VOLUME_RESTORE, False)),
+                "volume_restore",  # Use strings directly
+                default=self._config_entry.options.get(CONF_VOLUME_RESTORE, self._config_entry.data.get(CONF_VOLUME_RESTORE, False)),
+            ): selector({"boolean": {}}),
+            
+            # Use string directly for pause_playback
+            vol.Optional(
+                "pause_playback",  # Must match exactly with translation key
+                default=self._config_entry.options.get(CONF_PAUSE_PLAYBACK, self._config_entry.data.get(CONF_PAUSE_PLAYBACK, False)),
             ): selector({"boolean": {}}),
         })
 

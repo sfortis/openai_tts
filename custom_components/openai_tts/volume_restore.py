@@ -173,15 +173,19 @@ class VolumeRestorer:
                 _LOGGER.debug("Recorded volume %.2f for %s", volume, entity_id)
 
     async def record_media_state(self) -> None:
-        """Record the current media state for each player (only Sonos)."""
+        """Record the current media state for each player."""
+        _LOGGER.debug("Recording media state for players")
+        
         for entity_id in self.entity_ids:
             state = self.hass.states.get(entity_id)
             if state is None:
+                _LOGGER.debug("Media player %s state not available", entity_id)
                 continue
             
-            # Only record state for Sonos devices
+            # Check if it's a Sonos device
             is_sonos = ("sonos" in entity_id.lower() or 
-                       state.attributes.get("platform") == "sonos")
+                       state.attributes.get("platform") == "sonos" or
+                       state.attributes.get("vendor_id") == "sonos")
             
             if not is_sonos:
                 continue
@@ -196,12 +200,17 @@ class VolumeRestorer:
             
             if state.state == STATE_PLAYING:
                 _LOGGER.debug(
-                    "Recorded playing media for Sonos %s: %s (position: %s, context: %s, playlist: %s)",
+                    "Recorded playing media for Sonos %s: %s (position: %s)",
                     entity_id,
                     media_state.media_content_id,
-                    media_state.media_position,
-                    media_state.spotify_context,
-                    media_state.media_playlist
+                    media_state.media_position
+                )
+            elif state.state == STATE_PAUSED:
+                _LOGGER.debug(
+                    "Recorded paused media for Sonos %s: %s (position: %s)",
+                    entity_id,
+                    media_state.media_content_id,
+                    media_state.media_position
                 )
 
     async def pause_playing_media(self) -> None:
@@ -247,36 +256,68 @@ class VolumeRestorer:
 
     async def set_volume_if_needed(self, level: float) -> None:
         """Set media players to specified volume level only if they're not already at that level."""
+        _LOGGER.debug("Setting volume to %.2f for %d players", level, len(self.entity_ids))
+        
+        # Force volume level to be treated as float
+        level = float(level)
+        
         for entity_id in self.entity_ids:
             if entity_id not in self._initial:
+                _LOGGER.debug("No initial volume recorded for %s, skipping", entity_id)
                 continue
             
             # Get current volume
             state = self.hass.states.get(entity_id)
             if state is None:
+                _LOGGER.debug("Media player %s state not available, skipping", entity_id)
                 continue
                 
             current_volume = state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
             if current_volume is None:
+                _LOGGER.debug("Media player %s has no volume attribute, skipping", entity_id)
                 continue
             
+            # Make extra sure we're comparing floats
+            current_volume = float(current_volume)
+            
             # Check if volume adjustment is needed (with small tolerance for float comparison)
-            if abs(float(current_volume) - level) > 0.01:
+            if abs(current_volume - level) > 0.01:
                 _LOGGER.debug(
                     "Changing volume for %s from %.2f to %.2f",
                     entity_id, current_volume, level
                 )
                 
-                await self.hass.services.async_call(
-                    MP_DOMAIN,
-                    SERVICE_VOLUME_SET,
-                    {
-                        ATTR_ENTITY_ID: entity_id,
-                        ATTR_MEDIA_VOLUME_LEVEL: level,
-                    },
-                    blocking=True,
-                )
-                self._needs_restore[entity_id] = True
+                # Force blocking to ensure volume is set before TTS starts
+                try:
+                    await self.hass.services.async_call(
+                        MP_DOMAIN,
+                        SERVICE_VOLUME_SET,
+                        {
+                            ATTR_ENTITY_ID: entity_id,
+                            ATTR_MEDIA_VOLUME_LEVEL: level,
+                        },
+                        blocking=True,
+                    )
+                    # Mark for restore only after successful volume change
+                    self._needs_restore[entity_id] = True
+                    
+                    # Verify the volume was actually set
+                    await asyncio.sleep(0.2)  # Small delay to let state update
+                    new_state = self.hass.states.get(entity_id)
+                    if new_state:
+                        new_volume = new_state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
+                        if new_volume is not None:
+                            _LOGGER.debug(
+                                "Volume for %s is now %.2f (wanted %.2f)",
+                                entity_id, float(new_volume), level
+                            )
+                        else:
+                            _LOGGER.warning(
+                                "Volume attribute missing after setting volume for %s",
+                                entity_id
+                            )
+                except Exception as err:
+                    _LOGGER.error("Failed to set volume for %s: %s", entity_id, err)
             else:
                 _LOGGER.debug(
                     "Volume for %s already at desired level %.2f, skipping adjustment",
@@ -534,8 +575,8 @@ async def announce_with_volume_restore(
         state = hass.states.get(entity_id)
         if state is not None and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
             available_media_players.append(entity_id)
-            # Check if it's a Sonos device
-            if "sonos" in entity_id.lower() or state.attributes.get("platform") == "sonos":
+            # Only identify Sonos devices if pause feature is enabled
+            if pause_enabled and ("sonos" in entity_id.lower() or state.attributes.get("platform") == "sonos"):
                 sonos_players.append(entity_id)
         else:
             _LOGGER.warning("Media player %s is not available, skipping", entity_id)
@@ -544,35 +585,42 @@ async def announce_with_volume_restore(
         _LOGGER.warning("No media players are available")
         return
     
-    _LOGGER.debug("Available players: %s, Sonos players: %s", available_media_players, sonos_players)
+    # Only log Sonos players if we're actually using them for pause/resume
+    if pause_enabled and sonos_players:
+        _LOGGER.debug("Available players: %s, Sonos players: %s", available_media_players, sonos_players)
+    else:
+        _LOGGER.debug("Available players: %s", available_media_players)
     
-    # Create restorer instance
-    restorer = VolumeRestorer(hass, available_media_players)
+    # Create restorer instance only if needed for volume or media operations
+    if restore_enabled or pause_enabled:
+        restorer = VolumeRestorer(hass, available_media_players)
+    else:
+        restorer = None
     
     try:
-        # Record current volumes
-        await restorer.record_initial()
+        # Record current volumes only if volume restore is enabled
+        if restore_enabled and restorer:
+            await restorer.record_initial()
         
-        # Only pause/resume for Sonos devices
-        if pause_enabled and sonos_players:
+        # Only pause/resume for Sonos devices when pause feature is enabled
+        if pause_enabled and sonos_players and restorer:
             await restorer.record_media_state()
             await restorer.pause_playing_media()
         
         # Set announcement volume only if needed and restore is enabled
-        if restore_enabled and tts_volume is not None:
+        if restore_enabled and tts_volume is not None and restorer:
+            _LOGGER.debug("Setting TTS volume to %.2f", tts_volume)
             await restorer.set_volume_if_needed(tts_volume)
             
             # Give media players time to process volume change
             if any(restorer._needs_restore.values()):
                 await asyncio.sleep(0.5)
         
-        # Group Sonos speakers if multiple are present for better sync
+        # Group Sonos speakers if multiple are present and pause is enabled
         grouped_coordinator = None
-        sonos_to_use = sonos_players
-        if len(sonos_players) > 1:
+        if pause_enabled and len(sonos_players) > 1:
             grouped_coordinator = await group_sonos_speakers(hass, sonos_players)
             if grouped_coordinator:
-                sonos_to_use = [grouped_coordinator]
                 _LOGGER.debug("Using Sonos group coordinator: %s", grouped_coordinator)
         
         # Regular TTS call
@@ -584,8 +632,9 @@ async def announce_with_volume_restore(
             "media_player_entity_id": available_media_players,
         }
         
-        _LOGGER.debug("Playing TTS on all speakers: %s", available_media_players)
+        _LOGGER.debug("Playing TTS on speakers: %s", available_media_players)
         
+        # TTS speak call is blocking, wait for it to complete
         await hass.services.async_call(
             TTS_DOMAIN,
             "speak",
@@ -593,65 +642,63 @@ async def announce_with_volume_restore(
             blocking=True,
         )
         
-        # Get media duration - try multiple methods
-        media_duration_ms = None
-        
-        # Method 1: Wait for media players to start and get duration from audio file
-        _LOGGER.debug("Waiting for TTS to start playing to get media URL")
-        await asyncio.sleep(1.5)  # Give TTS time to start
-        
-        media_duration_ms, media_url = await get_media_duration_from_players(hass, available_media_players)
-        
-        if media_duration_ms:
-            _LOGGER.debug("Got exact duration by parsing audio file: %s ms", media_duration_ms)
-        else:
-            # Method 2: Try to get from TTS entity (shorter timeout for cached files)
+        # Different handling based on whether we need to track media or not
+        if pause_enabled or restore_enabled:
+            # We need to wait for the playback to complete to know when to restore state
+            
+            # Try to get duration from TTS entity
             _LOGGER.debug("Checking TTS entity for duration")
-            media_duration_ms = await wait_for_media_duration(hass, tts_entity, timeout_ms=3000)
+            media_duration_ms = None
+            tts_state = hass.states.get(tts_entity)
+            if tts_state and tts_state.attributes:
+                media_duration_ms = tts_state.attributes.get("media_duration")
+                if media_duration_ms:
+                    _LOGGER.debug("Got duration from TTS entity: %s ms", media_duration_ms)
             
             if media_duration_ms:
-                _LOGGER.debug("Got duration from TTS entity: %s ms", media_duration_ms)
+                # We have duration, wait accordingly
+                wait_time_ms = media_duration_ms + 1500  # Add buffer
+                _LOGGER.debug("Waiting %d ms for TTS playback to complete", wait_time_ms)
+                await asyncio.sleep(wait_time_ms / 1000.0)
             else:
-                # Method 3: Monitor player states as fallback
-                _LOGGER.debug("No duration available, will monitor player states")
-                await wait_for_media_players_complete(
-                    hass, 
-                    available_media_players,
-                    timeout_ms=30000,
-                    extra_wait_ms=1000
-                )
-                return  # Return early since we already waited
+                # No duration available, use a fixed delay
+                _LOGGER.debug("No duration info, using fixed wait time")
+                await asyncio.sleep(5.0)  # Default 5 seconds wait
+        else:
+            # No need to track, just wait a reasonable time for playback to finish
+            _LOGGER.debug("No tracking needed, using fixed wait time")
+            await asyncio.sleep(5.0)  # Default 5 seconds wait
         
-        # Wait for playback to complete based on exact duration
-        if media_duration_ms:
-            wait_time_ms = media_duration_ms + 1500  # Add buffer
-            _LOGGER.debug("Waiting %d ms for TTS playback to complete (exact duration)", wait_time_ms)
-            await asyncio.sleep(wait_time_ms / 1000.0)
-        
-        # Restore original volumes
-        if restore_enabled:
+        # Restore original volumes if needed
+        if restore_enabled and restorer:
             await restorer.restore()
         
-        # Ungroup Sonos speakers if we grouped them
-        if grouped_coordinator:
-            await ungroup_sonos_speakers(hass, sonos_players)
-        
-        # Resume media only for Sonos devices
-        if pause_enabled and sonos_players:
-            # Give a short delay before resuming
-            await asyncio.sleep(0.5)
-            await restorer.resume_media()
+        # Handle Sonos-specific actions only if pause_enabled is true
+        if pause_enabled:
+            # Ungroup Sonos speakers if we grouped them
+            if grouped_coordinator:
+                await ungroup_sonos_speakers(hass, sonos_players)
+            
+            # Resume media only for Sonos devices if we paused them
+            if sonos_players and restorer:
+                # Give a short delay before resuming
+                await asyncio.sleep(0.5)
+                await restorer.resume_media()
         
     except Exception as err:
         _LOGGER.error("Error during TTS announcement: %s", err)
         # Try to restore volumes and resume media even if TTS failed
         try:
-            if restore_enabled:
+            if restore_enabled and restorer:
                 await restorer.restore()
-            if grouped_coordinator:
-                await ungroup_sonos_speakers(hass, sonos_players)
-            if pause_enabled and sonos_players:
-                await restorer.resume_media()
+                
+            # Only handle Sonos-specific cleanup if pause_enabled is true
+            if pause_enabled:
+                if grouped_coordinator:
+                    await ungroup_sonos_speakers(hass, sonos_players)
+                
+                if sonos_players and restorer:
+                    await restorer.resume_media()
         except Exception as restore_err:
             _LOGGER.error("Failed to restore state: %s", restore_err)
         raise

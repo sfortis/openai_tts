@@ -21,5 +21,5 @@ CONF_INSTRUCTIONS = "instructions"
 # Toggle to snapshot & restore volumes
 CONF_VOLUME_RESTORE = "volume_restore"
 
-# NEW: Toggle to pause/resume media playback
+# Toggle to pause/resume media playback
 CONF_PAUSE_PLAYBACK = "pause_playback"

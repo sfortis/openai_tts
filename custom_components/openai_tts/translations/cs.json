@@ -25,8 +25,12 @@
           "chime": "Povolte zvukový signál před řečí (užitečné pro oznámení)",
           "chime_sound": "Zvuk zvukového signálu",
           "speed": "Rychlost (0,25 až 4,0)",
+          "model": "Model",
           "voice": "Hlas",
-          "normalize_audio": "Povolte zvýšení hlasitosti generovaného audia (vyžaduje více CPU)"
+          "instructions": "Pokyny (viz https://www.openai.fm/)",
+          "normalize_audio": "Povolte zvýšení hlasitosti generovaného audia (vyžaduje více CPU)",
+          "volume_restore": "Obnovit hlasitost reproduktorů po přehrávání TTS",
+          "pause_playback": "Pozastavit přehrávání médií během TTS (pouze Sonos)"
         }
       }
     }
