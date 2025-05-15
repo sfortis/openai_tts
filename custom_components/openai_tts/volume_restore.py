@@ -5,9 +5,10 @@ from __future__ import annotations
 import asyncio
 import logging
 import os
-import subprocess
-from typing import Any
+import tempfile
+from typing import Any, Dict, List, Optional, Set, Tuple, Union
 
+import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.components.media_player import (
     ATTR_MEDIA_VOLUME_LEVEL,
@@ -20,98 +21,81 @@ from homeassistant.components.media_player import (
     SERVICE_MEDIA_PAUSE,
     SERVICE_MEDIA_PLAY,
     SERVICE_PLAY_MEDIA,
-    SERVICE_MEDIA_SEEK,
     STATE_IDLE,
     STATE_PLAYING,
-    MediaPlayerEntityFeature,
 )
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
-from homeassistant.const import ATTR_ENTITY_ID, STATE_UNKNOWN, STATE_UNAVAILABLE, STATE_PAUSED
+from homeassistant.const import (
+    ATTR_ENTITY_ID, 
+    STATE_UNKNOWN, 
+    STATE_UNAVAILABLE,
+    STATE_PAUSED,
+)
+from homeassistant.helpers.typing import StateType
 
 from .const import DOMAIN, CONF_VOLUME_RESTORE, CONF_PAUSE_PLAYBACK
+from .utils import (
+    get_media_duration,
+    get_media_player_state,
+    call_media_player_service,
+    normalize_entity_ids,
+    set_media_player_volume,
+    categorize_media_players as utils_categorize_media_players,
+)
 
 _LOGGER = logging.getLogger(__name__)
-
-
-def get_media_duration_from_file(file_path: str) -> float:
-    """Get the duration of a media file in seconds using ffprobe."""
-    try:
-        cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            file_path,
-        ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        duration_str = result.stdout.strip()
-        return float(duration_str) if duration_str else 0.0
-    except Exception as e:
-        _LOGGER.error("Error getting media duration from file: %s", e)
-        return 0.0
 
 
 async def get_tts_audio_duration_from_url(hass: HomeAssistant, media_url: str) -> int | None:
     """Get the duration of TTS audio by downloading and parsing it with ffprobe."""
     try:
-        # Extract the actual file path from the media URL if it's a local file
+        # Handle TTS proxy URL
         if media_url.startswith("/api/tts_proxy/"):
-            # This is a TTS proxy URL, we need to download it
-            import aiohttp
-            import tempfile
-            
             full_url = f"{hass.config.internal_url}{media_url}"
-            _LOGGER.debug("Downloading TTS from URL: %s", full_url)
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(full_url) as response:
-                    if response.status == 200:
-                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-                            content = await response.read()
-                            tmp_file.write(content)
-                            tmp_path = tmp_file.name
-                        
-                        # Get duration using ffprobe
-                        duration = await hass.async_add_executor_job(get_media_duration_from_file, tmp_path)
-                        
-                        # Clean up temp file
-                        try:
-                            os.remove(tmp_path)
-                        except:
-                            pass
-                        
-                        return int(duration * 1000)  # Convert to milliseconds
+            return await _download_and_get_duration(hass, full_url)
         
+        # Handle direct HTTP URLs
         elif media_url.startswith("http"):
-            # External URL, download and parse
-            import aiohttp
-            import tempfile
-            
-            async with aiohttp.ClientSession() as session:
-                async with session.get(media_url) as response:
-                    if response.status == 200:
-                        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-                            content = await response.read()
-                            tmp_file.write(content)
-                            tmp_path = tmp_file.name
-                        
-                        duration = await hass.async_add_executor_job(get_media_duration_from_file, tmp_path)
-                        
-                        try:
-                            os.remove(tmp_path)
-                        except:
-                            pass
-                        
-                        return int(duration * 1000)
+            return await _download_and_get_duration(hass, media_url)
         
+        # Handle local file paths
         elif os.path.exists(media_url):
-            # Local file path
-            duration = await hass.async_add_executor_job(get_media_duration_from_file, media_url)
+            # This is running in an async context, so use executor
+            duration = await hass.async_add_executor_job(get_media_duration, media_url)
             return int(duration * 1000)
         
         return None
     except Exception as e:
         _LOGGER.error("Error getting TTS audio duration from URL: %s", e)
+        return None
+
+
+async def _download_and_get_duration(hass: HomeAssistant, url: str) -> int | None:
+    """Download audio from URL and get its duration."""
+    _LOGGER.debug("Downloading audio from URL: %s", url)
+    
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(url) as response:
+                if response.status == 200:
+                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
+                        content = await response.read()
+                        tmp_file.write(content)
+                        tmp_path = tmp_file.name
+                    
+                    # Get duration (always async in this context)
+                    duration = await hass.async_add_executor_job(get_media_duration, tmp_path)
+                    
+                    # Clean up temp file
+                    try:
+                        os.remove(tmp_path)
+                    except Exception:
+                        pass
+                    
+                    return int(duration * 1000)  # Convert to milliseconds
+        return None
+    except Exception as e:
+        _LOGGER.error("Error downloading audio: %s", e)
         return None
 
 
@@ -122,13 +106,15 @@ class MediaState:
         """Initialize media state."""
         self.entity_id = entity_id
         self.state = state
+        self.was_playing = state == STATE_PLAYING
+        
+        # Media attributes
         self.media_content_id = attributes.get(ATTR_MEDIA_CONTENT_ID)
         self.media_content_type = attributes.get(ATTR_MEDIA_CONTENT_TYPE)
         self.media_position = attributes.get(ATTR_MEDIA_POSITION)
         self.app_name = attributes.get(ATTR_APP_NAME)
-        self.was_playing = state == STATE_PLAYING
         
-        # Additional attributes for better playlist/queue support
+        # Extended attributes for better playlist/queue support
         self.media_title = attributes.get("media_title")
         self.media_artist = attributes.get("media_artist")
         self.media_album = attributes.get("media_album_name")
@@ -136,10 +122,9 @@ class MediaState:
         self.shuffle = attributes.get("shuffle", False)
         self.repeat = attributes.get("repeat", "off")
         
-        # Try to extract Spotify context (playlist, album, etc)
+        # Extract Spotify context if available
         self.spotify_context = None
         if self.media_content_id and self.media_content_id.startswith("spotify:"):
-            # Some integrations provide the context in attributes
             self.spotify_context = attributes.get("media_context_uri") or attributes.get("spotify_context")
         
     def should_resume(self) -> bool:
@@ -150,228 +135,228 @@ class MediaState:
 class VolumeRestorer:
     """Handle volume restoration for media players."""
     
-    def __init__(self, hass: HomeAssistant, entity_ids: list[str]):
+    def __init__(self, hass: HomeAssistant, entity_ids: List[str]):
         """Initialize the volume restorer."""
         self.hass = hass
         self.entity_ids = entity_ids
-        self._initial: dict[str, float] = {}
-        self._needs_restore: dict[str, bool] = {}  # Track which players need restoration
-        self._media_states: dict[str, MediaState] = {}  # Track media states for pause/resume
-
+        self._initial_volumes: Dict[str, float] = {}
+        self._needs_restore: Dict[str, bool] = {}
+        self._media_states: Dict[str, MediaState] = {}
+        self._was_off: Dict[str, bool] = {}
+    
     async def record_initial(self) -> None:
         """Record the initial volume for each media player."""
         for entity_id in self.entity_ids:
-            state = self.hass.states.get(entity_id)
-            if state is None:
-                _LOGGER.warning("Media player %s not found", entity_id)
+            state, attributes = await get_media_player_state(self.hass, entity_id)
+            if state is None or attributes is None:
+                _LOGGER.warning("Media player %s not available", entity_id)
                 continue
             
-            volume = state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
+            volume = attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
             if volume is not None:
-                self._initial[entity_id] = float(volume)
-                self._needs_restore[entity_id] = False  # Initially assume no restore needed
-                _LOGGER.debug("Recorded volume %.2f for %s", volume, entity_id)
+                self._initial_volumes[entity_id] = float(volume)
+                self._needs_restore[entity_id] = False
+                _LOGGER.debug("Recorded initial volume %.2f for %s", volume, entity_id)
+            
+            # Record if device is off
+            self._was_off[entity_id] = state.lower() == "off"
 
-    async def record_media_state(self) -> None:
+    async def record_media_state(self, media_player_type: Optional[str] = None) -> None:
         """Record the current media state for each player."""
         _LOGGER.debug("Recording media state for players")
         
         for entity_id in self.entity_ids:
-            state = self.hass.states.get(entity_id)
-            if state is None:
-                _LOGGER.debug("Media player %s state not available", entity_id)
+            state, attributes = await get_media_player_state(self.hass, entity_id)
+            if state is None or attributes is None:
                 continue
             
-            # Check if it's a Sonos device
-            is_sonos = ("sonos" in entity_id.lower() or 
-                       state.attributes.get("platform") == "sonos" or
-                       state.attributes.get("vendor_id") == "sonos")
-            
-            if not is_sonos:
+            # Filter by player type if specified
+            if media_player_type and not self._is_player_type(entity_id, media_player_type):
                 continue
-                
-            self._media_states[entity_id] = MediaState(
-                entity_id, 
-                state.state, 
-                state.attributes
-            )
+                    
+            # Store the media state
+            self._media_states[entity_id] = MediaState(entity_id, state, attributes)
             
             media_state = self._media_states[entity_id]
-            
-            if state.state == STATE_PLAYING:
+            if state == STATE_PLAYING or state == STATE_PAUSED:
                 _LOGGER.debug(
-                    "Recorded playing media for Sonos %s: %s (position: %s)",
-                    entity_id,
-                    media_state.media_content_id,
-                    media_state.media_position
-                )
-            elif state.state == STATE_PAUSED:
-                _LOGGER.debug(
-                    "Recorded paused media for Sonos %s: %s (position: %s)",
-                    entity_id,
-                    media_state.media_content_id,
-                    media_state.media_position
+                    "Recorded %s media for %s: %s (position: %s)",
+                    state, entity_id, media_state.media_content_id, media_state.media_position
                 )
 
-    async def pause_playing_media(self) -> None:
-        """Pause any currently playing media (only Sonos)."""
+    async def pause_playing_media(self, media_player_type: Optional[str] = None) -> None:
+        """Pause any currently playing media."""
+        pause_tasks = []
+        
         for entity_id, media_state in self._media_states.items():
-            if media_state.was_playing:
-                _LOGGER.debug("Pausing media on Sonos %s", entity_id)
-                await self.hass.services.async_call(
-                    MP_DOMAIN,
-                    SERVICE_MEDIA_PAUSE,
-                    {ATTR_ENTITY_ID: entity_id},
-                    blocking=True,
+            if (not media_player_type or self._is_player_type(entity_id, media_player_type)) and media_state.was_playing:
+                _LOGGER.debug("Pausing media on %s", entity_id)
+                pause_tasks.append(
+                    call_media_player_service(
+                        self.hass,
+                        SERVICE_MEDIA_PAUSE,
+                        entity_id
+                    )
                 )
-                # Give the player time to pause
-                await asyncio.sleep(0.5)
+        
+        if pause_tasks:
+            await asyncio.gather(*pause_tasks)
+            await asyncio.sleep(0.5)  # Allow time to pause
 
-    async def resume_media(self) -> None:
-        """Resume previously playing media (Sonos devices only)."""
+    async def resume_media(self, media_player_type: Optional[str] = None) -> None:
+        """Resume previously playing media."""
+        resume_tasks = []
+        
         for entity_id, media_state in self._media_states.items():
-            if not media_state.should_resume():
-                continue
-                
-            _LOGGER.debug(
-                "Resuming media on Sonos %s: %s (app: %s)", 
-                entity_id, 
-                media_state.media_content_id,
-                media_state.app_name
-            )
-            
-            try:
-                # For Sonos, simply use media_play to resume
-                await self.hass.services.async_call(
-                    MP_DOMAIN,
-                    SERVICE_MEDIA_PLAY,
-                    {ATTR_ENTITY_ID: entity_id},
-                    blocking=True,
+            if (not media_player_type or self._is_player_type(entity_id, media_player_type)) and media_state.should_resume():
+                _LOGGER.debug("Resuming media on %s: %s", entity_id, media_state.media_content_id)
+                resume_tasks.append(
+                    call_media_player_service(
+                        self.hass,
+                        SERVICE_MEDIA_PLAY,
+                        entity_id
+                    )
                 )
+        
+        if resume_tasks:
+            await asyncio.gather(*resume_tasks)
                 
-                _LOGGER.debug("Successfully resumed media on %s", entity_id)
-                
-            except Exception as err:
-                _LOGGER.warning("Failed to resume media on %s: %s", entity_id, err)
+    def _is_player_type(self, entity_id: str, player_type: str) -> bool:
+        """Check if a player matches a specified type."""
+        if player_type.lower() == "sonos":
+            return "sonos" in entity_id.lower()
+        elif player_type.lower() == "cast":
+            return any(keyword in entity_id.lower() for keyword in ["cast", "speaker", "display"])
+        return False
 
     async def set_volume_if_needed(self, level: float) -> None:
-        """Set media players to specified volume level only if they're not already at that level."""
+        """Set media players to specified volume level."""
         _LOGGER.debug("Setting volume to %.2f for %d players", level, len(self.entity_ids))
+        volume_tasks = []
         
-        # Force volume level to be treated as float
+        # Convert to float to ensure proper comparison
         level = float(level)
         
         for entity_id in self.entity_ids:
-            if entity_id not in self._initial:
-                _LOGGER.debug("No initial volume recorded for %s, skipping", entity_id)
-                continue
+            is_cast = any(keyword in entity_id.lower() for keyword in ["cast", "speaker"])
             
-            # Get current volume
-            state = self.hass.states.get(entity_id)
-            if state is None:
-                _LOGGER.debug("Media player %s state not available, skipping", entity_id)
+            # Check current state and volume
+            state, attributes = await get_media_player_state(self.hass, entity_id)
+            if state is None or attributes is None:
                 continue
                 
-            current_volume = state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
+            current_volume = attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
             if current_volume is None:
-                _LOGGER.debug("Media player %s has no volume attribute, skipping", entity_id)
+                continue
+                
+            # Record initial volume if not already done
+            if entity_id not in self._initial_volumes:
+                self._initial_volumes[entity_id] = float(current_volume)
+                self._was_off[entity_id] = state.lower() == "off"
+            
+            # Skip if already at target volume (with small tolerance)
+            if abs(float(current_volume) - level) < 0.01:
+                _LOGGER.debug("Volume already at desired level %.2f for %s", level, entity_id)
+                self._needs_restore[entity_id] = False
                 continue
             
-            # Make extra sure we're comparing floats
-            current_volume = float(current_volume)
+            # Set volume
+            volume_tasks.append(
+                self._set_volume_with_result(entity_id, level, is_cast)
+            )
+        
+        if volume_tasks:
+            # Run volume tasks concurrently
+            results = await asyncio.gather(*volume_tasks)
             
-            # Check if volume adjustment is needed (with small tolerance for float comparison)
-            if abs(current_volume - level) > 0.01:
-                _LOGGER.debug(
-                    "Changing volume for %s from %.2f to %.2f",
-                    entity_id, current_volume, level
-                )
-                
-                # Force blocking to ensure volume is set before TTS starts
-                try:
-                    await self.hass.services.async_call(
-                        MP_DOMAIN,
-                        SERVICE_VOLUME_SET,
-                        {
-                            ATTR_ENTITY_ID: entity_id,
-                            ATTR_MEDIA_VOLUME_LEVEL: level,
-                        },
-                        blocking=True,
-                    )
-                    # Mark for restore only after successful volume change
+            # Mark which ones need restoration based on results
+            for entity_id, success in results:
+                if success:
                     self._needs_restore[entity_id] = True
-                    
-                    # Verify the volume was actually set
-                    await asyncio.sleep(0.2)  # Small delay to let state update
-                    new_state = self.hass.states.get(entity_id)
-                    if new_state:
-                        new_volume = new_state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
-                        if new_volume is not None:
-                            _LOGGER.debug(
-                                "Volume for %s is now %.2f (wanted %.2f)",
-                                entity_id, float(new_volume), level
-                            )
-                        else:
-                            _LOGGER.warning(
-                                "Volume attribute missing after setting volume for %s",
-                                entity_id
-                            )
-                except Exception as err:
-                    _LOGGER.error("Failed to set volume for %s: %s", entity_id, err)
-            else:
-                _LOGGER.debug(
-                    "Volume for %s already at desired level %.2f, skipping adjustment",
-                    entity_id, level
-                )
-                self._needs_restore[entity_id] = False
+    
+    async def _set_volume_with_result(self, entity_id: str, level: float, is_cast: bool) -> Tuple[str, bool]:
+        """Set volume and return result tuple with entity_id and success status."""
+        success = await set_media_player_volume(
+            self.hass, 
+            entity_id, 
+            level, 
+            is_cast=is_cast
+        )
+        return (entity_id, success)
 
     async def restore(self) -> None:
-        """Restore each media player to its original volume, but only if we changed it."""
-        for entity_id, original_volume in self._initial.items():
+        """Restore each media player to its original volume and state."""
+        restore_tasks = []
+        turn_off_tasks = []
+        
+        # Restore volumes for players that were changed
+        for entity_id, original_volume in self._initial_volumes.items():
             # Only restore if we actually changed the volume
-            if self._needs_restore.get(entity_id, False):
-                await self.hass.services.async_call(
-                    MP_DOMAIN,
-                    SERVICE_VOLUME_SET,
-                    {
-                        ATTR_ENTITY_ID: entity_id,
-                        ATTR_MEDIA_VOLUME_LEVEL: original_volume,
-                    },
-                    blocking=True,
-                )
-                _LOGGER.debug("Restored volume to %.2f for %s", original_volume, entity_id)
-            else:
+            if not self._needs_restore.get(entity_id, False):
+                continue
+                
+            # Check if this is a Cast device
+            is_cast = any(keyword in entity_id.lower() for keyword in ["cast", "speaker"])
+            
+            # Get current state and volume
+            state, attributes = await get_media_player_state(self.hass, entity_id)
+            if state is None or attributes is None:
+                continue
+                
+            current_volume = attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
+            if current_volume is None:
+                continue
+                
+            # Only restore if current volume is different from original
+            if abs(float(current_volume) - original_volume) > 0.01:
                 _LOGGER.debug(
-                    "Skipping volume restore for %s (was not changed)",
-                    entity_id
+                    "Restoring volume for %s from %.2f to %.2f",
+                    entity_id, float(current_volume), original_volume
                 )
+                restore_tasks.append(
+                    set_media_player_volume(
+                        self.hass, 
+                        entity_id, 
+                        original_volume,
+                        is_cast=is_cast
+                    )
+                )
+        
+        # Turn off devices that were initially off
+        for entity_id, was_off in self._was_off.items():
+            if was_off:
+                _LOGGER.debug("Turning off %s (was initially off)", entity_id)
+                turn_off_tasks.append(
+                    call_media_player_service(
+                        self.hass,
+                        "turn_off",
+                        entity_id
+                    )
+                )
+        
+        # Run all restoration tasks concurrently
+        if restore_tasks:
+            await asyncio.gather(*restore_tasks)
+            
+        # Turn off devices after volume restoration
+        if turn_off_tasks:
+            await asyncio.gather(*turn_off_tasks)
 
 
 async def wait_for_media_duration(
     hass: HomeAssistant,
     tts_entity: str,
-    timeout_ms: int = 30000  # 30 seconds for duration check
+    timeout_ms: int = 30000
 ) -> int | None:
-    """Wait for the TTS entity to have a media_duration attribute.
-    
-    Returns the media duration in milliseconds.
-    """
+    """Wait for the TTS entity to have a media_duration attribute."""
     start_time_ms = int(asyncio.get_event_loop().time() * 1000)
     
     while (int(asyncio.get_event_loop().time() * 1000) - start_time_ms) < timeout_ms:
         tts_state = hass.states.get(tts_entity)
         
         if tts_state and hasattr(tts_state, 'attributes'):
-            # Check if TTS is still processing (engine_active)
-            engine_active = tts_state.attributes.get('engine_active', False)
-            media_duration_ms = tts_state.attributes.get('media_duration')  # Already in milliseconds
+            media_duration_ms = tts_state.attributes.get('media_duration')
             
-            _LOGGER.debug(
-                "Checking TTS entity: engine_active=%s, media_duration=%s ms",
-                engine_active, media_duration_ms
-            )
-            
-            # If we have a duration, return it immediately (don't wait for engine)
             if media_duration_ms is not None:
                 _LOGGER.debug("TTS media duration: %d ms", media_duration_ms)
                 return media_duration_ms
@@ -383,104 +368,54 @@ async def wait_for_media_duration(
     return None
 
 
-async def get_media_duration_from_players(
-    hass: HomeAssistant,
-    media_players: list[str],
-    timeout_ms: int = 10000
-) -> tuple[int | None, str | None]:
-    """Get media duration and URL from media players after TTS starts playing."""
-    start_time_ms = int(asyncio.get_event_loop().time() * 1000)
-    
-    # Filter out unavailable players before checking
-    available_players = []
-    for entity_id in media_players:
-        state = hass.states.get(entity_id)
-        if state and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
-            available_players.append(entity_id)
-    
-    if not available_players:
-        _LOGGER.warning("No available media players to get duration from")
-        return None, None
-    
-    while (int(asyncio.get_event_loop().time() * 1000) - start_time_ms) < timeout_ms:
-        for entity_id in available_players:
-            state = hass.states.get(entity_id)
-            if state and state.state == STATE_PLAYING:
-                # Get the media content ID (URL)
-                media_content_id = state.attributes.get("media_content_id")
-                if media_content_id:
-                    _LOGGER.debug("Found media URL from player %s: %s", entity_id, media_content_id)
-                    
-                    # Parse the audio file to get exact duration
-                    duration_ms = await get_tts_audio_duration_from_url(hass, media_content_id)
-                    if duration_ms:
-                        return duration_ms, media_content_id
-        
-        # Wait before checking again
-        await asyncio.sleep(0.5)
-    
-    _LOGGER.debug("Timeout waiting for media URL from players")
-    return None, None
-
-
 async def wait_for_media_players_complete(
     hass: HomeAssistant,
     media_players: list[str],
     timeout_ms: int = 30000,
-    extra_wait_ms: int = 1000,
+    extra_wait_ms: int = 1000
 ) -> None:
-    """Wait for media players to complete playback by checking their state."""
+    """Wait for media players to complete playback."""
     start_time_ms = int(asyncio.get_event_loop().time() * 1000)
     players_were_playing = set()
     
-    _LOGGER.debug("Starting to monitor media players for completion: %s", media_players)
+    _LOGGER.debug("Monitoring %d media players for playback completion", len(media_players))
     
     while (int(asyncio.get_event_loop().time() * 1000) - start_time_ms) < timeout_ms:
         all_finished = True
         
         for entity_id in media_players:
             state = hass.states.get(entity_id)
-            
             if state is None:
-                _LOGGER.warning("Media player %s not found", entity_id)
                 continue
             
-            # Check current state
             current_state = state.state
-            _LOGGER.debug("Media player %s state: %s", entity_id, current_state)
             
-            # Track if the player is/was playing
+            # Track if player is/was playing
             if current_state == STATE_PLAYING:
                 players_were_playing.add(entity_id)
                 all_finished = False
-            
-            # Check if a player that was playing is now idle or paused
             elif entity_id in players_were_playing and current_state in (STATE_IDLE, STATE_PAUSED, STATE_UNKNOWN, STATE_UNAVAILABLE):
-                _LOGGER.debug("Media player %s finished playing (now %s)", entity_id, current_state)
-                # Player finished, but keep checking others
-            
-            # If player is still playing, we're not done
+                # Player that was playing has finished
+                pass
             elif current_state == STATE_PLAYING:
                 all_finished = False
         
-        # If all players that were playing are now idle/paused, we're done
+        # If all players that were playing are now finished
         if all_finished and players_were_playing:
             _LOGGER.debug("All media players have finished playback")
-            # Add a small extra wait for audio processing
             await asyncio.sleep(extra_wait_ms / 1000.0)
             return
         
-        # If no players ever started playing but we've waited a reasonable time
+        # If no players ever started playing but we've waited long enough
         if not players_were_playing and (int(asyncio.get_event_loop().time() * 1000) - start_time_ms) > 5000:
-            _LOGGER.warning("No media players started playing after 5s - TTS may have failed")
-            # Use a default duration for failed TTS
+            _LOGGER.warning("No media players started playing after 5s")
             await asyncio.sleep(5.0)
             return
         
-        # Wait before checking again
+        # Check again in a moment
         await asyncio.sleep(0.5)
     
-    _LOGGER.warning("Timeout waiting for media players to complete playback")
+    _LOGGER.warning("Timeout waiting for playback completion")
 
 
 async def group_sonos_speakers(hass: HomeAssistant, sonos_players: list[str]) -> str | None:
@@ -521,19 +456,143 @@ async def group_sonos_speakers(hass: HomeAssistant, sonos_players: list[str]) ->
 
 
 async def ungroup_sonos_speakers(hass: HomeAssistant, sonos_players: list[str]) -> None:
-    """Ungroup Sonos speakers."""
+    """Ungroup Sonos speakers after playback."""
+    if len(sonos_players) <= 1:
+        return
+    
+    # Check if Sonos unjoin service is available
     if not hass.services.has_service("sonos", "unjoin"):
+        _LOGGER.debug("Sonos unjoin service not available")
         return
     
     try:
-        await hass.services.async_call(
-            "sonos",
-            "unjoin",
-            {ATTR_ENTITY_ID: sonos_players},
-            blocking=True,
-        )
+        _LOGGER.debug("Ungrouping %d Sonos speakers", len(sonos_players))
+        
+        # Separate each speaker
+        for entity_id in sonos_players:
+            await hass.services.async_call(
+                "sonos",
+                "unjoin",
+                {ATTR_ENTITY_ID: entity_id},
+                blocking=True,
+            )
+        
+        # Give time for ungrouping to complete
+        await asyncio.sleep(0.5)
     except Exception as e:
         _LOGGER.warning("Failed to ungroup Sonos speakers: %s", e)
+
+
+async def categorize_media_players(
+    hass: HomeAssistant,
+    media_players: List[str]
+) -> Tuple[List[str], List[str], List[str], List[str]]:
+    """Categorize media players by type and availability."""
+    categories = utils_categorize_media_players(hass, media_players)
+    return (
+        categories['available'],
+        categories['sonos'],
+        categories['cast'],
+        categories['other']
+    )
+
+
+async def prepare_players_for_announcement(
+    hass: HomeAssistant,
+    media_players: List[str],
+    pause_enabled: bool = False,
+    tts_volume: Optional[float] = None
+) -> Tuple[List[str], VolumeRestorer, Optional[str]]:
+    """Prepare media players for an announcement."""
+    # Categorize players
+    available_players, sonos_players, cast_players, other_players = await categorize_media_players(
+        hass, media_players
+    )
+    
+    if not available_players:
+        _LOGGER.warning("No available media players")
+        return [], None, None
+    
+    # Create volume and media state restorer
+    volume_restorer = VolumeRestorer(hass, available_players)
+    
+    # Process in parallel where possible
+    setup_tasks = []
+    
+    # Record media state and pause if needed
+    if pause_enabled and sonos_players:
+        setup_tasks.append(volume_restorer.record_media_state(media_player_type="sonos"))
+    
+    # Turn on any Cast devices that are off
+    turn_on_tasks = []
+    for entity_id in cast_players:
+        state = hass.states.get(entity_id)
+        if state and state.state.lower() == "off":
+            _LOGGER.debug("Turning on Cast device %s", entity_id)
+            turn_on_tasks.append(
+                call_media_player_service(
+                    hass,
+                    "turn_on",
+                    entity_id
+                )
+            )
+    
+    if turn_on_tasks:
+        setup_tasks.append(asyncio.gather(*turn_on_tasks))
+    
+    # Run initial setup tasks concurrently
+    if setup_tasks:
+        await asyncio.gather(*setup_tasks)
+        
+        # Wait a bit for Cast devices to initialize
+        if turn_on_tasks:
+            await asyncio.sleep(2.0)
+    
+    # Pause media if needed (after setup)
+    if pause_enabled and sonos_players:
+        await volume_restorer.pause_playing_media(media_player_type="sonos")
+    
+    # Group Sonos speakers if multiple present
+    grouped_sonos = None
+    if len(sonos_players) > 1:
+        grouped_sonos = await group_sonos_speakers(hass, sonos_players)
+    
+    # Record initial volumes
+    await volume_restorer.record_initial()
+    
+    # Set announcement volume if needed
+    if tts_volume is not None:
+        await volume_restorer.set_volume_if_needed(float(tts_volume))
+    
+    return available_players, volume_restorer, grouped_sonos
+
+
+async def cleanup_after_announcement(
+    hass: HomeAssistant,
+    volume_restorer: Optional[VolumeRestorer],
+    sonos_players: Optional[List[str]],
+    grouped_sonos: Optional[str],
+    pause_enabled: bool
+) -> None:
+    """Clean up after an announcement."""
+    cleanup_tasks = []
+    
+    # Restore original volumes
+    if volume_restorer:
+        cleanup_tasks.append(volume_restorer.restore())
+    
+    # Ungroup Sonos speakers if needed
+    if sonos_players and grouped_sonos:
+        cleanup_tasks.append(ungroup_sonos_speakers(hass, sonos_players))
+    
+    # Run cleanup tasks concurrently
+    if cleanup_tasks:
+        await asyncio.gather(*cleanup_tasks)
+    
+    # Resume media after cleanup is done
+    if pause_enabled and sonos_players and volume_restorer:
+        await asyncio.sleep(0.5)  # Small delay before resuming
+        await volume_restorer.resume_media(media_player_type="sonos")
 
 
 async def announce_with_volume_restore(
@@ -546,159 +605,88 @@ async def announce_with_volume_restore(
     tts_volume: float | None = None,
     pause_playback: bool | None = None,
 ) -> None:
-    """Play a TTS announcement with volume management and optional media pause/resume (Sonos only)."""
+    """Play a TTS announcement with reliable volume restoration."""
+    options = options or {}
     
-    if options is None:
-        options = {}
-    
-    # Check if volume restore is enabled
+    # Check config options
     restore_enabled = any(
         entry.options.get(CONF_VOLUME_RESTORE, False)
         for entry in hass.config_entries.async_entries(DOMAIN)
     )
     
-    # Check if pause playback is enabled
-    # Service call parameter overrides global setting
-    if pause_playback is not None:
-        pause_enabled = pause_playback
-    else:
-        pause_enabled = any(
-            entry.options.get(CONF_PAUSE_PLAYBACK, False)
-            for entry in hass.config_entries.async_entries(DOMAIN)
-        )
-    
-    # Filter out unavailable media players
-    available_media_players = []
-    sonos_players = []
-    
-    for entity_id in media_players:
-        state = hass.states.get(entity_id)
-        if state is not None and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
-            available_media_players.append(entity_id)
-            # Only identify Sonos devices if pause feature is enabled
-            if pause_enabled and ("sonos" in entity_id.lower() or state.attributes.get("platform") == "sonos"):
-                sonos_players.append(entity_id)
-        else:
-            _LOGGER.warning("Media player %s is not available, skipping", entity_id)
-    
-    if not available_media_players:
-        _LOGGER.warning("No media players are available")
-        return
-    
-    # Only log Sonos players if we're actually using them for pause/resume
-    if pause_enabled and sonos_players:
-        _LOGGER.debug("Available players: %s, Sonos players: %s", available_media_players, sonos_players)
-    else:
-        _LOGGER.debug("Available players: %s", available_media_players)
-    
-    # Create restorer instance only if needed for volume or media operations
-    if restore_enabled or pause_enabled:
-        restorer = VolumeRestorer(hass, available_media_players)
-    else:
-        restorer = None
+    pause_enabled = pause_playback if pause_playback is not None else any(
+        entry.options.get(CONF_PAUSE_PLAYBACK, False)
+        for entry in hass.config_entries.async_entries(DOMAIN)
+    )
     
     try:
-        # Record current volumes only if volume restore is enabled
-        if restore_enabled and restorer:
-            await restorer.record_initial()
+        # Prepare players
+        available_players, volume_restorer, grouped_sonos = await prepare_players_for_announcement(
+            hass, 
+            media_players, 
+            pause_enabled=pause_enabled,
+            tts_volume=tts_volume if restore_enabled else None
+        )
         
-        # Only pause/resume for Sonos devices when pause feature is enabled
-        if pause_enabled and sonos_players and restorer:
-            await restorer.record_media_state()
-            await restorer.pause_playing_media()
+        if not available_players:
+            return
         
-        # Set announcement volume only if needed and restore is enabled
-        if restore_enabled and tts_volume is not None and restorer:
-            _LOGGER.debug("Setting TTS volume to %.2f", tts_volume)
-            await restorer.set_volume_if_needed(tts_volume)
-            
-            # Give media players time to process volume change
-            if any(restorer._needs_restore.values()):
-                await asyncio.sleep(0.5)
-        
-        # Group Sonos speakers if multiple are present and pause is enabled
-        grouped_coordinator = None
-        if pause_enabled and len(sonos_players) > 1:
-            grouped_coordinator = await group_sonos_speakers(hass, sonos_players)
-            if grouped_coordinator:
-                _LOGGER.debug("Using Sonos group coordinator: %s", grouped_coordinator)
-        
-        # Regular TTS call
-        tts_data = {
-            ATTR_ENTITY_ID: tts_entity,
-            "message": message,
-            "language": language,
-            "options": options,
-            "media_player_entity_id": available_media_players,
-        }
-        
-        _LOGGER.debug("Playing TTS on speakers: %s", available_media_players)
-        
-        # TTS speak call is blocking, wait for it to complete
+        # Play TTS message
+        _LOGGER.debug("Playing TTS on %d speakers", len(available_players))
         await hass.services.async_call(
             TTS_DOMAIN,
             "speak",
-            tts_data,
+            {
+                ATTR_ENTITY_ID: tts_entity,
+                "message": message,
+                "language": language,
+                "options": options,
+                "media_player_entity_id": available_players,
+            },
             blocking=True,
         )
         
-        # Different handling based on whether we need to track media or not
-        if pause_enabled or restore_enabled:
-            # We need to wait for the playback to complete to know when to restore state
-            
-            # Try to get duration from TTS entity
-            _LOGGER.debug("Checking TTS entity for duration")
-            media_duration_ms = None
-            tts_state = hass.states.get(tts_entity)
-            if tts_state and tts_state.attributes:
-                media_duration_ms = tts_state.attributes.get("media_duration")
-                if media_duration_ms:
-                    _LOGGER.debug("Got duration from TTS entity: %s ms", media_duration_ms)
-            
-            if media_duration_ms:
-                # We have duration, wait accordingly
-                wait_time_ms = media_duration_ms + 1500  # Add buffer
-                _LOGGER.debug("Waiting %d ms for TTS playback to complete", wait_time_ms)
-                await asyncio.sleep(wait_time_ms / 1000.0)
-            else:
-                # No duration available, use a fixed delay
-                _LOGGER.debug("No duration info, using fixed wait time")
-                await asyncio.sleep(5.0)  # Default 5 seconds wait
+        # Wait for playback to complete
+        media_duration_ms = await wait_for_media_duration(hass, tts_entity)
+        
+        if media_duration_ms:
+            # Calculate wait time with buffer for multiple players
+            buffer_ms = 2000 + (len(available_players) * 500)
+            wait_time_ms = media_duration_ms + buffer_ms
+            _LOGGER.debug("Waiting %.1f seconds for TTS playback", wait_time_ms / 1000.0)
+            await asyncio.sleep(wait_time_ms / 1000.0)
         else:
-            # No need to track, just wait a reasonable time for playback to finish
-            _LOGGER.debug("No tracking needed, using fixed wait time")
-            await asyncio.sleep(5.0)  # Default 5 seconds wait
+            # If we couldn't get duration, wait for players to complete
+            await wait_for_media_players_complete(hass, available_players)
         
-        # Restore original volumes if needed
-        if restore_enabled and restorer:
-            await restorer.restore()
-        
-        # Handle Sonos-specific actions only if pause_enabled is true
-        if pause_enabled:
-            # Ungroup Sonos speakers if we grouped them
-            if grouped_coordinator:
-                await ungroup_sonos_speakers(hass, sonos_players)
-            
-            # Resume media only for Sonos devices if we paused them
-            if sonos_players and restorer:
-                # Give a short delay before resuming
-                await asyncio.sleep(0.5)
-                await restorer.resume_media()
+        # Clean up
+        await cleanup_after_announcement(
+            hass,
+            volume_restorer if restore_enabled else None,
+            sonos_players=[p for p in available_players if "sonos" in p.lower()],
+            grouped_sonos=grouped_sonos,
+            pause_enabled=pause_enabled
+        )
         
     except Exception as err:
         _LOGGER.error("Error during TTS announcement: %s", err)
-        # Try to restore volumes and resume media even if TTS failed
+        
+        # Try to clean up on error
         try:
-            if restore_enabled and restorer:
-                await restorer.restore()
+            # Handle cleanup in case variables exist
+            if 'volume_restorer' in locals() and restore_enabled:
+                await volume_restorer.restore()
+            
+            if 'grouped_sonos' in locals() and grouped_sonos:
+                sonos_players = [p for p in media_players if "sonos" in p.lower()]
+                await ungroup_sonos_speakers(hass, sonos_players)
+            
+            if 'volume_restorer' in locals() and pause_enabled:
+                sonos_players = [p for p in media_players if "sonos" in p.lower()]
+                if sonos_players:
+                    await volume_restorer.resume_media(media_player_type="sonos")
                 
-            # Only handle Sonos-specific cleanup if pause_enabled is true
-            if pause_enabled:
-                if grouped_coordinator:
-                    await ungroup_sonos_speakers(hass, sonos_players)
-                
-                if sonos_players and restorer:
-                    await restorer.resume_media()
         except Exception as restore_err:
-            _LOGGER.error("Failed to restore state: %s", restore_err)
+            _LOGGER.error("Failed to restore state after error: %s", restore_err)
+        
         raise

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import logging
 import os
+from typing import List, Dict, Any, Optional, Union
+
 import voluptuous as vol
 from homeassistant.const import Platform, ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
@@ -13,6 +15,7 @@ from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 
 from .const import DOMAIN
 from .volume_restore import announce_with_volume_restore
+from .utils import normalize_entity_ids
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -48,7 +51,9 @@ SAY_SCHEMA = vol.Schema(
         vol.Optional("instructions"): cv.string,
         vol.Optional("volume"): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         vol.Optional("pause_playback"): cv.boolean,  # Added pause_playback
-        vol.Optional("entity_id"): cv.entity_ids,  # Accept but don't use entity_id
+        vol.Optional("entity_id"): cv.entity_ids,  # For direct entity targeting
+        vol.Optional("device_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string])),  # For device targeting
+        vol.Optional("area_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string]))     # For area targeting
     }, extra=vol.ALLOW_EXTRA
 )
 
@@ -56,46 +61,85 @@ def _get_entities_from_target(
     hass: HomeAssistant, 
     target: dict | None
 ) -> list[str]:
-    """Extract entity IDs from service target."""
+    """
+    Extract entity IDs from service target more efficiently.
+    
+    Args:
+        hass: Home Assistant instance
+        target: Service call target dictionary
+        
+    Returns:
+        List of entity IDs
+    """
     if not target:
         return []
     
+    _LOGGER.debug("Target: %s", target)
     entities = []
     
-    # Handle direct entity_ids
+    # Handle direct entity_ids - normalize to always work with lists
     if entity_ids := target.get("entity_id"):
-        if isinstance(entity_ids, str):
-            entities.append(entity_ids)
-        else:
-            entities.extend(entity_ids)
+        entities.extend(normalize_entity_ids(entity_ids))
+        _LOGGER.debug("Added entity_ids from target: %s", entities)
+    
+    # Get entity registry only once if needed
+    entity_reg = None
+    device_reg = None
+    
+    if any(key in target for key in ["area_id", "device_id"]):
+        entity_reg = er.async_get(hass)
+        device_reg = dr.async_get(hass)
     
     # Handle area_ids
     if area_ids := target.get("area_id"):
-        entity_reg = er.async_get(hass)
-        if isinstance(area_ids, str):
-            area_ids = [area_ids]
+        # Normalize to always work with lists
+        area_ids = normalize_entity_ids(area_ids)
+        _LOGGER.debug("Processing area_ids: %s", area_ids)
         
-        for area_id in area_ids:
+        if entity_reg:
+            # First, get all device IDs in these areas
+            area_device_ids = set()
+            
+            # Find devices in these areas
+            if device_reg:
+                for device in device_reg.devices.values():
+                    if device.area_id in area_ids:
+                        area_device_ids.add(device.id)
+                _LOGGER.debug("Found devices in areas: %s", area_device_ids)
+            
+            # Get all media player entities for devices in these areas
             for entry in entity_reg.entities.values():
-                if entry.area_id == area_id and entry.domain == MP_DOMAIN:
+                # Check if entity is directly in area
+                if (entry.area_id in area_ids and 
+                    entry.domain == MP_DOMAIN and 
+                    entry.entity_id not in entities):
                     entities.append(entry.entity_id)
+                    _LOGGER.debug("Added entity %s from area %s", entry.entity_id, entry.area_id)
+                
+                # Also check if entity's device is in area
+                elif (entry.device_id in area_device_ids and
+                      entry.domain == MP_DOMAIN and
+                      entry.entity_id not in entities):
+                    entities.append(entry.entity_id)
+                    _LOGGER.debug("Added entity %s from device %s in area", entry.entity_id, entry.device_id)
     
     # Handle device_ids
     if device_ids := target.get("device_id"):
-        entity_reg = er.async_get(hass)
-        device_reg = dr.async_get(hass)
+        # Normalize to always work with lists
+        device_ids = normalize_entity_ids(device_ids)
+        _LOGGER.debug("Processing device_ids: %s", device_ids)
         
-        if isinstance(device_ids, str):
-            device_ids = [device_ids]
-        
-        for device_id in device_ids:
-            # Find all entities for this device
+        if entity_reg:
+            # Get all media player entities for specified devices
             for entry in entity_reg.entities.values():
-                if entry.device_id == device_id and entry.domain == MP_DOMAIN:
+                if (entry.device_id in device_ids and 
+                    entry.domain == MP_DOMAIN and 
+                    entry.entity_id not in entities):
                     entities.append(entry.entity_id)
+                    _LOGGER.debug("Added entity %s from device %s", entry.entity_id, entry.device_id)
     
-    # Remove duplicates while preserving order
-    return list(dict.fromkeys(entities))
+    _LOGGER.debug("Final entities from target: %s", entities)
+    return entities
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OpenAI TTS and register the openai_tts.say service."""
@@ -110,23 +154,28 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         _LOGGER.debug("Service call data: %s", data)
         _LOGGER.debug("Service call target: %s", getattr(call, 'target', None))
         
-        # Extract media players from target
+        # Extract media players from target and data
         media_players = []
-        if hasattr(call, "target") and call.target:
-            media_players = _get_entities_from_target(hass, dict(call.target))
-            _LOGGER.debug("Media players from target: %s", media_players)
         
-        # Also check if entity_id was passed in data (for backward compatibility)
-        if "entity_id" in data:
-            _LOGGER.debug("Found entity_id in data (legacy format), extracting...")
-            entity_ids = data.get("entity_id", [])
-            if isinstance(entity_ids, str):
-                entity_ids = [entity_ids]
-            # Add these to media_players if they're not already there
-            for entity_id in entity_ids:
-                if entity_id not in media_players:
-                    media_players.append(entity_id)
-            _LOGGER.debug("Media players after adding from data: %s", media_players)
+        # Combine target from both places (call.target attribute and data)
+        target_data = {}
+        
+        # First check call.target attribute (preferred way)
+        if hasattr(call, "target") and call.target:
+            # Convert call.target to dict if it's not already
+            target_data = dict(call.target) if not isinstance(call.target, dict) else call.target
+            _LOGGER.debug("Processing target from call.target: %s", target_data)
+        
+        # Also check data for targeting parameters
+        for target_key in ["entity_id", "device_id", "area_id"]:
+            if target_key in data:
+                target_data[target_key] = data[target_key]
+                _LOGGER.debug("Found %s in data: %s", target_key, data[target_key])
+        
+        # Extract entities using our helper
+        if target_data:
+            media_players = _get_entities_from_target(hass, target_data)
+            _LOGGER.debug("Media players from target data: %s", media_players)
         
         # Validate TTS entity
         tts_entity = data["tts_entity"]
@@ -166,12 +215,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             pause_playback=pause_playback,  # Pass the parameter
         )
 
-    # Register service
+    # Register service without advanced targeting options 
+    # (using simpler registration compatible with older HA versions)
     hass.services.async_register(
         DOMAIN,
         SERVICE_NAME,
         _handle_say,
-        schema=SAY_SCHEMA,
+        schema=SAY_SCHEMA
     )
     
     _LOGGER.info("OpenAI TTS service 'say' registered successfully")
