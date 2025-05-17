@@ -14,7 +14,7 @@ from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 
 from .const import DOMAIN
-from .volume_restore import announce_with_volume_restore
+from .volume_restore import announce
 from .utils import normalize_entity_ids
 
 _LOGGER = logging.getLogger(__name__)
@@ -199,12 +199,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         pause_playback = data.get("pause_playback")  # Get pause_playback from service call
         
         _LOGGER.debug(
-            "Calling announce_with_volume_restore with: tts_entity=%s, media_players=%s, message=%s, pause_playback=%s",
+            "Calling announce with: tts_entity=%s, media_players=%s, message=%s, pause_playback=%s",
             tts_entity, media_players, message, pause_playback
         )
         
         # Call our helper with pause_playback parameter
-        await announce_with_volume_restore(
+        await announce(
             hass,
             tts_entity=tts_entity,
             media_players=media_players,

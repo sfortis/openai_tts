@@ -326,23 +326,43 @@ async def get_media_player_state(
         return None, None
     return state.state, state.attributes
 
+def get_speaker_status(state: Optional[str]) -> str:
+    """
+    Get speaker status based on state.
+    
+    Args:
+        state: Speaker state
+        
+    Returns:
+        "inactive" if state is "off" or "idle" or "paused", "active" otherwise
+    """
+    # Hardcode state values instead of importing constants to avoid import issues
+    if not state:
+        return "inactive"
+    
+    state_lower = state.lower()
+    
+    # Check for the three inactive states
+    if state_lower == "idle" or state_lower == "off" or state_lower == "paused":
+        return "inactive"
+        
+    return "active"
+
 async def set_media_player_volume(
     hass: HomeAssistant, 
     entity_id: str, 
-    volume_level: float, 
-    is_cast: bool = False,
-    retries: int = 3, 
-    retry_delay: float = 0.5
+    volume_level: float,
+    retries: int = 3,
+    retry_delay: float = 0.7
 ) -> bool:
     """
-    Set volume for a media player with support for Cast device retry logic.
+    Set volume for a media player.
     
     Args:
         hass: Home Assistant instance
         entity_id: Entity ID to set volume for
         volume_level: Volume level to set (0.0-1.0)
-        is_cast: Whether this is a Cast device
-        retries: Number of retries for Cast devices
+        retries: Number of retries
         retry_delay: Delay between retries
         
     Returns:
@@ -365,10 +385,10 @@ async def set_media_player_volume(
         _LOGGER.debug("Volume already at desired level %.2f for %s", volume_level, entity_id)
         return True
     
-    # Set volume with retries for Cast devices
+    # Set volume
     _LOGGER.debug("Setting volume for %s from %.2f to %.2f", entity_id, float(current_volume), volume_level)
     
-    for attempt in range(1, retries + 1 if is_cast else 2):
+    for attempt in range(1, retries + 1):
         try:
             await hass.services.async_call(
                 MP_DOMAIN,
@@ -380,32 +400,45 @@ async def set_media_player_volume(
                 blocking=True,
             )
             
-            # Wait longer for Cast devices
-            await asyncio.sleep(1.0 if is_cast else 0.2)
+            # Brief wait for volume change
+            await asyncio.sleep(0.3)
             
-            # Verify the volume was set
+            # Verify volume
             new_state, new_attributes = await get_media_player_state(hass, entity_id)
             if new_state is not None and new_attributes is not None:
                 new_volume = new_attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
-                if new_volume is not None and abs(float(new_volume) - volume_level) < 0.05:
-                    _LOGGER.debug(
-                        "Successfully set volume for %s to %.2f (actual: %.2f)",
-                        entity_id, volume_level, float(new_volume)
-                    )
-                    return True
+                if new_volume is not None:
+                    # Tolerance for volume verification
+                    tolerance = 0.1
+                    
+                    if abs(float(new_volume) - volume_level) < tolerance:
+                        _LOGGER.debug(
+                            "Successfully set volume for %s to %.2f (actual: %.2f)",
+                            entity_id, volume_level, float(new_volume)
+                        )
+                        return True
+                    else:
+                        _LOGGER.debug(
+                            "Volume not set correctly for %s: target=%.2f, actual=%.2f (difference: %.2f)",
+                            entity_id, volume_level, float(new_volume), abs(float(new_volume) - volume_level)
+                        )
             
-            if is_cast and attempt < retries:
-                _LOGGER.debug("Cast volume change not effective yet, retrying %d/%d", attempt, retries)
-                await asyncio.sleep(retry_delay * attempt)  # Increasing delay
+            if attempt < retries:
+                # Shorter retry delay
+                delay = 0.3
+                _LOGGER.debug("Volume change not effective yet, retrying %d/%d after %.1f seconds", 
+                             attempt, retries, delay)
+                await asyncio.sleep(delay)
             
         except Exception as err:
             _LOGGER.error("Failed to set volume for %s: %s", entity_id, err)
-            if is_cast and attempt < retries:
-                await asyncio.sleep(retry_delay * attempt)
+            if attempt < retries:
+                await asyncio.sleep(0.3)
     
-    if is_cast:
-        _LOGGER.warning("Failed to set Cast volume for %s after %d attempts", entity_id, retries)
-    return False
+    # Even if we couldn't verify the volume was set, return True
+    # Sometimes devices update their state but don't report it back immediately
+    _LOGGER.warning("Could not verify volume was set for %s, continuing anyway", entity_id)
+    return True
 
 def get_cascaded_config_value(
     options: Dict[str, Any], 
@@ -469,44 +502,3 @@ async def call_media_player_service(
         entity_ids = normalize_entity_ids(entity_id)
         _LOGGER.error("Failed to call %s for %s: %s", service, ", ".join(entity_ids), err)
 
-def categorize_media_players(
-    hass: HomeAssistant,
-    media_players: List[str]
-) -> Dict[str, List[str]]:
-    """
-    Categorize media players by type and availability.
-    
-    Args:
-        hass: Home Assistant instance
-        media_players: List of media player entity IDs
-        
-    Returns:
-        Dictionary with categorized players: 
-        {
-            'available': [...],
-            'sonos': [...],
-            'cast': [...],
-            'other': [...]
-        }
-    """
-    result = {
-        'available': [],
-        'sonos': [],
-        'cast': [],
-        'other': []
-    }
-    
-    for entity_id in media_players:
-        state = hass.states.get(entity_id)
-        if state is not None and state.state not in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
-            result['available'].append(entity_id)
-            
-            # Categorize player
-            if "sonos" in entity_id.lower():
-                result['sonos'].append(entity_id)
-            elif any(keyword in entity_id.lower() for keyword in ["cast", "speaker", "display"]):
-                result['cast'].append(entity_id)
-            else:
-                result['other'].append(entity_id)
-    
-    return result

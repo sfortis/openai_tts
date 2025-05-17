@@ -142,18 +142,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         chime = self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False))
         normalization = self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False))
         
-        # Format media_duration as milliseconds
-        media_duration_display = None
-        if self._last_media_duration_ms is not None:
-            media_duration_display = f"{int(self._last_media_duration_ms)} msec"
-        
         return {
             "engine_active": self._engine_active,
             "last_api_time": f"{int(self._last_api_time)} msec" if self._last_api_time is not None else None,
             "last_ffmpeg_time": f"{int(self._last_ffmpeg_time)} msec" if self._last_ffmpeg_time is not None else None,
             "last_total_time": f"{int(self._last_total_time)} msec" if self._last_total_time is not None else None,
             "media_duration": self._last_media_duration_ms,  # Raw milliseconds value
-            "media_duration_display": media_duration_display,  # Formatted display
             "model": model,
             "voice": voice,
             "speed": speed,
