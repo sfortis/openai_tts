@@ -38,6 +38,7 @@ data:
   message: My speech has improved now!
   options:
     chime: true                          # Enable or disable the chime
+    chime_sound: signal2                 # Name of the file in the chime directory, without .mp3 extension
     instructions: "Speak like a pirate"  # Instructions for text-to-speach model on how to speak 
 ```
 
