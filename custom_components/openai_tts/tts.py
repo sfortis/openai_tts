@@ -68,7 +68,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
     @property
     def supported_options(self) -> list:
-        return ["instructions", "chime"]
+        return ["instructions", "chime", "chime_sound"]
         
     @property
     def supported_languages(self) -> list:
@@ -127,8 +127,11 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     tts_path = tts_file.name
                 _LOGGER.debug("TTS audio written to temp file: %s", tts_path)
 
-                # Determine chime file path.
-                chime_file = self._config.options.get(CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
+                # Determine chime file path - check options first, then fall back to configured chime sound
+                chime_file = options.get(CONF_CHIME_SOUND, self._config.options.get(CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3")))
+                # If no .mp3 extension, append it
+                if not chime_file.lower().endswith('.mp3'):
+                    chime_file = f"{chime_file}.mp3"
                 chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
                 _LOGGER.debug("Using chime file at: %s", chime_path)
 
