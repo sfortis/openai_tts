@@ -1,0 +1,15 @@
+{
+  "domain": "groq_tts",
+  "name": "Groq TTS",
+  "codeowners": [
+    "@sfortis"
+  ],
+  "config_flow": true,
+  "dependencies": [],
+  "documentation": "https://github.com/barneyonline/groq_tts",
+  "iot_class": "cloud_polling",
+  "issue_tracker": "https://github.com/barneyonline/groq_tts/issues",
+  "requirements": [],
+  "version": "0.1",
+  "icon": "icon.png"
+}

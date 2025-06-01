@@ -18,9 +18,7 @@ from homeassistant.helpers.entity import generate_entity_id
 from .const import (
     CONF_API_KEY,
     CONF_MODEL,
-    CONF_SPEED,
     CONF_VOICE,
-    CONF_INSTRUCTIONS,
     CONF_URL,
     DOMAIN,
     UNIQUE_ID,
@@ -28,8 +26,7 @@ from .const import (
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
 )
-from .openaitts_engine import OpenAITTSEngine
-from homeassistant.exceptions import MaxLengthExceeded
+from .groqtts_engine import GroqTTSEngine
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -39,20 +36,19 @@ async def async_setup_entry(
     async_add_entities: AddEntitiesCallback,
 ) -> None:
     api_key = config_entry.data.get(CONF_API_KEY)
-    engine = OpenAITTSEngine(
+    engine = GroqTTSEngine(
         api_key,
         config_entry.data[CONF_VOICE],
         config_entry.data[CONF_MODEL],
-        config_entry.data.get(CONF_SPEED, 1.0),
         config_entry.data[CONF_URL],
     )
-    async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
+    async_add_entities([GroqTTSEntity(hass, config_entry, engine)])
 
-class OpenAITTSEntity(TextToSpeechEntity):
+class GroqTTSEntity(TextToSpeechEntity):
     _attr_has_entity_name = True
     _attr_should_poll = False
 
-    def __init__(self, hass: HomeAssistant, config: ConfigEntry, engine: OpenAITTSEngine) -> None:
+    def __init__(self, hass: HomeAssistant, config: ConfigEntry, engine: GroqTTSEngine) -> None:
         self.hass = hass
         self._engine = engine
         self._config = config
@@ -60,7 +56,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
         if not self._attr_unique_id:
             self._attr_unique_id = f"{config.data.get(CONF_URL)}_{config.data.get(CONF_MODEL)}"
         base_name = self._config.data.get(CONF_MODEL, "").upper()
-        self.entity_id = generate_entity_id("tts.openai_tts_{}", base_name.lower(), hass=hass)
+        self.entity_id = generate_entity_id("tts.groq_tts_{}", base_name.lower(), hass=hass)
 
     @property
     def default_language(self) -> str:
@@ -79,7 +75,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
         return {
             "identifiers": {(DOMAIN, self._attr_unique_id)},
             "model": self._config.data.get(CONF_MODEL),
-            "manufacturer": "OpenAI",
+            "manufacturer": "Groq",
         }
 
     @property
@@ -92,24 +88,23 @@ class OpenAITTSEntity(TextToSpeechEntity):
         overall_start = time.monotonic()
 
         _LOGGER.debug(" -------------------------------------------")
-        _LOGGER.debug("|  OpenAI TTS                               |")
-        _LOGGER.debug("|  https://github.com/sfortis/openai_tts    |")
+        _LOGGER.debug("|  Groq TTS                               |")
+        _LOGGER.debug("|  https://console.groq.com/docs/text-to-speech    |")
         _LOGGER.debug(" -------------------------------------------")
 
         try:
             if len(message) > 4096:
-                raise MaxLengthExceeded("Message exceeds maximum allowed length")
+                raise Exception("Message exceeds maximum allowed length")
             # Retrieve settings.
-            current_speed = self._config.options.get(CONF_SPEED, self._config.data.get(CONF_SPEED, 1.0))
+            current_speed = 1.0  # Speed is not used in Groq TTS
             effective_voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
-            instructions = options.get(CONF_INSTRUCTIONS, self._config.options.get(CONF_INSTRUCTIONS, self._config.data.get(CONF_INSTRUCTIONS)))
             _LOGGER.debug("Effective speed: %s", current_speed)
             _LOGGER.debug("Effective voice: %s", effective_voice)
-            _LOGGER.debug("Instructions: %s", instructions)
 
             _LOGGER.debug("Creating TTS API request")
             api_start = time.monotonic()
-            speech = self._engine.get_tts(message, speed=current_speed, voice=effective_voice, instructions=instructions)
+            # Remove speed argument, GroqTTSEngine.get_tts does not accept it
+            speech = self._engine.get_tts(message, voice=effective_voice)
             api_duration = (time.monotonic() - api_start) * 1000
             _LOGGER.debug("TTS API call completed in %.2f ms", api_duration)
             audio_content = speech.content
@@ -236,12 +231,10 @@ class OpenAITTSEntity(TextToSpeechEntity):
                     _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
                     return "mp3", audio_content
 
-        except CancelledError as ce:
+        except CancelledError:
             _LOGGER.exception("TTS task cancelled")
             return None, None
-        except MaxLengthExceeded as mle:
-            _LOGGER.exception("Maximum message length exceeded")
-        except Exception as e:
+        except Exception:
             _LOGGER.exception("Unknown error in get_tts_audio")
         return None, None
 
