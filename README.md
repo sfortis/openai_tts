@@ -13,7 +13,7 @@ The Groq TTS component for Home Assistant makes it possible to use the Groq API 
 - **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/groq_tts/chime` folder (MP3).
 - **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → Groq TTS → CONFIGURE button)*
 
-### *Caution! You need a Groq API key and some balance available in your Groq account!* ###
+### *Caution! You need a free Groq API key* ###
 visit: (https://console.groq.com/)
 
 ## Supported Groq TTS Models and Voices
