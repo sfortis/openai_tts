@@ -2,7 +2,7 @@
   "domain": "groq_tts",
   "name": "Groq TTS",
   "codeowners": [
-    "@sfortis"
+    "@barneyonline"
   ],
   "config_flow": true,
   "dependencies": [],
