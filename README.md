@@ -20,13 +20,13 @@ visit: (https://console.groq.com/)
 
 ### Models
 - `playai-tts`
-- 'playai-tts-arabic'
+- `playai-tts-arabic`
 
 ### Voices
-- `Arista-PlayAI'
-- `Atlas-PlayAI'
-- `Basil-PlayAI'
-- `Briggs-PlayAI'
+- `Arista-PlayAI`
+- `Atlas-PlayAI`
+- `Basil-PlayAI`
+- `Briggs-PlayAI`
 
 > For the latest list of models and voices, see the [Groq TTS documentation](https://console.groq.com/docs/text-to-speech).
 
