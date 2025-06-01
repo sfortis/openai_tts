@@ -19,13 +19,14 @@ visit: (https://console.groq.com/)
 ## Supported Groq TTS Models and Voices
 
 ### Models
-- `groq-tts-1`
+- `playai-tts`
+- 'playai-tts-arabic'
 
 ### Voices
-- `emma` (English, Female)
-- `liam` (English, Male)
-- `olivia` (English, Female)
-- `noah` (English, Male)
+- `Arista-PlayAI'
+- `Atlas-PlayAI'
+- `Basil-PlayAI'
+- `Briggs-PlayAI'
 
 > For the latest list of models and voices, see the [Groq TTS documentation](https://console.groq.com/docs/text-to-speech).
 
@@ -47,7 +48,7 @@ data:
 
 1. Go to the sidebar HACS menu
 2. Click on the 3-dot overflow menu in the upper right and select the "Custom Repositories" item.
-3. Copy/paste [https://github.com/sfortis/groq_tts](https://github.com/sfortis/groq_tts) into the "Repository" textbox and select "Integration" for the category entry.
+3. Copy/paste [https://github.com/barneyonline/groq_tts](https://github.com/barneyonline/groq_tts) into the "Repository" textbox and select "Integration" for the category entry.
 4. Click on "Add" to add the custom repository.
 5. You can then click on the "Groq TTS Speech Services" repository entry and download it. Restart Home Assistant to apply the component.
 6. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
