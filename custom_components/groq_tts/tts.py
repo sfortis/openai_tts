@@ -5,9 +5,9 @@ from __future__ import annotations
 import io
 import logging
 import os
-import subprocess
 import tempfile
 import time
+import asyncio
 from asyncio import CancelledError
 
 from homeassistant.components.tts import TextToSpeechEntity
@@ -64,7 +64,7 @@ class GroqTTSEntity(TextToSpeechEntity):
 
     @property
     def supported_options(self) -> list:
-        return ["instructions", "chime"]
+        return ["chime"]
         
     @property
     def supported_languages(self) -> list:
@@ -82,175 +82,131 @@ class GroqTTSEntity(TextToSpeechEntity):
     def name(self) -> str:
         return self._config.data.get(CONF_MODEL, "").upper()
 
-    def get_tts_audio(
-        self, message: str, language: str, options: dict | None = None
+    async def async_get_tts_audio(
+        self, message: str, language: str, options: dict | None = None,
     ) -> tuple[str, bytes] | tuple[None, None]:
+        """Generate TTS audio asynchronously and optionally merge chime or normalize."""
         overall_start = time.monotonic()
 
         options = options or {}
 
-        _LOGGER.debug(" -------------------------------------------")
-        _LOGGER.debug("|  Groq TTS                               |")
-        _LOGGER.debug("|  https://console.groq.com/docs/text-to-speech    |")
-        _LOGGER.debug(" -------------------------------------------")
-
         try:
             if len(message) > 4096:
                 raise Exception("Message exceeds maximum allowed length")
-            # Retrieve settings.
-            current_speed = 1.0  # Speed is not used in Groq TTS
+
             effective_voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
-            _LOGGER.debug("Effective speed: %s", current_speed)
-            _LOGGER.debug("Effective voice: %s", effective_voice)
 
             _LOGGER.debug("Creating TTS API request")
             api_start = time.monotonic()
-            # Remove speed argument, GroqTTSEngine.get_tts does not accept it
-            speech = self._engine.get_tts(message, voice=effective_voice)
+            speech = await self._engine.async_get_tts(self.hass, message, voice=effective_voice)
             api_duration = (time.monotonic() - api_start) * 1000
             _LOGGER.debug("TTS API call completed in %.2f ms", api_duration)
             audio_content = speech.content
 
-            # Retrieve options.
-            chime_enabled = options.get(CONF_CHIME_ENABLE,self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)))
-            normalize_audio = self._config.options.get(CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False))
+            chime_enabled = options.get(
+                CONF_CHIME_ENABLE,
+                self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)),
+            )
+            normalize_audio = self._config.options.get(
+                CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False)
+            )
             _LOGGER.debug("Chime enabled: %s", chime_enabled)
             _LOGGER.debug("Normalization option: %s", normalize_audio)
 
-            if chime_enabled:
-                # Write TTS audio to a temp file.
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
-                    tts_file.write(audio_content)
-                    tts_path = tts_file.name
-                _LOGGER.debug("TTS audio written to temp file: %s", tts_path)
+            async def run_ffmpeg(cmd):
+                process = await asyncio.create_subprocess_exec(
+                    *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+                )
+                _, stderr = await process.communicate()
+                if process.returncode != 0:
+                    _LOGGER.error("ffmpeg error: %s", stderr.decode())
+                    raise Exception("ffmpeg failed")
 
-                # Determine chime file path.
-                chime_file = self._config.options.get(CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
-                chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
-                _LOGGER.debug("Using chime file at: %s", chime_path)
+            if chime_enabled or normalize_audio:
+                with tempfile.TemporaryDirectory() as tmpdir:
+                    tts_path = os.path.join(tmpdir, "speech.mp3")
+                    with open(tts_path, "wb") as f:
+                        f.write(audio_content)
 
-                # Create a temporary output file.
-                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
-                    merged_output_path = out_file.name
+                    output_path = os.path.join(tmpdir, "out.mp3")
 
-                if normalize_audio:
-                    _LOGGER.debug("Both chime and normalization enabled; " +
-                                  "using filter_complex to normalize TTS audio and merge with chime in one pass.")
-                    # Use filter_complex to normalize the TTS audio and then concatenate with the chime.
-                    # First input: chime audio, second input: TTS audio (to be normalized).
-                    cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-i", chime_path,
-                        "-i", tts_path,
-                        "-filter_complex", "[1:a]loudnorm=I=-16:TP=-1:LRA=5[tts_norm]; [0:a][tts_norm]concat=n=2:v=0:a=1[out]",
-                        "-map", "[out]",
-                        "-ac", "1",
-                        "-ar", "24000",
-                        "-b:a", "128k",
-                        "-preset", "superfast",
-                        "-threads", "4",
-                        merged_output_path,
-                    ]
-                    _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                else:
-                    _LOGGER.debug("Chime enabled without normalization; merging using concat method.")
-                    # Create a file list for concatenation.
-                    with tempfile.NamedTemporaryFile(mode="w", delete=False) as list_file:
-                        list_file.write(f"file '{chime_path}'\n")
-                        list_file.write(f"file '{tts_path}'\n")
-                        list_path = list_file.name
-                    _LOGGER.debug("FFmpeg file list created: %s", list_path)
-                    cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-f", "concat",
-                        "-safe", "0",
-                        "-i", list_path,
-                        "-ac", "1",
-                        "-ar", "24000",
-                        "-b:a", "128k",
-                        "-preset", "superfast",
-                        "-threads", "4",
-                        merged_output_path,
-                    ]
-                    _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    try:
-                        os.remove(list_path)
-                    except Exception:
-                        pass
+                    if chime_enabled:
+                        chime_file = self._config.options.get(
+                            CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3")
+                        )
+                        chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
 
-                with open(merged_output_path, "rb") as merged_file:
-                    final_audio = merged_file.read()
-                overall_duration = (time.monotonic() - overall_start) * 1000
-                _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
-                # Cleanup temporary files.
-                try:
-                    os.remove(tts_path)
-                    os.remove(merged_output_path)
-                except Exception:
-                    pass
-                return "mp3", final_audio
+                        if normalize_audio:
+                            cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-i",
+                                chime_path,
+                                "-i",
+                                tts_path,
+                                "-filter_complex",
+                                "[1:a]loudnorm=I=-16:TP=-1:LRA=5[tts_norm];[0:a][tts_norm]concat=n=2:v=0:a=1[out]",
+                                "-map",
+                                "[out]",
+                                "-ac",
+                                "1",
+                                "-ar",
+                                "24000",
+                                "-b:a",
+                                "128k",
+                                output_path,
+                            ]
+                        else:
+                            list_path = os.path.join(tmpdir, "list.txt")
+                            with open(list_path, "w") as list_file:
+                                list_file.write(f"file '{chime_path}'\n")
+                                list_file.write(f"file '{tts_path}'\n")
+                            cmd = [
+                                "ffmpeg",
+                                "-y",
+                                "-f",
+                                "concat",
+                                "-safe",
+                                "0",
+                                "-i",
+                                list_path,
+                                "-ac",
+                                "1",
+                                "-ar",
+                                "24000",
+                                "-b:a",
+                                "128k",
+                                output_path,
+                            ]
+                    else:
+                        cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            tts_path,
+                            "-ac",
+                            "1",
+                            "-ar",
+                            "24000",
+                            "-b:a",
+                            "128k",
+                            "-af",
+                            "loudnorm=I=-16:TP=-1:LRA=5",
+                            output_path,
+                        ]
 
-            else:
-                # Chime disabled.
-                if normalize_audio:
-                    _LOGGER.debug("Normalization enabled without chime; processing TTS audio via ffmpeg.")
-                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
-                        tts_file.write(audio_content)
-                        norm_input_path = tts_file.name
-                    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
-                        norm_output_path = out_file.name
-                    cmd = [
-                        "ffmpeg",
-                        "-y",
-                        "-i", norm_input_path,
-                        "-ac", "1",
-                        "-ar", "24000",
-                        "-b:a", "128k",
-                        "-preset", "superfast",
-                        "-threads", "4",
-                        "-af", "loudnorm=I=-16:TP=-1:LRA=5",
-                        norm_output_path,
-                    ]
-                    _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    with open(norm_output_path, "rb") as norm_file:
-                        normalized_audio = norm_file.read()
-                    overall_duration = (time.monotonic() - overall_start) * 1000
-                    _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
-                    try:
-                        os.remove(norm_input_path)
-                        os.remove(norm_output_path)
-                    except Exception:
-                        pass
-                    return "mp3", normalized_audio
-                else:
-                    _LOGGER.debug("Chime and normalization disabled; returning TTS MP3 audio only.")
-                    overall_duration = (time.monotonic() - overall_start) * 1000
-                    _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
-                    return "mp3", audio_content
+                    await run_ffmpeg(cmd)
+
+                    with open(output_path, "rb") as out_f:
+                        audio_content = out_f.read()
+
+            overall_duration = (time.monotonic() - overall_start) * 1000
+            _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
+            return "mp3", audio_content
 
         except CancelledError:
             _LOGGER.exception("TTS task cancelled")
             return None, None
         except Exception:
-            _LOGGER.exception("Unknown error in get_tts_audio")
+            _LOGGER.exception("Unknown error in async_get_tts_audio")
         return None, None
-
-    async def async_get_tts_audio(
-        self, message: str, language: str, options: dict | None = None,
-    ) -> tuple[str, bytes] | tuple[None, None]:
-        from functools import partial
-        import asyncio
-        try:
-            return await asyncio.shield(
-                self.hass.async_add_executor_job(
-                    partial(self.get_tts_audio, message, language, options=options)
-                )
-            )
-        except asyncio.CancelledError:
-            _LOGGER.exception("async_get_tts_audio cancelled")
-            raise

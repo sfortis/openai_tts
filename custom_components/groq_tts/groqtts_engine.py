@@ -3,9 +3,11 @@ TTS Engine for Groq TTS.
 """
 import json
 import logging
-import time
-from urllib.request import Request, urlopen
+import asyncio
 from urllib.error import HTTPError, URLError
+
+import aiohttp
+from homeassistant.helpers.aiohttp_client import async_get_clientsession
 from asyncio import CancelledError
 
 from homeassistant.exceptions import HomeAssistantError
@@ -24,91 +26,59 @@ class GroqTTSEngine:
         self._model = model
         self._url = url
 
-    def get_tts(self, text: str, voice: str = None) -> AudioResponse:
-        """Synchronous TTS request using urllib.request for Groq API."""
+    async def async_get_tts(self, hass, text: str, voice: str | None = None) -> AudioResponse:
+        """Asynchronous TTS request using aiohttp for Groq API."""
         if voice is None:
             voice = self._voice
 
         headers = {"Content-Type": "application/json"}
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
-        # Override User-Agent to match working curl request
         headers["User-Agent"] = "curl/8.7.1"
 
-        data = {
-            "model": self._model,
-            "input": text,
-            "voice": voice,
-        }
+        data = {"model": self._model, "input": text, "voice": voice}
 
         max_retries = 1
         attempt = 0
+        session = async_get_clientsession(hass)
+
         while True:
             try:
-                req = Request(
-                    self._url,
-                    data=json.dumps(data).encode("utf-8"),
-                    headers=headers,
-                    method="POST"
-                )
-                with urlopen(req, timeout=30) as response:
-                    content = response.read()
-                # Check if the response is JSON (error) instead of audio
-                try:
-                    decoded = content.decode("utf-8")
-                    if decoded.startswith('{'):
-                        error_json = json.loads(decoded)
+                async with session.post(self._url, json=data, headers=headers, timeout=30) as resp:
+                    content = await resp.read()
+                    if resp.headers.get("content-type", "").startswith("application/json"):
+                        error_json = json.loads(content.decode("utf-8"))
                         if "error" in error_json:
-                            _LOGGER.error("Groq API error: %s", error_json["error"].get("message", str(error_json["error"])) )
-                            raise HomeAssistantError(f"Groq API error: {error_json['error'].get('message', str(error_json['error']))}")
-                except Exception:
-                    pass  # Not JSON, assume audio
-                return AudioResponse(content)
+                            msg = error_json["error"].get("message", str(error_json["error"]))
+                            _LOGGER.error("Groq API error: %s", msg)
+                            raise HomeAssistantError(f"Groq API error: {msg}")
+                    return AudioResponse(content)
             except CancelledError:
                 _LOGGER.exception("TTS request cancelled")
                 raise
-            except (HTTPError, URLError) as net_err:
-                status_code = getattr(net_err, 'code', None)
-                error_body = None
-                error_hint = None
-                if hasattr(net_err, 'read'):
-                    try:
-                        error_content = net_err.read().decode('utf-8')
-                        error_body = error_content
-                        # Try to parse as JSON
-                        try:
-                            error_json = json.loads(error_content)
-                            if "error" in error_json:
-                                error_msg = error_json["error"].get("message", str(error_json["error"]))
-                                _LOGGER.error("Groq API error (HTTP %s): %s", status_code, error_msg)
-                            else:
-                                _LOGGER.error("Groq API error (HTTP %s): %s", status_code, error_json)
-                        except Exception:
-                            # Not JSON, log raw error body
-                            if "1010" in error_content:
-                                error_hint = "(Groq error 1010: You may not have accepted the PlayAI TTS model terms in your Groq account. See https://console.groq.com/playground?model=playai-tts)"
-                            _LOGGER.error("Groq API error (HTTP %s): %s %s", status_code, error_content, error_hint or "")
-                    except Exception as e:
-                        _LOGGER.error("Groq API error (HTTP %s): Unable to read error body: %s", status_code, e)
-                else:
-                    _LOGGER.error("Groq API error (HTTP %s): No error body available.", status_code)
-                _LOGGER.exception("Network error in synchronous get_tts on attempt %d", attempt + 1)
+            except (aiohttp.ClientError, HTTPError, URLError) as net_err:
+                status_code = getattr(net_err, "status", None) or getattr(net_err, "code", None)
+                error_body = getattr(net_err, "message", None)
+                _LOGGER.error("Groq API network error: %s", net_err)
+                error_hint = ""
+                if error_body and "1010" in str(error_body):
+                    error_hint = " (You may need to accept the PlayAI TTS model terms at https://console.groq.com/playground?model=playai-tts)"
                 if attempt < max_retries:
                     attempt += 1
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
                     continue
-                else:
-                    raise HomeAssistantError(f"Network error occurred while fetching TTS audio (HTTP {status_code}): {error_body}") from net_err
+                raise HomeAssistantError(
+                    f"Network error occurred while fetching TTS audio (HTTP {status_code}): {error_body}{error_hint}"
+                ) from net_err
             except Exception as exc:
-                _LOGGER.exception("Unknown error in synchronous get_tts on attempt %d", attempt + 1)
+                _LOGGER.exception("Unknown error in async_get_tts on attempt %d", attempt + 1)
                 if attempt < max_retries:
                     attempt += 1
-                    time.sleep(1)
+                    await asyncio.sleep(1)
                     _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
                     continue
-                else:
-                    raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
+                raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
 
     def close(self):
         pass

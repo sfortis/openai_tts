@@ -6,7 +6,6 @@
         "description": "Více informací naleznete v dokumentaci.",
         "data": {
           "api_key": "Zadejte Groq API klíč",
-          "speed": "Rychlost (0,25 až 4,0, kde 1,0 je výchozí)",
           "model": "Model",
           "voice": "Hlas",
           "url": "Zadejte Groq TTS endpoint."
@@ -24,7 +23,6 @@
         "data": {
           "chime": "Povolte zvukový signál před řečí (užitečné pro oznámení)",
           "chime_sound": "Zvuk zvukového signálu",
-          "speed": "Rychlost (0,25 až 4,0)",
           "voice": "Hlas",
           "normalize_audio": "Povolte zvýšení hlasitosti generovaného audia (vyžaduje více CPU)"
         }
