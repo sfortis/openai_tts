@@ -5,11 +5,11 @@
         "title": "Add text-to-speech engine",
         "description": "See documentation for further info.",
         "data": {
-          "api_key": "Enter OpenAI API key",
+          "api_key": "Enter Groq API key",
           "speed": "Speed (0.25 to 4.0, where 1.0 is default)",
           "model": "Model",
           "voice": "Voice",
-          "url": "Enter an OpenAI-compatible endpoint (optionally include a port number)."
+          "url": "Enter the Groq TTS endpoint."
         }
       }
     },

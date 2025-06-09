@@ -5,11 +5,11 @@
         "title": "Text-to-Speech Engine hinzufügen",
         "description": "Weitere Informationen finden Sie in der Dokumentation.",
         "data": {
-          "api_key": "Geben Sie den OpenAI API-Schlüssel ein",
+          "api_key": "Geben Sie den Groq API-Schlüssel ein",
           "speed": "Geschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
           "model": "Modell",
           "voice": "Stimme",
-          "url": "Geben Sie einen OpenAI-kompatiblen Endpunkt ein (optional können Sie eine Portnummer angeben)."
+          "url": "Geben Sie den Groq TTS Endpunkt ein."
         }
       }
     },

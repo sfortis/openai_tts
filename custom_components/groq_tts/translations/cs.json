@@ -5,11 +5,11 @@
         "title": "Přidat TTS engine",
         "description": "Více informací naleznete v dokumentaci.",
         "data": {
-          "api_key": "Zadejte OpenAI API klíč",
+          "api_key": "Zadejte Groq API klíč",
           "speed": "Rychlost (0,25 až 4,0, kde 1,0 je výchozí)",
           "model": "Model",
           "voice": "Hlas",
-          "url": "Zadejte endpoint kompatibilní s OpenAI (volitelně uveďte číslo portu)."
+          "url": "Zadejte Groq TTS endpoint."
         }
       }
     },

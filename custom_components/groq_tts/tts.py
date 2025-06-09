@@ -87,6 +87,8 @@ class GroqTTSEntity(TextToSpeechEntity):
     ) -> tuple[str, bytes] | tuple[None, None]:
         overall_start = time.monotonic()
 
+        options = options or {}
+
         _LOGGER.debug(" -------------------------------------------")
         _LOGGER.debug("|  Groq TTS                               |")
         _LOGGER.debug("|  https://console.groq.com/docs/text-to-speech    |")
