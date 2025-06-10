@@ -25,6 +25,8 @@ class GroqTTSEngine:
         self._voice = voice
         self._model = model
         self._url = url
+        self._session: aiohttp.ClientSession | None = None
+        self._cache: dict[tuple[str, str], bytes] = {}
 
     async def async_get_tts(self, hass, text: str, voice: str | None = None) -> AudioResponse:
         """Asynchronous TTS request using aiohttp for Groq API."""
@@ -38,9 +40,17 @@ class GroqTTSEngine:
 
         data = {"model": self._model, "input": text, "voice": voice}
 
+        cache_key = (voice, text)
+        if cache_key in self._cache:
+            _LOGGER.debug("Returning cached audio for %s", cache_key)
+            return AudioResponse(self._cache[cache_key])
+
         max_retries = 1
         attempt = 0
-        session = async_get_clientsession(hass)
+
+        if self._session is None:
+            self._session = async_get_clientsession(hass)
+        session = self._session
 
         while True:
             try:
@@ -52,6 +62,7 @@ class GroqTTSEngine:
                             msg = error_json["error"].get("message", str(error_json["error"]))
                             _LOGGER.error("Groq API error: %s", msg)
                             raise HomeAssistantError(f"Groq API error: {msg}")
+                    self._cache[cache_key] = content
                     return AudioResponse(content)
             except CancelledError:
                 _LOGGER.exception("TTS request cancelled")
@@ -81,9 +92,25 @@ class GroqTTSEngine:
                 raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
 
     def close(self):
-        pass
+        if self._session and not self._session.closed:
+            asyncio.create_task(self._session.close())
 
     @staticmethod
     def get_supported_langs() -> list:
-        # Update with Groq's supported languages if available
-        return ["en"]
+        """Return supported language codes for Groq TTS."""
+        return [
+            "ar",
+            "de",
+            "en",
+            "es",
+            "fr",
+            "hi",
+            "it",
+            "ja",
+            "ko",
+            "pl",
+            "pt",
+            "ru",
+            "tr",
+            "zh",
+        ]
