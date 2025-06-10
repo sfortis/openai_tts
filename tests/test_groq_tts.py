@@ -25,6 +25,13 @@ sys.modules["homeassistant.helpers.selector"].selector = lambda x: x
 aiohttp_mod = types.ModuleType("aiohttp_client")
 aiohttp_mod.async_get_clientsession = lambda hass: None
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_mod)
+sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
+sys.modules["aiohttp"].ClientSession = object
+vol_mod = types.ModuleType("voluptuous")
+vol_mod.Schema = lambda x: x
+vol_mod.Optional = lambda *args, **kwargs: None
+vol_mod.Required = lambda *args, **kwargs: None
+sys.modules.setdefault("voluptuous", vol_mod)
 exceptions_mod = types.ModuleType("exceptions")
 class _HAError(Exception):
     pass

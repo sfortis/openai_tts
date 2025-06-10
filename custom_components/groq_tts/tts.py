@@ -2,10 +2,8 @@
 Setting up TTS entity.
 """
 from __future__ import annotations
-import io
 import logging
 import os
-import tempfile
 import time
 import asyncio
 from asyncio import CancelledError
@@ -64,7 +62,7 @@ class GroqTTSEntity(TextToSpeechEntity):
 
     @property
     def supported_options(self) -> list:
-        return ["chime"]
+        return ["chime", "voice", "normalize"]
         
     @property
     def supported_languages(self) -> list:
@@ -94,7 +92,10 @@ class GroqTTSEntity(TextToSpeechEntity):
             if len(message) > 4096:
                 raise Exception("Message exceeds maximum allowed length")
 
-            effective_voice = self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE))
+            effective_voice = options.get(
+                CONF_VOICE,
+                self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE)),
+            )
 
             _LOGGER.debug("Creating TTS API request")
             api_start = time.monotonic()
@@ -107,98 +108,99 @@ class GroqTTSEntity(TextToSpeechEntity):
                 CONF_CHIME_ENABLE,
                 self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)),
             )
-            normalize_audio = self._config.options.get(
-                CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False)
+            normalize_audio = options.get(
+                CONF_NORMALIZE_AUDIO,
+                self._config.options.get(
+                    CONF_NORMALIZE_AUDIO, self._config.data.get(CONF_NORMALIZE_AUDIO, False)
+                ),
             )
             _LOGGER.debug("Chime enabled: %s", chime_enabled)
             _LOGGER.debug("Normalization option: %s", normalize_audio)
 
-            async def run_ffmpeg(cmd):
+            async def run_ffmpeg(cmd, input_bytes):
                 process = await asyncio.create_subprocess_exec(
-                    *cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE
+                    *cmd,
+                    stdin=asyncio.subprocess.PIPE,
+                    stdout=asyncio.subprocess.PIPE,
+                    stderr=asyncio.subprocess.PIPE,
                 )
-                _, stderr = await process.communicate()
+                stdout, stderr = await process.communicate(input=input_bytes)
                 if process.returncode != 0:
                     _LOGGER.error("ffmpeg error: %s", stderr.decode())
                     raise Exception("ffmpeg failed")
+                return stdout
 
             if chime_enabled or normalize_audio:
-                with tempfile.TemporaryDirectory() as tmpdir:
-                    tts_path = os.path.join(tmpdir, "speech.mp3")
-                    with open(tts_path, "wb") as f:
-                        f.write(audio_content)
+                if chime_enabled:
+                    chime_file = self._config.options.get(
+                        CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3")
+                    )
+                    chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
 
-                    output_path = os.path.join(tmpdir, "out.mp3")
-
-                    if chime_enabled:
-                        chime_file = self._config.options.get(
-                            CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3")
-                        )
-                        chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
-
-                        if normalize_audio:
-                            cmd = [
-                                "ffmpeg",
-                                "-y",
-                                "-i",
-                                chime_path,
-                                "-i",
-                                tts_path,
-                                "-filter_complex",
-                                "[1:a]loudnorm=I=-16:TP=-1:LRA=5[tts_norm];[0:a][tts_norm]concat=n=2:v=0:a=1[out]",
-                                "-map",
-                                "[out]",
-                                "-ac",
-                                "1",
-                                "-ar",
-                                "24000",
-                                "-b:a",
-                                "128k",
-                                output_path,
-                            ]
-                        else:
-                            list_path = os.path.join(tmpdir, "list.txt")
-                            with open(list_path, "w") as list_file:
-                                list_file.write(f"file '{chime_path}'\n")
-                                list_file.write(f"file '{tts_path}'\n")
-                            cmd = [
-                                "ffmpeg",
-                                "-y",
-                                "-f",
-                                "concat",
-                                "-safe",
-                                "0",
-                                "-i",
-                                list_path,
-                                "-ac",
-                                "1",
-                                "-ar",
-                                "24000",
-                                "-b:a",
-                                "128k",
-                                output_path,
-                            ]
-                    else:
+                    if normalize_audio:
                         cmd = [
                             "ffmpeg",
                             "-y",
                             "-i",
-                            tts_path,
+                            chime_path,
+                            "-i",
+                            "pipe:0",
+                            "-filter_complex",
+                            "[1:a]loudnorm=I=-16:TP=-1:LRA=5[tts];[0:a][tts]concat=n=2:v=0:a=1[out]",
+                            "-map",
+                            "[out]",
                             "-ac",
                             "1",
                             "-ar",
                             "24000",
                             "-b:a",
                             "128k",
-                            "-af",
-                            "loudnorm=I=-16:TP=-1:LRA=5",
-                            output_path,
+                            "-f",
+                            "mp3",
+                            "pipe:1",
                         ]
+                    else:
+                        cmd = [
+                            "ffmpeg",
+                            "-y",
+                            "-i",
+                            chime_path,
+                            "-i",
+                            "pipe:0",
+                            "-filter_complex",
+                            "[0:a][1:a]concat=n=2:v=0:a=1[out]",
+                            "-map",
+                            "[out]",
+                            "-ac",
+                            "1",
+                            "-ar",
+                            "24000",
+                            "-b:a",
+                            "128k",
+                            "-f",
+                            "mp3",
+                            "pipe:1",
+                        ]
+                else:
+                    cmd = [
+                        "ffmpeg",
+                        "-y",
+                        "-i",
+                        "pipe:0",
+                        "-ac",
+                        "1",
+                        "-ar",
+                        "24000",
+                        "-b:a",
+                        "128k",
+                        "-af",
+                        "loudnorm=I=-16:TP=-1:LRA=5",
+                        "-f",
+                        "mp3",
+                        "pipe:1",
+                    ]
 
-                    await run_ffmpeg(cmd)
-
-                    with open(output_path, "rb") as out_f:
-                        audio_content = out_f.read()
+                audio_content = await run_ffmpeg(cmd, audio_content)
 
             overall_duration = (time.monotonic() - overall_start) * 1000
             _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)
