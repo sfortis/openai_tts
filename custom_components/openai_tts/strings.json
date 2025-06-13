@@ -2,33 +2,81 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add text-to-speech engine",
-        "description": "See documentation for further info.",
+        "title": "Add Text-to-Speech Engine",
+        "description": "Choose your TTS engine and provide the necessary configuration. See documentation for further info.",
         "data": {
-          "api_key": "Enter OpenAI API key",
-          "speed": "Speed (0.25 to 4.0, where 1.0 is default)",
+          "tts_engine": "TTS Engine",
+          "api_key": "OpenAI API Key",
+          "url": "OpenAI-compatible API URL",
+          "kokoro_url": "Kokoro FastAPI URL",
           "model": "Model",
           "voice": "Voice",
-          "url": "Enter an OpenAI-compatible endpoint (optionally include a port number)."
+          "speed": "Speed (0.25 to 4.0, where 1.0 is default)"
+        },
+        "data_description": {
+          "api_key": "Required for official OpenAI engine. Leave blank if using Kokoro FastAPI or if not required by your OpenAI-compatible endpoint.",
+          "url": "The API endpoint for OpenAI or your OpenAI-compatible proxy. Leave blank if using Kokoro FastAPI. Defaults to official OpenAI endpoint if not specified for OpenAI engine.",
+          "kokoro_url": "The full URL for your Kokoro FastAPI TTS endpoint (e.g., http://localhost:8002/tts). Required if Kokoro FastAPI engine is selected."
         }
       }
     },
     "error": {
-      "wrong_api_key": "Invalid API key. Please enter a valid API key."
+      "wrong_api_key": "Invalid API key. Please enter a valid API key.",
+      "cannot_connect": "Failed to connect to the specified URL.",
+      "unknown": "An unexpected error occurred.",
+      "model_required": "Model selection is required.",
+      "voice_required": "Voice selection is required.",
+      "url_required_openai": "API URL is required for the OpenAI engine.",
+      "kokoro_url_required": "Kokoro FastAPI URL is required for the Kokoro FastAPI engine.",
+      "invalid_url": "Invalid URL format."
+    },
+    "abort": {
+      "already_configured": "This TTS engine configuration is already registered."
     }
   },
   "options": {
     "step": {
       "init": {
-        "title": "Configure TTS options",
+        "title": "Configure TTS Options",
+        "description": "Adjust common TTS settings. To change engine type or main URLs, please re-add the integration.",
         "data": {
-          "chime": "Enable chime sound prior speech (useful for announcements)",
-          "chime_sound": "Chime sound",
-          "speed": "Speed (0.25 to 4.0)",
+          "model": "Model (Note: Engine type cannot be changed here)",
           "voice": "Voice",
-          "instructions": "Instructions",
-          "normalize_audio": "Enable loudness for generated audio (uses more CPU)"
+          "speed": "Speed (0.25 to 4.0)",
+          "instructions": "Instructions (if supported by model)",
+          "chime": "Enable chime sound prior to speech (useful for announcements)",
+          "chime_sound": "Chime sound",
+          "normalize_audio": "Enable loudness normalization for generated audio (uses more CPU)"
         }
+      }
+    }
+  },
+  "selector": {
+    "tts_engine": {
+      "options": {
+        "openai": "OpenAI (Official or compatible proxy)",
+        "kokoro_fastapi": "Kokoro FastAPI"
+      }
+    },
+    "model": {
+      "options": {
+        "tts-1": "OpenAI TTS-1",
+        "tts-1-hd": "OpenAI TTS-1-HD (High Definition)",
+        "gpt-4o-mini-tts": "GPT-4o-mini-TTS (Custom/Experimental)"
+      }
+    },
+    "voice": {
+      "options": {
+        "alloy": "Alloy",
+        "ash": "Ash",
+        "ballad": "Ballad (Experimental/Custom)",
+        "coral": "Coral (Experimental/Custom)",
+        "echo": "Echo",
+        "fable": "Fable",
+        "onyx": "Onyx",
+        "nova": "Nova",
+        "sage": "Sage (Experimental/Custom)",
+        "shimmer": "Shimmer"
       }
     }
   }

@@ -3,19 +3,12 @@ TTS Engine for OpenAI TTS.
 """
 import json
 import logging
-import time
-from urllib.request import Request, urlopen
-from urllib.error import HTTPError, URLError
+import aiohttp
 from asyncio import CancelledError
 
 from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
-
-class AudioResponse:
-    """A simple response wrapper with a 'content' attribute to hold audio bytes."""
-    def __init__(self, content: bytes):
-        self.content = content
 
 class OpenAITTSEngine:
     def __init__(self, api_key: str, voice: str, model: str, speed: float, url: str):
@@ -24,11 +17,10 @@ class OpenAITTSEngine:
         self._model = model
         self._speed = speed
         self._url = url
+        self._session = aiohttp.ClientSession()
 
-    def get_tts(self, text: str, speed: float = None, instructions: str = None, voice: str = None) -> AudioResponse:
-        """Synchronous TTS request using urllib.request.
-        If the API call fails, waits for 1 second and retries once.
-        """
+    async def get_tts(self, text: str, speed: float = None, instructions: str = None, voice: str = None):
+        """Asynchronous TTS request that streams audio chunks."""
         if speed is None:
             speed = self._speed
         if voice is None:
@@ -42,51 +34,41 @@ class OpenAITTSEngine:
             "model": self._model,
             "input": text,
             "voice": voice,
-            "response_format": "mp3",
+            "response_format": "mp3",  # Assuming mp3 is still desired
             "speed": speed
         }
-        if instructions is not None and self._model == "gpt-4o-mini-tts":
+        if instructions is not None and self._model == "gpt-4o-mini-tts": # TODO: check if this model is correct
             data["instructions"] = instructions
 
-        max_retries = 1
-        attempt = 0
-        while True:
-            try:
-                req = Request(
-                    self._url,
-                    data=json.dumps(data).encode("utf-8"),
-                    headers=headers,
-                    method="POST"
-                )
-                # Set a timeout of 30 seconds for the entire request.
-                with urlopen(req, timeout=30) as response:
-                    content = response.read()
-                return AudioResponse(content)
-            except CancelledError as ce:
-                _LOGGER.exception("TTS request cancelled")
-                raise  # Propagate cancellation.
-            except (HTTPError, URLError) as net_err:
-                _LOGGER.exception("Network error in synchronous get_tts on attempt %d", attempt + 1)
-                if attempt < max_retries:
-                    attempt += 1
-                    time.sleep(1)  # Wait for 1 second before retrying.
-                    _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
-                    continue
-                else:
-                    raise HomeAssistantError("Network error occurred while fetching TTS audio") from net_err
-            except Exception as exc:
-                _LOGGER.exception("Unknown error in synchronous get_tts on attempt %d", attempt + 1)
-                if attempt < max_retries:
-                    attempt += 1
-                    time.sleep(1)
-                    _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
-                    continue
-                else:
-                    raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
+        try:
+            async with self._session.post(
+                self._url,
+                json=data,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=30) # Overall timeout for the request
+            ) as response:
+                response.raise_for_status()  # Raise an exception for bad status codes
+                async for chunk in response.content.iter_any():
+                    if chunk:
+                        yield chunk
+        except CancelledError:
+            _LOGGER.debug("TTS request cancelled")
+            raise
+        except aiohttp.ClientResponseError as net_err:
+            # More specific error for HTTP issues if needed, e.g. response.status
+            _LOGGER.error("Network error in get_tts: %s, status: %s", net_err.message, net_err.status)
+            raise HomeAssistantError(f"Network error occurred while fetching TTS audio: {net_err.message}") from net_err
+        except aiohttp.ClientError as net_err:
+            _LOGGER.error("Network error in get_tts: %s", net_err)
+            raise HomeAssistantError(f"Network error occurred while fetching TTS audio: {net_err}") from net_err
+        except Exception as exc:
+            _LOGGER.exception("Unknown error in get_tts")
+            raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
 
-    def close(self):
-        """Nothing to close in the synchronous version."""
-        pass
+    async def close(self):
+        """Close the aiohttp session."""
+        if self._session and not self._session.closed:
+            await self._session.close()
 
     @staticmethod
     def get_supported_langs() -> list:

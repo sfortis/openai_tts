@@ -9,6 +9,7 @@ import subprocess
 import tempfile
 import time
 from asyncio import CancelledError
+from functools import partial # Added for subprocess.run
 
 from homeassistant.components.tts import TextToSpeechEntity
 from homeassistant.config_entries import ConfigEntry
@@ -27,6 +28,11 @@ from .const import (
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
+    # New constants
+    CONF_TTS_ENGINE,
+    OPENAI_ENGINE, # DEFAULT_TTS_ENGINE is OPENAI_ENGINE
+    KOKORO_FASTAPI_ENGINE,
+    CONF_KOKORO_URL,
 )
 from .openaitts_engine import OpenAITTSEngine
 from homeassistant.exceptions import MaxLengthExceeded
@@ -38,13 +44,29 @@ async def async_setup_entry(
     config_entry: ConfigEntry,
     async_add_entities: AddEntitiesCallback,
 ) -> None:
-    api_key = config_entry.data.get(CONF_API_KEY)
+    engine_type = config_entry.data.get(CONF_TTS_ENGINE, OPENAI_ENGINE)
+    api_key = config_entry.data.get(CONF_API_KEY) # Will be None if not provided
+
+    if engine_type == KOKORO_FASTAPI_ENGINE:
+        api_url = config_entry.data.get(CONF_KOKORO_URL)
+        # API key might not be used by Kokoro, or could be a different type of auth
+        # For now, we pass the OpenAI API key field, which might be None
+    else: # OpenAI or compatible
+        api_url = config_entry.data.get(CONF_URL)
+
+    if not api_url:
+        _LOGGER.error(
+            "TTS API URL is not configured for engine type '%s'. Cannot setup OpenAI TTS.",
+            engine_type
+        )
+        return
+
     engine = OpenAITTSEngine(
-        api_key,
-        config_entry.data[CONF_VOICE],
-        config_entry.data[CONF_MODEL],
-        config_entry.data.get(CONF_SPEED, 1.0),
-        config_entry.data[CONF_URL],
+        api_key=api_key, # Pass it, engine's __init__ should handle if it's None and not needed
+        voice=config_entry.data[CONF_VOICE],
+        model=config_entry.data[CONF_MODEL],
+        speed=config_entry.data.get(CONF_SPEED, 1.0),
+        url=api_url, # This is the resolved URL for the selected engine
     )
     async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
 
@@ -76,17 +98,34 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
     @property
     def device_info(self) -> dict:
+        engine_type = self._config.data.get(CONF_TTS_ENGINE, OPENAI_ENGINE)
+        manufacturer = "OpenAI"
+        if engine_type == KOKORO_FASTAPI_ENGINE:
+            manufacturer = "Kokoro FastAPI"
+
         return {
             "identifiers": {(DOMAIN, self._attr_unique_id)},
-            "model": self._config.data.get(CONF_MODEL),
-            "manufacturer": "OpenAI",
+            "model": self._config.data.get(CONF_MODEL), # Model display can be kept as is
+            "manufacturer": manufacturer,
+            "name": self.name, # Add entity name to device name for clarity
+            "sw_version": "1.0", # Example, can be dynamic if integration has versions
         }
 
     @property
     def name(self) -> str:
-        return self._config.data.get(CONF_MODEL, "").upper()
+        # The title of the config entry is usually more descriptive and set in config_flow
+        # This name property is for the entity itself.
+        # Example: "OpenAI TTS tts-1" or "Kokoro TTS tts-1-hd"
+        engine_type_display = "OpenAI"
+        if self._config.data.get(CONF_TTS_ENGINE) == KOKORO_FASTAPI_ENGINE:
+            engine_type_display = "Kokoro FastAPI"
 
-    def get_tts_audio(
+        model_name = self._config.data.get(CONF_MODEL, "Unknown Model")
+        # return f"{engine_type_display} TTS {model_name.upper()}" # This might be too long
+        return self._config.title or f"{engine_type_display} {model_name}"
+
+
+    async def get_tts_audio(
         self, message: str, language: str, options: dict | None = None
     ) -> tuple[str, bytes] | tuple[None, None]:
         overall_start = time.monotonic()
@@ -109,10 +148,18 @@ class OpenAITTSEntity(TextToSpeechEntity):
 
             _LOGGER.debug("Creating TTS API request")
             api_start = time.monotonic()
-            speech = self._engine.get_tts(message, speed=current_speed, voice=effective_voice, instructions=instructions)
+
+            audio_chunks = []
+            async for chunk in self._engine.get_tts(message, speed=current_speed, voice=effective_voice, instructions=instructions):
+                audio_chunks.append(chunk)
+            audio_content = b"".join(audio_chunks)
+
+            if not audio_content:
+                _LOGGER.error("TTS API returned no audio content.")
+                return None, None
+
             api_duration = (time.monotonic() - api_start) * 1000
-            _LOGGER.debug("TTS API call completed in %.2f ms", api_duration)
-            audio_content = speech.content
+            _LOGGER.debug("TTS API call and streaming completed in %.2f ms", api_duration)
 
             # Retrieve options.
             chime_enabled = options.get(CONF_CHIME_ENABLE,self._config.options.get(CONF_CHIME_ENABLE, self._config.data.get(CONF_CHIME_ENABLE, False)))
@@ -159,7 +206,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
                         merged_output_path,
                     ]
                     _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await self.hass.async_add_executor_job(partial(subprocess.run, cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                 else:
                     _LOGGER.debug("Chime enabled without normalization; merging using concat method.")
                     # Create a file list for concatenation.
@@ -182,7 +229,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
                         merged_output_path,
                     ]
                     _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await self.hass.async_add_executor_job(partial(subprocess.run, cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                     try:
                         os.remove(list_path)
                     except Exception:
@@ -222,7 +269,7 @@ class OpenAITTSEntity(TextToSpeechEntity):
                         norm_output_path,
                     ]
                     _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    await self.hass.async_add_executor_job(partial(subprocess.run, cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE))
                     with open(norm_output_path, "rb") as norm_file:
                         normalized_audio = norm_file.read()
                     overall_duration = (time.monotonic() - overall_start) * 1000
@@ -251,14 +298,18 @@ class OpenAITTSEntity(TextToSpeechEntity):
     async def async_get_tts_audio(
         self, message: str, language: str, options: dict | None = None,
     ) -> tuple[str, bytes] | tuple[None, None]:
-        from functools import partial
-        import asyncio
         try:
-            return await asyncio.shield(
-                self.hass.async_add_executor_job(
-                    partial(self.get_tts_audio, message, language, options=options)
-                )
-            )
-        except asyncio.CancelledError:
-            _LOGGER.exception("async_get_tts_audio cancelled")
+            # Directly await the now asynchronous get_tts_audio method
+            return await self.get_tts_audio(message, language, options=options)
+        except CancelledError: # Changed from asyncio.CancelledError to just CancelledError
+            _LOGGER.debug("async_get_tts_audio cancelled") # Changed from .exception to .debug
             raise
+        except Exception: # Catch any other exception from get_tts_audio
+            _LOGGER.exception("Error in async_get_tts_audio")
+            return None, None
+
+    async def async_will_remove_from_hass(self) -> None:
+        """Handle entity removal."""
+        _LOGGER.debug("Closing OpenAI TTS engine session.")
+        if self._engine:
+            await self._engine.close()
