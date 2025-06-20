@@ -12,6 +12,11 @@ The Groq TTS component for Home Assistant makes it possible to use the Groq API 
 - **Chime option** – Useful for announcements on speakers. *(See Devices → Groq TTS → CONFIGURE button)*
 - **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/groq_tts/chime` folder (MP3).
 - **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → Groq TTS → CONFIGURE button)*
+- **Dynamic voice discovery** – Available models and voices are fetched from the Groq API during setup.
+- **Per-call options** – Voice and normalization can be changed when calling `tts.speak`.
+- **In-memory caching** – Frequently used phrases are cached to reduce API calls.
+
+The integration relies on `ffmpeg` for merging chime sounds and for optional loudness normalization. Ensure `ffmpeg` is installed on the system running Home Assistant.
 
 ### *Caution! You need a free Groq API key* ###
 visit: (https://console.groq.com/)

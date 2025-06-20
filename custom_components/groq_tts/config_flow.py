@@ -6,6 +6,7 @@ from typing import Any
 import os
 import voluptuous as vol
 import logging
+import aiohttp
 from urllib.parse import urlparse
 import uuid
 
@@ -31,6 +32,39 @@ _LOGGER = logging.getLogger(__name__)
 
 def generate_entry_id() -> str:
     return str(uuid.uuid4())
+
+async def fetch_available(endpoint: str, api_key: str | None = None) -> list[str]:
+    """Fetch list of items from Groq API endpoint returning JSON data."""
+    headers = {}
+    if api_key:
+        headers["Authorization"] = f"Bearer {api_key}"
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.get(endpoint, headers=headers, timeout=10) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    items = data.get("data") or data
+                    if isinstance(items, list):
+                        names = []
+                        for item in items:
+                            if isinstance(item, dict):
+                                name = item.get("id") or item.get("name")
+                                if name:
+                                    names.append(name)
+                            elif isinstance(item, str):
+                                names.append(item)
+                        return sorted(names)
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.debug("Error fetching %s: %s", endpoint, err)
+    return []
+
+async def get_dynamic_options(api_key: str | None) -> tuple[list[str], list[str]]:
+    """Return lists of models and voices, falling back to constants on error."""
+    models_endpoint = "https://api.groq.com/openai/v1/models"
+    voices_endpoint = "https://api.groq.com/openai/v1/voices"
+    models = await fetch_available(models_endpoint, api_key) or MODELS
+    voices = await fetch_available(voices_endpoint, api_key) or VOICES
+    return models, voices
 
 async def validate_user_input(user_input: dict):
     if user_input.get(CONF_MODEL) is None:
@@ -84,6 +118,17 @@ class GroqTTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None):
         errors = {}
+        models, voices = await get_dynamic_options(user_input.get(CONF_API_KEY) if user_input else None)
+        schema = vol.Schema({
+            vol.Optional(CONF_API_KEY): str,
+            vol.Optional(CONF_URL, default="https://api.groq.com/openai/v1/audio/speech"): str,
+            vol.Required(CONF_MODEL, default="playai-tts"): selector({
+                "select": {"options": models, "mode": "dropdown", "sort": True, "custom_value": True}
+            }),
+            vol.Required(CONF_VOICE, default="Arista-PlayAI"): selector({
+                "select": {"options": voices, "mode": "dropdown", "sort": True, "custom_value": True}
+            }),
+        })
         if user_input is not None:
             try:
                 await validate_user_input(user_input)
@@ -102,9 +147,9 @@ class GroqTTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown_error"
         return self.async_show_form(
             step_id="user",
-            data_schema=self.data_schema,
+            data_schema=schema,
             errors=errors,
-            description_placeholders=user_input
+            description_placeholders=user_input,
         )
 
     @staticmethod
@@ -117,6 +162,9 @@ class GroqTTSOptionsFlow(OptionsFlow):
         if user_input is not None:
             return self.async_create_entry(title="", data=user_input)
         chime_options = await self.hass.async_add_executor_job(get_chime_options)
+        models, voices = await get_dynamic_options(
+            self.config_entry.options.get(CONF_API_KEY, self.config_entry.data.get(CONF_API_KEY))
+        )
         options_schema = vol.Schema({
             vol.Optional(
                 CONF_API_KEY,
@@ -131,7 +179,7 @@ class GroqTTSOptionsFlow(OptionsFlow):
                 default=self.config_entry.options.get(CONF_MODEL, self.config_entry.data.get(CONF_MODEL, "playai-tts"))
             ): selector({
                 "select": {
-                    "options": MODELS,
+                    "options": models,
                     "mode": "dropdown",
                     "sort": True,
                     "custom_value": True
@@ -154,7 +202,7 @@ class GroqTTSOptionsFlow(OptionsFlow):
                 default=self.config_entry.options.get(CONF_VOICE, self.config_entry.data.get(CONF_VOICE, "Arista-PlayAI"))
             ): selector({
                 "select": {
-                    "options": VOICES,
+                    "options": voices,
                     "mode": "dropdown",
                     "sort": True,
                     "custom_value": True
