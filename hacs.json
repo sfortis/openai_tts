@@ -1,6 +1,5 @@
 {
     "name": "Groq TTS Speech Service",
     "homeassistant": "2024.5.3",
-    "render_readme": true,
-    "version": "0.1"
+    "render_readme": true
 }
