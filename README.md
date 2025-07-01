@@ -49,22 +49,27 @@ data:
     chime: true                          # Enable or disable the chime
 ```
 
-## HACS installation (preferred!)
+## HACS installation (preferred)
 
-1. Go to the sidebar HACS menu
-2. Click on the 3-dot overflow menu in the upper right and select the "Custom Repositories" item.
-3. Copy/paste [https://github.com/barneyonline/groq_tts](https://github.com/barneyonline/groq_tts) into the "Repository" textbox and select "Integration" for the category entry.
-4. Click on "Add" to add the custom repository.
-5. You can then click on the "Groq TTS Speech Services" repository entry and download it. Restart Home Assistant to apply the component.
-6. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
+1. **Install HACS** if you haven't already
+2. Search for **Groq TTS**
+3. Select the Integration and click **Download**
+4. **Restart Home Assistant**
+5. Go to Settings -> Devices & Services -> **+ Add Integration** and search for Groq TTS
 
 ## Manual installation
 
-1. Ensure you have a `custom_components` folder within your Home Assistant configuration directory.
-2. Inside the `custom_components` folder, create a new folder named `groq_tts`.
-3. Place the repo files inside `groq_tts` folder.
-4. Restart Home Assistant
-5. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
+1. **Download** the contents of this repo
+2. **Copy** the `custom_components/groq_tts` folder to your Home Assistant `custom_components` directory
+```bash
+    <homeassistant_config_dir>/
+    └── custom_components/
+        └── groq_tts/
+            ├── __init__.py
+            └── ... (other files)
+```
+3. **Restart Home Assistant**
+4. Go to Settings -> Devices & Services -> **+ Add Integration** and search for Groq TTS
 
 ## Important: Accept PlayAI TTS Model Terms
 
