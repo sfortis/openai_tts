@@ -2,19 +2,75 @@
   "config": {
     "step": {
       "user": {
-        "title": "Text-to-Speech Engine hinzufügen",
-        "description": "Weitere Informationen finden Sie in der Dokumentation.",
+        "title": "OpenAI TTS hinzufügen",
+        "description": "Richten Sie die OpenAI API-Anmeldedaten für TTS ein.",
         "data": {
-          "api_key": "Geben Sie den OpenAI API-Schlüssel ein",
-          "speed": "Geschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
-          "model": "Modell",
-          "voice": "Stimme",
-          "url": "Geben Sie einen OpenAI-kompatiblen Endpunkt ein (optional können Sie eine Portnummer angeben)."
+          "api_key": "API-Schlüssel",
+          "url": "Endpunkt-URL"
+        },
+        "data_description": {
+          "api_key": "Ihr OpenAI API-Schlüssel",
+          "url": "Basis-URL für die OpenAI API (Standard: https://api.openai.com/v1/audio/speech)"
         }
       }
     },
     "error": {
-      "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein."
+      "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein.",
+      "duplicate_api_key": "Eine Integration mit diesem API-Schlüssel existiert bereits: {existing_entry}",
+      "no_subentries": "Keine TTS-Agenten verfügbar. Bitte fügen Sie einen TTS-Agenten hinzu."
+    }
+  },
+  "subentry": {
+    "step": {
+      "user": {
+        "title": "TTS-Agent hinzufügen",
+        "description": "Erstellen Sie einen neuen TTS-Agenten mit eigener Konfiguration.",
+        "data": {
+          "profile_name": "Profilname",
+          "model": "Modell",
+          "voice": "Stimme",
+          "instructions": "Anweisungen",
+          "speed": "Geschwindigkeit",
+          "chime": "Signalton vor der Sprache",
+          "chime_sound": "Signalton-Sound",
+          "normalize_audio": "Audio normalisieren"
+        },
+        "data_description": {
+          "profile_name": "Eindeutiger Name für dieses TTS-Profil",
+          "model": "Das zu verwendende OpenAI TTS-Modell",
+          "voice": "Die für die Sprachsynthese zu verwendende Stimme",
+          "instructions": "Optionale Anweisungen zur Anpassung des Sprachstils (siehe https://www.openai.fm/)",
+          "speed": "Sprechgeschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
+          "chime": "Einen Signalton vor der Sprache abspielen",
+          "chime_sound": "Audiodatei für den Signalton",
+          "normalize_audio": "Lautstärke des generierten Audios erhöhen"
+        }
+      },
+      "reconfigure": {
+        "title": "TTS-Agent neu konfigurieren",
+        "description": "Einstellungen für diesen TTS-Agenten aktualisieren.",
+        "data": {
+          "model": "Modell",
+          "voice": "Stimme",
+          "instructions": "Anweisungen",
+          "speed": "Geschwindigkeit",
+          "chime": "Signalton vor der Sprache",
+          "chime_sound": "Signalton-Sound",
+          "normalize_audio": "Audio normalisieren"
+        },
+        "data_description": {
+          "model": "Das zu verwendende OpenAI TTS-Modell",
+          "voice": "Die für die Sprachsynthese zu verwendende Stimme",
+          "instructions": "Optionale Anweisungen zur Anpassung des Sprachstils (siehe https://www.openai.fm/)",
+          "speed": "Sprechgeschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
+          "chime": "Einen Signalton vor der Sprache abspielen",
+          "chime_sound": "Audiodatei für den Signalton",
+          "normalize_audio": "Lautstärke des generierten Audios erhöhen"
+        }
+      }
+    },
+    "error": {
+      "subentry_not_found": "Untereintrag nicht gefunden"
     }
   },
   "options": {

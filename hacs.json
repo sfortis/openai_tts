@@ -3,7 +3,7 @@
     "domains": [
         "tts"
     ],
-    "homeassistant": "2024.12.0",
+    "homeassistant": "2025.7.0",
     "render_readme": true,
     "iot_class": [
         "Cloud Polling"

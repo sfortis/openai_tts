@@ -2,22 +2,26 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add text-to-speech engine",
-        "description": "See documentation for further info.",
+        "title": "Add OpenAI TTS Service",
+        "description": "Set up OpenAI TTS integration to create TTS agents.",
         "data": {
-          "api_key": "Enter OpenAI API key",
-          "speed": "Speed (0.25 to 4.0, where 1.0 is default)",
-          "model": "Model",
-          "voice": "Voice",
-          "url": "Enter an OpenAI-compatible endpoint (optionally include a port number)."
+          "api_key": "API Key",
+          "url": "API Endpoint (optional)"
         }
       }
     },
     "error": {
-      "wrong_api_key": "Invalid API key. Please enter a valid API key."
+      "wrong_api_key": "Invalid API key. Please enter a valid API key.",
+      "duplicate_api_key": "An entry with this API key already exists: {existing_entry}. Each integration entry must have a unique API key."
+    },
+    "abort": {
+      "already_configured": "Device is already configured"
     }
   },
   "options": {
+    "abort": {
+      "no_options_available": "This integration entry has no configurable options. Use the subentries to configure individual TTS agents."
+    },
     "step": {
       "init": {
         "title": "Configure TTS options",
@@ -30,8 +34,55 @@
           "instructions": "Instructions (check https://www.openai.fm/ )",
           "normalize_audio": "Enable loudness for generated audio (uses more CPU)",
           "volume_restore": "Restore speaker volumes after TTS playback",
-          "pause_playback": "Pause media during TTS (Sonos only)"
+          "pause_playback": "Pause media during TTS (Sonos only)",
+          "enable_instructions": "Enable custom instructions"
         }
+      }
+    }
+  },
+  "config_subentries": {
+    "profile": {
+      "entry_type": "TTS agent",
+      "initiate_flow": {
+        "user": "Add TTS agent",
+        "reconfigure": "Reconfigure TTS agent"
+      },
+      "step": {
+        "user": {
+          "title": "Add TTS Agent",
+          "description": "Create a new TTS agent with custom voice settings",
+          "data": {
+            "profile_name": "Profile name",
+            "model": "Model",
+            "voice": "Voice",
+            "speed": "Speed (0.25 to 4.0)",
+            "chime": "Enable chime sound",
+            "chime_sound": "Chime sound",
+            "normalize_audio": "Normalize audio volume",
+            "instructions": "Custom instructions (optional, for supported models only)"
+          }
+        },
+        "reconfigure": {
+          "title": "Update TTS Agent",
+          "description": "Modify settings for this TTS agent",
+          "data": {
+            "model": "Model",
+            "voice": "Voice",
+            "speed": "Speed (0.25 to 4.0)",
+            "chime": "Enable chime sound",
+            "chime_sound": "Chime sound",
+            "normalize_audio": "Normalize audio volume",
+            "instructions": "Custom instructions (optional, for supported models only)"
+          }
+        }
+      },
+      "error": {
+        "already_exists": "A profile with this name already exists"
+      },
+      "abort": {
+        "already_configured": "Profile already configured",
+        "reconfigure_successful": "TTS agent reconfigured successfully",
+        "subentry_not_found": "TTS agent not found"
       }
     }
   }

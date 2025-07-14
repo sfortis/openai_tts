@@ -5,6 +5,7 @@ say:
     entity:
       domain: media_player
   fields:
+    # Core Settings
     tts_entity:
       name: TTS Entity
       description: The TTS entity to use for text-to-speech.
@@ -13,6 +14,7 @@ say:
       selector:
         entity:
           domain: tts
+          integration: openai_tts
     message:
       name: Message
       description: The text to be spoken.
@@ -20,6 +22,54 @@ say:
       example: "Hello, this is a test message."
       selector:
         text:
+    
+    # Voice Settings
+    voice:
+      name: Voice
+      description: Voice to use for speech generation (overrides entity default).
+      required: false
+      selector:
+        select:
+          options:
+            - label: Alloy (Neutral)
+              value: alloy
+            - label: Ash (Calm)
+              value: ash
+            - label: Ballad (Warm)
+              value: ballad
+            - label: Coral (Friendly)
+              value: coral
+            - label: Echo (Smooth)
+              value: echo
+            - label: Fable (Expressive)
+              value: fable
+            - label: Onyx (Authoritative)
+              value: onyx
+            - label: Nova (Energetic)
+              value: nova
+            - label: Sage (Thoughtful)
+              value: sage
+            - label: Shimmer (Gentle)
+              value: shimmer
+    speed:
+      name: Speed
+      description: Speed of the speech (0.25-4.0). 1.0 is normal speed.
+      required: false
+      example: 1.0
+      selector:
+        number:
+          min: 0.25
+          max: 4.0
+          step: 0.05
+          mode: slider
+    instructions:
+      name: Instructions
+      description: Custom instructions for the TTS engine (e.g., "speak like a pirate").
+      required: false
+      example: "Speak with enthusiasm"
+      selector:
+        text:
+          multiline: true
     language:
       name: Language
       description: Language code for the speech.
@@ -28,8 +78,10 @@ say:
       example: "en"
       selector:
         text:
+    
+    # Audio Processing
     chime:
-      name: Chime
+      name: Play Chime
       description: Play a chime sound before speaking.
       required: false
       default: false
@@ -49,13 +101,8 @@ say:
       default: false
       selector:
         boolean:
-    instructions:
-      name: Instructions
-      description: Custom instructions for the TTS engine.
-      required: false
-      selector:
-        text:
-          multiline: true
+    
+    # Playback Control
     volume:
       name: Volume
       description: Override speaker volume for this announcement (0.0-1.0).

@@ -2,19 +2,75 @@
   "config": {
     "step": {
       "user": {
-        "title": "Přidat TTS engine",
-        "description": "Více informací naleznete v dokumentaci.",
+        "title": "Přidat OpenAI TTS",
+        "description": "Nastavte přihlašovací údaje OpenAI API pro TTS.",
         "data": {
-          "api_key": "Zadejte OpenAI API klíč",
-          "speed": "Rychlost (0,25 až 4,0, kde 1,0 je výchozí)",
-          "model": "Model",
-          "voice": "Hlas",
-          "url": "Zadejte endpoint kompatibilní s OpenAI (volitelně uveďte číslo portu)."
+          "api_key": "API klíč",
+          "url": "Endpoint URL"
+        },
+        "data_description": {
+          "api_key": "Váš OpenAI API klíč",
+          "url": "Základní URL pro OpenAI API (výchozí: https://api.openai.com/v1/audio/speech)"
         }
       }
     },
     "error": {
-      "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč."
+      "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč.",
+      "duplicate_api_key": "Integrace s tímto API klíčem již existuje: {existing_entry}",
+      "no_subentries": "Nejsou k dispozici žádné TTS agenty. Přidejte agenta TTS."
+    }
+  },
+  "subentry": {
+    "step": {
+      "user": {
+        "title": "Přidat TTS agenta",
+        "description": "Vytvořte nového TTS agenta s vlastní konfigurací.",
+        "data": {
+          "profile_name": "Název profilu",
+          "model": "Model",
+          "voice": "Hlas",
+          "instructions": "Pokyny",
+          "speed": "Rychlost",
+          "chime": "Zvukový signál před řečí",
+          "chime_sound": "Zvuk signálu",
+          "normalize_audio": "Normalizovat audio"
+        },
+        "data_description": {
+          "profile_name": "Jedinečný název pro tento TTS profil",
+          "model": "Model OpenAI TTS k použití",
+          "voice": "Hlas k použití pro syntézu řeči",
+          "instructions": "Volitelné pokyny pro přizpůsobení stylu řeči (viz https://www.openai.fm/)",
+          "speed": "Rychlost řeči (0,25 až 4,0, kde 1,0 je výchozí)",
+          "chime": "Přehrát zvukový signál před řečí",
+          "chime_sound": "Zvukový soubor k použití pro signál",
+          "normalize_audio": "Zvýšit hlasitost generovaného audia"
+        }
+      },
+      "reconfigure": {
+        "title": "Překonfigurovat TTS agenta",
+        "description": "Aktualizovat nastavení pro tohoto TTS agenta.",
+        "data": {
+          "model": "Model",
+          "voice": "Hlas",
+          "instructions": "Pokyny",
+          "speed": "Rychlost",
+          "chime": "Zvukový signál před řečí",
+          "chime_sound": "Zvuk signálu",
+          "normalize_audio": "Normalizovat audio"
+        },
+        "data_description": {
+          "model": "Model OpenAI TTS k použití",
+          "voice": "Hlas k použití pro syntézu řeči",
+          "instructions": "Volitelné pokyny pro přizpůsobení stylu řeči (viz https://www.openai.fm/)",
+          "speed": "Rychlost řeči (0,25 až 4,0, kde 1,0 je výchozí)",
+          "chime": "Přehrát zvukový signál před řečí",
+          "chime_sound": "Zvukový soubor k použití pro signál",
+          "normalize_audio": "Zvýšit hlasitost generovaného audia"
+        }
+      }
+    },
+    "error": {
+      "subentry_not_found": "Podpoložka nenalezena"
     }
   },
   "options": {

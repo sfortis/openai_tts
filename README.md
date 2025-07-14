@@ -13,26 +13,21 @@ The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI 
 - **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/openai_tts/chime` folder (MP3).
 - **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
 - **Support for new gpt-4o-mini-tts model** – A fast and powerful language model.
-- **Text-to-Speech Instructions option** – Instruct the text-to-speech model to speak in a specific way (only works with newest gpt-4o-mini-tts model). [OpenAI new generation audio models](https://openai.com/index/introducing-our-next-generation-audio-models/)
-
-### ⭐ New Features in v0.3.4 Beta
-
+- **Text-to-Speech Instructions option** – Instruct the text-to-speech model to speak in a specific way (only works with newest gpt-4o-mini-tts model). [OpenAI new generation audio models](https://openai.com/
+index/introducing-our-next-generation-audio-models/)
 - **Volume Restoration** – Automatically restores speaker volumes to their original levels after TTS announcements.
 - **Media Pause/Resume** – Pauses currently playing media during announcements and resumes afterward (works with Sonos speakers).
 - **Sonos Integration** – Automatically groups and ungroups Sonos speakers for synchronized announcements.
-- **New `openai_tts.say` Service** – New service parameters including volume control and pause/resume options.
+- **New `openai_tts.say` Service** – New service parameters including voice, instructions, etc.
 - **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
-- **Media Player Targeting** – Target speakers using areas, devices, or entity IDs for more flexible automations.
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
-
+### ⭐ New Features in 3.4b4
+- **Sub-entries support** – Support for sub-entries, HA 2025.7 required.
+- **Volume restoration** – Improved logic and persist entity attributes after restarting home assistant.
 
 ### *Caution! You need an OpenAI API key and some balance available in your OpenAI account!* ###
 visit: (https://platform.openai.com/docs/pricing)
-
-## YouTube sample video (its not a tutorial!)
-
-[![OpenAI TTS Demo](https://img.youtube.com/vi/oeeypI_X0qs/0.jpg)](https://www.youtube.com/watch?v=oeeypI_X0qs)
 
 ## ⭐New TTS say action
 
@@ -51,21 +46,6 @@ data:
   pause_playback: true  # Pause any music playing during the announcement
   chime: true  # Add a chime sound before the announcement
   normalize_audio: true  # Normalize audio (for small speakers)
-```
-
-## Sample Home Assistant service
-
-```
-service: tts.speak
-target:
-  entity_id: tts.openai_nova_engine
-data:
-  cache: true
-  media_player_entity_id: media_player.bedroom_speaker
-  message: My speech has improved now!
-  options:
-    chime: true                          # Enable or disable the chime
-    instructions: "Speak like a pirate"  # Instructions for text-to-speach model on how to speak 
 ```
 
 ## HACS installation ( *preferred!* ) 

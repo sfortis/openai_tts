@@ -2,19 +2,75 @@
   "config": {
     "step": {
       "user": {
-        "title": "Προσθήκη μετατροπής κειμένου σε ομιλία",
-        "description": "Δείτε την τεκμηρίωση για περαιτέρω πληροφορίες.",
+        "title": "Προσθήκη OpenAI TTS",
+        "description": "Ρύθμιση των διαπιστευτηρίων OpenAI API για TTS.",
         "data": {
-          "api_key": "Εισάγετε το API key του OpenAI",
-          "speed": "Ταχύτητα (0.25 έως 4.0, όπου το 1.0 είναι προεπιλογή)",
-          "model": "Μοντέλο",
-          "voice": "Φωνή",
-          "url": "Εισάγετε ένα endpoint συμβατό με OpenAI (προαιρετικά συμπεριλάβετε την πόρτα)."
+          "api_key": "API κλειδί",
+          "url": "URL endpoint"
+        },
+        "data_description": {
+          "api_key": "Το API κλειδί σας για το OpenAI",
+          "url": "Βασικό URL για το OpenAI API (προεπιλογή: https://api.openai.com/v1/audio/speech)"
         }
       }
     },
     "error": {
-      "wrong_api_key": "Μη έγκυρο API key. Εισάγετε ένα έγκυρο API key."
+      "wrong_api_key": "Μη έγκυρο API key. Εισάγετε ένα έγκυρο API key.",
+      "duplicate_api_key": "Υπάρχει ήδη ενσωμάτωση με αυτό το API κλειδί: {existing_entry}",
+      "no_subentries": "Δεν υπάρχουν διαθέσιμοι TTS agents. Προσθέστε έναν TTS agent."
+    }
+  },
+  "subentry": {
+    "step": {
+      "user": {
+        "title": "Προσθήκη TTS agent",
+        "description": "Δημιουργία νέου TTS agent με δική του ρύθμιση.",
+        "data": {
+          "profile_name": "Όνομα προφίλ",
+          "model": "Μοντέλο",
+          "voice": "Φωνή",
+          "instructions": "Οδηγίες",
+          "speed": "Ταχύτητα",
+          "chime": "Ήχος πριν την ομιλία",
+          "chime_sound": "Ήχος ειδοποίησης",
+          "normalize_audio": "Κανονικοποίηση ήχου"
+        },
+        "data_description": {
+          "profile_name": "Μοναδικό όνομα για αυτό το TTS προφίλ",
+          "model": "Το μοντέλο OpenAI TTS που θα χρησιμοποιηθεί",
+          "voice": "Η φωνή που θα χρησιμοποιηθεί για τη σύνθεση ομιλίας",
+          "instructions": "Προαιρετικές οδηγίες για προσαρμογή του στυλ ομιλίας (δείτε https://www.openai.fm/)",
+          "speed": "Ταχύτητα ομιλίας (0.25 έως 4.0, όπου το 1.0 είναι προεπιλογή)",
+          "chime": "Αναπαραγωγή ήχου πριν την ομιλία",
+          "chime_sound": "Αρχείο ήχου για ειδοποίηση",
+          "normalize_audio": "Αύξηση έντασης του παραγόμενου ήχου"
+        }
+      },
+      "reconfigure": {
+        "title": "Επαναρύθμιση TTS agent",
+        "description": "Ενημέρωση ρυθμίσεων για αυτόν τον TTS agent.",
+        "data": {
+          "model": "Μοντέλο",
+          "voice": "Φωνή",
+          "instructions": "Οδηγίες",
+          "speed": "Ταχύτητα",
+          "chime": "Ήχος πριν την ομιλία",
+          "chime_sound": "Ήχος ειδοποίησης",
+          "normalize_audio": "Κανονικοποίηση ήχου"
+        },
+        "data_description": {
+          "model": "Το μοντέλο OpenAI TTS που θα χρησιμοποιηθεί",
+          "voice": "Η φωνή που θα χρησιμοποιηθεί για τη σύνθεση ομιλίας",
+          "instructions": "Προαιρετικές οδηγίες για προσαρμογή του στυλ ομιλίας (δείτε https://www.openai.fm/)",
+          "speed": "Ταχύτητα ομιλίας (0.25 έως 4.0, όπου το 1.0 είναι προεπιλογή)",
+          "chime": "Αναπαραγωγή ήχου πριν την ομιλία",
+          "chime_sound": "Αρχείο ήχου για ειδοποίηση",
+          "normalize_audio": "Αύξηση έντασης του παραγόμενου ήχου"
+        }
+      }
+    },
+    "error": {
+      "subentry_not_found": "Η υποκαταχώρηση δεν βρέθηκε"
     }
   },
   "options": {

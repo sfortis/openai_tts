@@ -23,7 +23,8 @@ _LOGGER = logging.getLogger(__name__)
 
 def get_media_duration(file_path: str) -> float:
     """
-    Get the duration of a media file in seconds using ffprobe.
+    Get the duration of a media file in seconds.
+    First tries to read from metadata, then falls back to ffprobe.
     
     Args:
         file_path: Path to the media file
@@ -32,6 +33,29 @@ def get_media_duration(file_path: str) -> float:
         Duration in seconds as float
     """
     try:
+        # First try to get duration from metadata
+        cmd_metadata = [
+            "ffprobe",
+            "-v", "quiet",
+            "-print_format", "json",
+            "-show_format",
+            file_path
+        ]
+        result = subprocess.run(cmd_metadata, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
+        
+        if result.stdout:
+            import json
+            data = json.loads(result.stdout)
+            # Check for our custom metadata
+            if "format" in data and "tags" in data["format"]:
+                tags = data["format"]["tags"]
+                # Look for our duration metadata
+                for key, value in tags.items():
+                    if "tts_duration_ms" in key:
+                        _LOGGER.debug("Found duration in metadata: %s ms", value)
+                        return float(value) / 1000.0
+        
+        # Fallback to standard duration detection
         cmd = [
             "ffprobe",
             "-v", "error",
@@ -164,16 +188,21 @@ async def process_audio(
     ffmpeg_time = 0
     
     # Create a temporary file for TTS audio
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
-        tts_file.write(audio_content)
-        tts_path = tts_file.name
+    def write_temp_file():
+        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
+            tts_file.write(audio_content)
+            return tts_file.name
+    
+    tts_path = await hass.async_add_executor_job(write_temp_file)
     
     try:
         # Determine final output path
         final_output_path = output_path
         if not final_output_path:
-            with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
-                final_output_path = out_file.name
+            def create_temp_output():
+                with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
+                    return out_file.name
+            final_output_path = await hass.async_add_executor_job(create_temp_output)
         
         # Process based on options
         if chime_enabled and chime_path:
@@ -186,10 +215,12 @@ async def process_audio(
                 )
             else:
                 # Chime only (using concat demuxer)
-                with tempfile.NamedTemporaryFile(mode="w", delete=False) as list_file:
-                    list_file.write(f"file '{chime_path}'\n")
-                    list_file.write(f"file '{tts_path}'\n")
-                    list_path = list_file.name
+                def write_concat_list():
+                    with tempfile.NamedTemporaryFile(mode="w", delete=False) as list_file:
+                        list_file.write(f"file '{chime_path}'\n")
+                        list_file.write(f"file '{tts_path}'\n")
+                        return list_file.name
+                list_path = await hass.async_add_executor_job(write_concat_list)
                 
                 cmd = build_ffmpeg_command(
                     final_output_path,
@@ -209,14 +240,17 @@ async def process_audio(
         
         else:
             # No processing needed, just read the file
-            with open(tts_path, "rb") as f:
-                final_audio = f.read()
+            def read_original():
+                with open(tts_path, "rb") as f:
+                    return f.read()
+            
+            final_audio = await hass.async_add_executor_job(read_original)
             
             # Get duration
-            duration = get_media_duration(tts_path)
+            duration = await hass.async_add_executor_job(get_media_duration, tts_path)
             
             # Clean up and return
-            os.remove(tts_path)
+            await hass.async_add_executor_job(os.remove, tts_path)
             
             total_time = (time.monotonic() - start_time) * 1000
             return "mp3", final_audio, total_time
@@ -228,8 +262,10 @@ async def process_audio(
         # When using asyncio.run, we need to simplify execution to avoid event loop conflicts
         # Just run synchronously since this whole function is being wrapped in asyncio.run()
         try:
-            _LOGGER.debug("Running ffmpeg synchronously to avoid event loop conflicts")
-            subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            _LOGGER.debug("Running ffmpeg in executor")
+            await hass.async_add_executor_job(
+                lambda: subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            )
         except Exception as exc:
             _LOGGER.error("Error executing ffmpeg: %s", exc)
             raise
@@ -237,36 +273,45 @@ async def process_audio(
         ffmpeg_time = (time.monotonic() - ffmpeg_start_time) * 1000
         
         # Read the processed file
-        with open(final_output_path, "rb") as f:
-            final_audio = f.read()
+        def read_file():
+            with open(final_output_path, "rb") as f:
+                return f.read()
         
-        # Get duration from processed file - already in right context because we just checked above
-        duration = get_media_duration(final_output_path)
+        final_audio = await hass.async_add_executor_job(read_file)
+        
+        # Get duration from processed file
+        duration = await hass.async_add_executor_job(get_media_duration, final_output_path)
         
         # Final clean up of temporary files
-        try:
-            os.remove(tts_path)
-            os.remove(final_output_path)
-            
-            # Remove concat list file if it was created
-            if chime_enabled and not normalize_audio and 'list_path' in locals():
-                os.remove(list_path)
-        except Exception as e:
-            _LOGGER.debug("Error cleaning up temporary files: %s", e)
+        def cleanup_files():
+            try:
+                os.remove(tts_path)
+                os.remove(final_output_path)
+                
+                # Remove concat list file if it was created
+                if chime_enabled and not normalize_audio and 'list_path' in locals():
+                    os.remove(list_path)
+            except Exception as e:
+                _LOGGER.debug("Error cleaning up temporary files: %s", e)
+        
+        await hass.async_add_executor_job(cleanup_files)
         
         total_time = (time.monotonic() - start_time) * 1000
         return "mp3", final_audio, total_time
     
     except Exception as e:
         # Clean up in case of error
-        try:
-            os.remove(tts_path)
-            if 'final_output_path' in locals():
-                os.remove(final_output_path)
-            if 'list_path' in locals():
-                os.remove(list_path)
-        except:
-            pass
+        def error_cleanup():
+            try:
+                os.remove(tts_path)
+                if 'final_output_path' in locals():
+                    os.remove(final_output_path)
+                if 'list_path' in locals():
+                    os.remove(list_path)
+            except:
+                pass
+        
+        await hass.async_add_executor_job(error_cleanup)
         
         _LOGGER.error("Error processing audio: %s", e)
         raise HomeAssistantError(f"Error processing audio: {e}") from e
@@ -377,16 +422,22 @@ async def set_media_player_volume(
     # Skip if entity doesn't have a volume level attribute
     current_volume = attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
     if current_volume is None:
-        _LOGGER.debug("Media player %s has no volume attribute", entity_id)
-        return False
+        # For Google speakers, they might not report volume when off
+        # Try to set volume anyway and let the device handle it
+        _LOGGER.debug("Media player %s has no volume attribute (state: %s), attempting to set volume anyway", 
+                      entity_id, state)
+        # Don't return False here - continue with volume setting
     
     # Skip if already at target volume (with small tolerance)
-    if abs(float(current_volume) - volume_level) < 0.01:
+    if current_volume is not None and abs(float(current_volume) - volume_level) < 0.01:
         _LOGGER.debug("Volume already at desired level %.2f for %s", volume_level, entity_id)
         return True
     
     # Set volume
-    _LOGGER.debug("Setting volume for %s from %.2f to %.2f", entity_id, float(current_volume), volume_level)
+    if current_volume is not None:
+        _LOGGER.debug("Setting volume for %s from %.2f to %.2f", entity_id, float(current_volume), volume_level)
+    else:
+        _LOGGER.debug("Setting volume for %s to %.2f (current volume unknown)", entity_id, volume_level)
     
     for attempt in range(1, retries + 1):
         try:
