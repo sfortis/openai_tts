@@ -22,7 +22,8 @@ index/introducing-our-next-generation-audio-models/)
 - **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
-### ⭐ New Features in 3.4b4
+### ⭐ New Features in 3.4b5
+- **Reconfigure** – Allows changing the API key and URL endpoint without recreating the entity.
 - **Sub-entries support** – Support for sub-entries, HA 2025.7 required.
 - **Volume restoration** – Improved logic and persist entity attributes after restarting home assistant.
 
