@@ -101,9 +101,6 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                             step_id="user",
                             data_schema=self.data_schema,
                             errors=errors,
-                            description_placeholders={
-                                "existing_entry": entry.title
-                            },
                         )
                 
                 # Use API key as the unique identifier (hashed for privacy)

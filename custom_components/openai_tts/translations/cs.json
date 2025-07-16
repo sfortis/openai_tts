@@ -2,15 +2,11 @@
   "config": {
     "step": {
       "user": {
-        "title": "Přidat OpenAI TTS",
-        "description": "Nastavte přihlašovací údaje OpenAI API pro TTS.",
+        "title": "Přidat OpenAI TTS službu",
+        "description": "Nastavte OpenAI TTS integraci pro vytvoření TTS agentů.",
         "data": {
           "api_key": "API klíč",
-          "url": "Endpoint URL"
-        },
-        "data_description": {
-          "api_key": "Váš OpenAI API klíč",
-          "url": "Základní URL pro OpenAI API (výchozí: https://api.openai.com/v1/audio/speech)"
+          "url": "API Endpoint (volitelné)"
         }
       },
       "reconfigure": {
@@ -18,7 +14,7 @@
         "description": "Aktualizovat přihlašovací údaje API pro tuto integraci.",
         "data": {
           "api_key": "API klíč",
-          "url": "Endpoint URL"
+          "url": "API Endpoint"
         }
       }
     },
@@ -28,77 +24,75 @@
     },
     "error": {
       "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč.",
-      "duplicate_api_key": "Integrace s tímto API klíčem již existuje: {existing_entry}",
-      "no_subentries": "Nejsou k dispozici žádné TTS agenty. Přidejte agenta TTS."
+      "duplicate_api_key": "Integrace s tímto API klíčem již existuje. Každá integrace musí mít jedinečný API klíč."
     }
   },
-  "subentry": {
-    "step": {
-      "user": {
-        "title": "Přidat TTS agenta",
-        "description": "Vytvořte nového TTS agenta s vlastní konfigurací.",
-        "data": {
-          "profile_name": "Název profilu",
-          "model": "Model",
-          "voice": "Hlas",
-          "instructions": "Pokyny",
-          "speed": "Rychlost",
-          "chime": "Zvukový signál před řečí",
-          "chime_sound": "Zvuk signálu",
-          "normalize_audio": "Normalizovat audio"
+  "config_subentries": {
+    "profile": {
+      "entry_type": "TTS agent",
+      "initiate_flow": {
+        "user": "Přidat TTS agenta",
+        "reconfigure": "Překonfigurovat TTS agenta"
+      },
+      "step": {
+        "user": {
+          "title": "Přidat TTS agenta",
+          "description": "Vytvořte nového TTS agenta s vlastním nastavením hlasu",
+          "data": {
+            "profile_name": "Název profilu",
+            "model": "Model",
+            "voice": "Hlas",
+            "speed": "Rychlost (0,25 až 4,0)",
+            "chime": "Povolit zvukový signál",
+            "chime_sound": "Zvuk signálu",
+            "normalize_audio": "Normalizovat hlasitost audia",
+            "instructions": "Vlastní pokyny (volitelné, pouze pro podporované modely)"
+          }
         },
-        "data_description": {
-          "profile_name": "Jedinečný název pro tento TTS profil",
-          "model": "Model OpenAI TTS k použití",
-          "voice": "Hlas k použití pro syntézu řeči",
-          "instructions": "Volitelné pokyny pro přizpůsobení stylu řeči (viz https://www.openai.fm/)",
-          "speed": "Rychlost řeči (0,25 až 4,0, kde 1,0 je výchozí)",
-          "chime": "Přehrát zvukový signál před řečí",
-          "chime_sound": "Zvukový soubor k použití pro signál",
-          "normalize_audio": "Zvýšit hlasitost generovaného audia"
+        "reconfigure": {
+          "title": "Aktualizovat TTS agenta",
+          "description": "Upravit nastavení tohoto TTS agenta",
+          "data": {
+            "model": "Model",
+            "voice": "Hlas",
+            "speed": "Rychlost (0,25 až 4,0)",
+            "chime": "Povolit zvukový signál",
+            "chime_sound": "Zvuk signálu",
+            "normalize_audio": "Normalizovat hlasitost audia",
+            "instructions": "Vlastní pokyny (volitelné, pouze pro podporované modely)"
+          }
         }
       },
-      "reconfigure": {
-        "title": "Překonfigurovat TTS agenta",
-        "description": "Aktualizovat nastavení pro tohoto TTS agenta.",
-        "data": {
-          "model": "Model",
-          "voice": "Hlas",
-          "instructions": "Pokyny",
-          "speed": "Rychlost",
-          "chime": "Zvukový signál před řečí",
-          "chime_sound": "Zvuk signálu",
-          "normalize_audio": "Normalizovat audio"
-        },
-        "data_description": {
-          "model": "Model OpenAI TTS k použití",
-          "voice": "Hlas k použití pro syntézu řeči",
-          "instructions": "Volitelné pokyny pro přizpůsobení stylu řeči (viz https://www.openai.fm/)",
-          "speed": "Rychlost řeči (0,25 až 4,0, kde 1,0 je výchozí)",
-          "chime": "Přehrát zvukový signál před řečí",
-          "chime_sound": "Zvukový soubor k použití pro signál",
-          "normalize_audio": "Zvýšit hlasitost generovaného audia"
-        }
+      "error": {
+        "already_exists": "Profil s tímto názvem již existuje"
+      },
+      "abort": {
+        "already_configured": "Profil je již nakonfigurován",
+        "reconfigure_successful": "TTS agent byl úspěšně překonfigurován",
+        "subentry_not_found": "TTS agent nebyl nalezen"
       }
-    },
-    "error": {
-      "subentry_not_found": "Podpoložka nenalezena"
     }
   },
   "options": {
+    "abort": {
+      "no_options_available": "Tato integrace nemá konfigurovatelné možnosti. Pro konfiguraci jednotlivých TTS agentů použijte podpoložky.",
+      "not_supported": "Tok možností není pro tuto položku podporován"
+    },
     "step": {
       "init": {
-        "title": "Nastavte TTS možnosti",
+        "title": "Konfigurovat možnosti TTS",
+        "description": "Konfigurovat nastavení pro tento TTS profil",
         "data": {
-          "chime": "Povolte zvukový signál před řečí (užitečné pro oznámení)",
-          "chime_sound": "Zvuk zvukového signálu",
+          "chime": "Povolit zvukový signál před řečí (užitečné pro oznámení)",
+          "chime_sound": "Zvuk signálu",
           "speed": "Rychlost (0,25 až 4,0)",
           "model": "Model",
           "voice": "Hlas",
-          "instructions": "Pokyny (viz https://www.openai.fm/)",
-          "normalize_audio": "Povolte zvýšení hlasitosti generovaného audia (vyžaduje více CPU)",
+          "enable_instructions": "Povolit vlastní pokyny",
+          "instructions": "Pokyny (ponechte prázdné pro deaktivaci)",
+          "normalize_audio": "Povolit zvýšení hlasitosti generovaného audia (vyžaduje více CPU)",
           "volume_restore": "Obnovit hlasitost reproduktorů po přehrávání TTS",
-          "pause_playback": "Pozastavit přehrávání médií během TTS (pouze Sonos)"
+          "pause_playback": "Pozastavit média během TTS (pouze Sonos)"
         }
       }
     }

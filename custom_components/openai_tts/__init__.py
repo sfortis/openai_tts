@@ -263,6 +263,29 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             # Clear migration flag
             hass.data[DOMAIN].pop(f"{config_entry.entry_id}_migrating", None)
             
+            # Fix device registry associations after migration
+            # Devices should only be associated with subentries, not parent entries
+            device_reg = dr.async_get(hass)
+            entity_reg = er.async_get(hass)
+            
+            # Find all entities for this unique_id
+            entities = [
+                entity for entity in entity_reg.entities.values()
+                if entity.unique_id == original_unique_id and entity.platform == DOMAIN
+            ]
+            
+            # Update device associations to only reference the subentry
+            for entity in entities:
+                if entity.device_id:
+                    device = device_reg.async_get(entity.device_id)
+                    if device and config_entry.entry_id in device.config_entries:
+                        # Remove parent association and ensure only subentry is associated
+                        _LOGGER.debug("Updating device %s associations after migration", device.id)
+                        device_reg.async_update_device(
+                            device.id,
+                            remove_config_entry_id=config_entry.entry_id
+                        )
+            
             # Don't schedule reload - let Home Assistant handle it
             # The entry will be reloaded automatically after migration
             

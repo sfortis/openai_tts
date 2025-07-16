@@ -8,19 +8,29 @@
           "api_key": "API Key",
           "url": "API Endpoint (optional)"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure OpenAI TTS",
+        "description": "Update API credentials for this integration.",
+        "data": {
+          "api_key": "API Key",
+          "url": "API Endpoint"
+        }
       }
     },
     "error": {
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
-      "duplicate_api_key": "An entry with this API key already exists: {existing_entry}. Each integration entry must have a unique API key."
+      "duplicate_api_key": "An entry with this API key already exists. Each integration entry must have a unique API key."
     },
     "abort": {
-      "already_configured": "Device is already configured"
+      "already_configured": "This instance is already configured",
+      "reconfigure_successful": "Configuration updated successfully"
     }
   },
   "options": {
     "abort": {
-      "no_options_available": "This integration entry has no configurable options. Use the subentries to configure individual TTS agents."
+      "no_options_available": "This integration entry has no configurable options. Use the subentries to configure individual TTS agents.",
+      "not_supported": "Options flow is not supported for this entry"
     },
     "step": {
       "init": {
@@ -31,11 +41,11 @@
           "speed": "Speed (0.25 to 4.0)",
           "model": "Model",
           "voice": "Voice",
-          "instructions": "Instructions (check https://www.openai.fm/ )",
+          "enable_instructions": "Enable custom instructions",
+          "instructions": "Instructions (leave empty to disable)",
           "normalize_audio": "Enable loudness for generated audio (uses more CPU)",
           "volume_restore": "Restore speaker volumes after TTS playback",
-          "pause_playback": "Pause media during TTS (Sonos only)",
-          "enable_instructions": "Enable custom instructions"
+          "pause_playback": "Pause media during TTS (Sonos only)"
         }
       }
     }

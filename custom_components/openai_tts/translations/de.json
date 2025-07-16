@@ -2,15 +2,11 @@
   "config": {
     "step": {
       "user": {
-        "title": "OpenAI TTS hinzufügen",
-        "description": "Richten Sie die OpenAI API-Anmeldedaten für TTS ein.",
+        "title": "OpenAI TTS-Dienst hinzufügen",
+        "description": "Richten Sie die OpenAI TTS-Integration ein, um TTS-Agenten zu erstellen.",
         "data": {
           "api_key": "API-Schlüssel",
-          "url": "Endpunkt-URL"
-        },
-        "data_description": {
-          "api_key": "Ihr OpenAI API-Schlüssel",
-          "url": "Basis-URL für die OpenAI API (Standard: https://api.openai.com/v1/audio/speech)"
+          "url": "API-Endpunkt (optional)"
         }
       },
       "reconfigure": {
@@ -18,7 +14,7 @@
         "description": "API-Anmeldedaten für diese Integration aktualisieren.",
         "data": {
           "api_key": "API-Schlüssel",
-          "url": "Endpunkt-URL"
+          "url": "API-Endpunkt"
         }
       }
     },
@@ -28,77 +24,75 @@
     },
     "error": {
       "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein.",
-      "duplicate_api_key": "Eine Integration mit diesem API-Schlüssel existiert bereits: {existing_entry}",
-      "no_subentries": "Keine TTS-Agenten verfügbar. Bitte fügen Sie einen TTS-Agenten hinzu."
+      "duplicate_api_key": "Ein Eintrag mit diesem API-Schlüssel existiert bereits. Jeder Integrationseintrag muss einen eindeutigen API-Schlüssel haben."
     }
   },
-  "subentry": {
-    "step": {
-      "user": {
-        "title": "TTS-Agent hinzufügen",
-        "description": "Erstellen Sie einen neuen TTS-Agenten mit eigener Konfiguration.",
-        "data": {
-          "profile_name": "Profilname",
-          "model": "Modell",
-          "voice": "Stimme",
-          "instructions": "Anweisungen",
-          "speed": "Geschwindigkeit",
-          "chime": "Signalton vor der Sprache",
-          "chime_sound": "Signalton-Sound",
-          "normalize_audio": "Audio normalisieren"
+  "config_subentries": {
+    "profile": {
+      "entry_type": "TTS-Agent",
+      "initiate_flow": {
+        "user": "TTS-Agent hinzufügen",
+        "reconfigure": "TTS-Agent neu konfigurieren"
+      },
+      "step": {
+        "user": {
+          "title": "TTS-Agent hinzufügen",
+          "description": "Erstellen Sie einen neuen TTS-Agenten mit benutzerdefinierten Stimmeinstellungen",
+          "data": {
+            "profile_name": "Profilname",
+            "model": "Modell",
+            "voice": "Stimme",
+            "speed": "Geschwindigkeit (0,25 bis 4,0)",
+            "chime": "Signalton aktivieren",
+            "chime_sound": "Signalton-Sound",
+            "normalize_audio": "Audiolautstärke normalisieren",
+            "instructions": "Benutzerdefinierte Anweisungen (optional, nur für unterstützte Modelle)"
+          }
         },
-        "data_description": {
-          "profile_name": "Eindeutiger Name für dieses TTS-Profil",
-          "model": "Das zu verwendende OpenAI TTS-Modell",
-          "voice": "Die für die Sprachsynthese zu verwendende Stimme",
-          "instructions": "Optionale Anweisungen zur Anpassung des Sprachstils (siehe https://www.openai.fm/)",
-          "speed": "Sprechgeschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
-          "chime": "Einen Signalton vor der Sprache abspielen",
-          "chime_sound": "Audiodatei für den Signalton",
-          "normalize_audio": "Lautstärke des generierten Audios erhöhen"
+        "reconfigure": {
+          "title": "TTS-Agent aktualisieren",
+          "description": "Einstellungen für diesen TTS-Agenten ändern",
+          "data": {
+            "model": "Modell",
+            "voice": "Stimme",
+            "speed": "Geschwindigkeit (0,25 bis 4,0)",
+            "chime": "Signalton aktivieren",
+            "chime_sound": "Signalton-Sound",
+            "normalize_audio": "Audiolautstärke normalisieren",
+            "instructions": "Benutzerdefinierte Anweisungen (optional, nur für unterstützte Modelle)"
+          }
         }
       },
-      "reconfigure": {
-        "title": "TTS-Agent neu konfigurieren",
-        "description": "Einstellungen für diesen TTS-Agenten aktualisieren.",
-        "data": {
-          "model": "Modell",
-          "voice": "Stimme",
-          "instructions": "Anweisungen",
-          "speed": "Geschwindigkeit",
-          "chime": "Signalton vor der Sprache",
-          "chime_sound": "Signalton-Sound",
-          "normalize_audio": "Audio normalisieren"
-        },
-        "data_description": {
-          "model": "Das zu verwendende OpenAI TTS-Modell",
-          "voice": "Die für die Sprachsynthese zu verwendende Stimme",
-          "instructions": "Optionale Anweisungen zur Anpassung des Sprachstils (siehe https://www.openai.fm/)",
-          "speed": "Sprechgeschwindigkeit (0,25 bis 4,0, wobei 1,0 Standard ist)",
-          "chime": "Einen Signalton vor der Sprache abspielen",
-          "chime_sound": "Audiodatei für den Signalton",
-          "normalize_audio": "Lautstärke des generierten Audios erhöhen"
-        }
+      "error": {
+        "already_exists": "Ein Profil mit diesem Namen existiert bereits"
+      },
+      "abort": {
+        "already_configured": "Profil bereits konfiguriert",
+        "reconfigure_successful": "TTS-Agent erfolgreich neu konfiguriert",
+        "subentry_not_found": "TTS-Agent nicht gefunden"
       }
-    },
-    "error": {
-      "subentry_not_found": "Untereintrag nicht gefunden"
     }
   },
   "options": {
+    "abort": {
+      "no_options_available": "Dieser Integrationseintrag hat keine konfigurierbaren Optionen. Verwenden Sie die Untereinträge, um einzelne TTS-Agenten zu konfigurieren.",
+      "not_supported": "Der Optionsfluss wird für diesen Eintrag nicht unterstützt"
+    },
     "step": {
       "init": {
-        "title": "Konfigurieren Sie die TTS-Optionen",
+        "title": "TTS-Optionen konfigurieren",
+        "description": "Einstellungen für dieses TTS-Profil konfigurieren",
         "data": {
-          "chime": "Aktivieren Sie den Signalton vor der Sprache (nützlich für Ansagen)",
-          "chime_sound": "Signalton",
+          "chime": "Signalton vor der Sprache aktivieren (nützlich für Ansagen)",
+          "chime_sound": "Signalton-Sound",
           "speed": "Geschwindigkeit (0,25 bis 4,0)",
           "model": "Modell",
           "voice": "Stimme",
-          "instructions": "Anweisungen (siehe https://www.openai.fm/)",
-          "normalize_audio": "Aktivieren Sie die Lautstärkeerhöhung für das erzeugte Audio (verwendet mehr CPU)",
-          "volume_restore": "Lautstärke der Lautsprecher nach der TTS-Wiedergabe wiederherstellen",
-          "pause_playback": "Medienwiedergabe während TTS pausieren (nur Sonos)"
+          "enable_instructions": "Benutzerdefinierte Anweisungen aktivieren",
+          "instructions": "Anweisungen (leer lassen zum Deaktivieren)",
+          "normalize_audio": "Lautstärkeerhöhung für erzeugtes Audio aktivieren (verwendet mehr CPU)",
+          "volume_restore": "Lautsprecherlautstärke nach TTS-Wiedergabe wiederherstellen",
+          "pause_playback": "Medien während TTS pausieren (nur Sonos)"
         }
       }
     }

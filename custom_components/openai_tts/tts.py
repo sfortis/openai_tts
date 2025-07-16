@@ -384,18 +384,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         
         # Get the unique ID for device grouping
         if is_subentry:
-            # Try to get parent's unique ID for consistent device grouping
-            if self._parent_entry:
-                device_unique_id = self._parent_entry.data.get(UNIQUE_ID)
-            elif hasattr(self._config, 'parent_entry') and self._config.parent_entry:
-                device_unique_id = self._config.parent_entry.data.get(UNIQUE_ID)
-            else:
-                # Try to get from main entry in hass.data
-                main_entry = self.hass.data.get(DOMAIN, {}).get("main_entry")
-                if main_entry:
-                    device_unique_id = main_entry.data.get(UNIQUE_ID)
-                else:
-                    device_unique_id = self._config.data.get(UNIQUE_ID)
+            # For subentries, use the subentry's unique ID to create a separate device
+            # This ensures the device is only associated with the subentry, not the parent
+            device_unique_id = self._config.data.get(UNIQUE_ID)
+            if not device_unique_id:
+                # Fallback: generate based on profile name
+                device_unique_id = f"{self._config.data.get(CONF_PROFILE_NAME, 'profile')}_{self._config.data.get(CONF_MODEL, 'tts-1')}"
         else:
             device_unique_id = self._config.data.get(UNIQUE_ID)
         
@@ -403,13 +397,27 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             # Fallback to URL-based unique ID
             device_unique_id = self._config.data.get(CONF_URL, "openai_tts")
         
-        return {
+        # Create device info
+        device_info = {
             "identifiers": {(DOMAIN, device_unique_id)},
-            "name": "OpenAI TTS",
             "manufacturer": "OpenAI",
-            "model": self._config.data.get(CONF_MODEL, "TTS API"),
             "sw_version": "1.0",
         }
+        
+        # Customize device info based on entry type
+        if is_subentry:
+            # Get agent name (profile name), model, and voice
+            agent_name = self._config.data.get(CONF_PROFILE_NAME, "default")
+            model = self._config.data.get(CONF_MODEL, "tts-1")
+            voice = self._config.data.get(CONF_VOICE, "unknown")
+            # Format: "agentname (model-voice)"
+            device_info["name"] = f"{agent_name} ({model}-{voice})"
+            device_info["model"] = f"{model} ({voice})"
+        else:
+            device_info["name"] = "OpenAI TTS"
+            device_info["model"] = self._config.data.get(CONF_MODEL, "TTS API")
+        
+        return device_info
 
     def _get_config_value(self, key: str, default=None):
         """Get config value from options or data, handling subentries."""

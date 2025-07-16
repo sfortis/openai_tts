@@ -24,7 +24,7 @@
     },
     "error": {
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
-      "duplicate_api_key": "An entry with this API key already exists: {existing_entry}. Each integration entry must have a unique API key."
+      "duplicate_api_key": "An entry with this API key already exists. Each integration entry must have a unique API key."
     }
   },
   "config_subentries": {
