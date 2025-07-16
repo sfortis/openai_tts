@@ -12,7 +12,19 @@
           "api_key": "Ihr OpenAI API-Schlüssel",
           "url": "Basis-URL für die OpenAI API (Standard: https://api.openai.com/v1/audio/speech)"
         }
+      },
+      "reconfigure": {
+        "title": "OpenAI TTS neu konfigurieren",
+        "description": "API-Anmeldedaten für diese Integration aktualisieren.",
+        "data": {
+          "api_key": "API-Schlüssel",
+          "url": "Endpunkt-URL"
+        }
       }
+    },
+    "abort": {
+      "already_configured": "Diese Instanz ist bereits konfiguriert",
+      "reconfigure_successful": "Konfiguration erfolgreich aktualisiert"
     },
     "error": {
       "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein.",

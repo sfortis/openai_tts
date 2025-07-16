@@ -12,7 +12,19 @@
           "api_key": "Το API κλειδί σας για το OpenAI",
           "url": "Βασικό URL για το OpenAI API (προεπιλογή: https://api.openai.com/v1/audio/speech)"
         }
+      },
+      "reconfigure": {
+        "title": "Επαναρύθμιση OpenAI TTS",
+        "description": "Ενημέρωση διαπιστευτηρίων API για αυτή την ενσωμάτωση.",
+        "data": {
+          "api_key": "API κλειδί",
+          "url": "URL endpoint"
+        }
       }
+    },
+    "abort": {
+      "already_configured": "Αυτή η instance είναι ήδη διαμορφωμένη",
+      "reconfigure_successful": "Η διαμόρφωση ενημερώθηκε επιτυχώς"
     },
     "error": {
       "wrong_api_key": "Μη έγκυρο API key. Εισάγετε ένα έγκυρο API key.",

@@ -2,6 +2,7 @@
 """Custom integration for OpenAI TTS."""
 from __future__ import annotations
 
+import asyncio
 import logging
 import os
 import uuid
@@ -149,6 +150,8 @@ def _get_entities_from_target(
 async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) -> bool:
     """Migrate old entry."""
     _LOGGER.debug("Migrating configuration from version %s.%s", config_entry.version, config_entry.minor_version)
+    _LOGGER.debug("Entry data contains: model=%s, voice=%s", 
+                 config_entry.data.get(CONF_MODEL), config_entry.data.get(CONF_VOICE))
 
     if config_entry.version > 2:
         # This means the user has downgraded from a future version
@@ -168,8 +171,21 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
     if config_entry.version == 2 and config_entry.minor_version < 1:
         # Migration from 2.0 to 2.1: Convert legacy entries to parent+subentry structure
+        # Only migrate if we have model/voice data (legacy entry) AND haven't migrated yet
         if config_entry.data.get(CONF_MODEL) or config_entry.data.get(CONF_VOICE):
+            # Check if we already have subentries - if so, skip migration
+            has_subentries = hasattr(config_entry, 'subentries') and config_entry.subentries
+            if has_subentries:
+                _LOGGER.debug("Entry already has %d subentries, skipping migration", len(config_entry.subentries))
+                # Just update the version
+                hass.config_entries.async_update_entry(config_entry, minor_version=1)
+                return True
+            
             _LOGGER.info("Migrating legacy entry %s to parent+subentry structure", config_entry.entry_id)
+            
+            # Set migration flag to prevent reload during migration
+            hass.data.setdefault(DOMAIN, {})
+            hass.data[DOMAIN][f"{config_entry.entry_id}_migrating"] = True
             
             # Extract voice configuration from the entry
             model = config_entry.data.get(CONF_MODEL, "tts-1")
@@ -215,15 +231,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             if instructions:
                 subentry_data[CONF_INSTRUCTIONS] = instructions
             
-            # Update the parent entry to remove voice config
-            hass.config_entries.async_update_entry(
-                config_entry, 
-                data=parent_data,
-                options={},  # Clear options as they've moved to subentry
-                minor_version=1
-            )
-            
-            # Create the subentry immediately
+            # Create the subentry first
             from types import MappingProxyType
             
             subentry = ConfigSubentry(
@@ -236,26 +244,29 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             # Add the subentry to the parent
             hass.config_entries.async_add_subentry(config_entry, subentry)
             
-            # Update entity registry to move existing entities to the new subentry
-            entity_reg = er.async_get(hass)
-            entities = er.async_entries_for_config_entry(entity_reg, config_entry.entry_id)
+            # Update the parent entry AFTER subentry is created
+            # This ensures if subentry creation fails, migration won't be marked complete
+            from urllib.parse import urlparse
+            hostname = urlparse(parent_data.get(CONF_URL, DEFAULT_URL)).hostname
             
-            for entity in entities:
-                if entity.domain == "tts":
-                    # Update the entity to point to the subentry instead of the parent
-                    entity_reg.async_update_entity(
-                        entity.entity_id,
-                        config_entry_id=subentry.subentry_id,
-                    )
-                    _LOGGER.info("Migrated entity %s to subentry %s", entity.entity_id, subentry.subentry_id)
+            hass.config_entries.async_update_entry(
+                config_entry, 
+                data=parent_data,
+                options={},  # Clear options as they've moved to subentry
+                title=f"OpenAI TTS ({hostname})",
+                minor_version=1,
+                version=2
+            )
             
             _LOGGER.info("Successfully migrated legacy entry to parent+subentry structure")
             
-            # Schedule a reload to clean up orphaned entities
-            hass.async_create_task(
-                hass.config_entries.async_reload(config_entry.entry_id)
-            )
-            _LOGGER.info("Scheduled reload of entry after migration")
+            # Clear migration flag
+            hass.data[DOMAIN].pop(f"{config_entry.entry_id}_migrating", None)
+            
+            # Don't schedule reload - let Home Assistant handle it
+            # The entry will be reloaded automatically after migration
+            
+            return True
         else:
             # Not a legacy entry, just update version
             hass.config_entries.async_update_entry(config_entry, minor_version=1)
@@ -266,6 +277,8 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OpenAI TTS and register the openai_tts.say service."""
+    _LOGGER.debug("async_setup_entry called for %s (version %s.%s)", 
+                 entry.entry_id, entry.version, entry.minor_version)
     # Store entry for reference
     hass.data.setdefault(DOMAIN, {})
     
@@ -282,6 +295,9 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Check if this entry has subentries (making it a parent)
     has_subentries = hasattr(entry, 'subentries') and entry.subentries
+    _LOGGER.debug("Entry %s has_subentries=%s (count=%s)", 
+                 entry.entry_id, has_subentries, 
+                 len(entry.subentries) if has_subentries else 0)
     
     # Legacy entries have model/voice data directly AND no subentries AND version < 2.1
     # After migration, entries with model/voice data are converted to parent+subentry
@@ -333,10 +349,21 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             hass.data[DOMAIN]["main_entry"] = entry
             _LOGGER.info("Modern parent entry forwarded to platforms (will process subentries)")
     
-    # Setup update listener
+    # Setup update listener following official Home Assistant patterns
     async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
-        """Handle options update."""
-        _LOGGER.info("Options update detected for OpenAI TTS entry %s", entry.entry_id)
+        """Handle config entry updates."""
+        # Don't reload during migration - migration handles its own reload
+        if hass.data.get(DOMAIN, {}).get(f"{entry.entry_id}_migrating"):
+            _LOGGER.debug("Skipping reload during migration for entry %s", entry.entry_id)
+            return
+        
+        # Check if Home Assistant is still starting up
+        # This prevents phantom reloads during startup
+        if not hass.is_running:
+            _LOGGER.debug("Skipping reload during Home Assistant startup for entry %s", entry.entry_id)
+            return
+        
+        _LOGGER.info("Config entry updated for OpenAI TTS entry %s, reloading", entry.entry_id)
         await hass.config_entries.async_reload(entry.entry_id)
     
     entry.async_on_unload(entry.add_update_listener(update_listener))

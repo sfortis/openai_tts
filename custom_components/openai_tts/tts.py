@@ -16,6 +16,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.entity import generate_entity_id
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
+from homeassistant.helpers import entity_registry as er
 
 from .const import (
     CONF_API_KEY,
@@ -52,6 +53,9 @@ async def async_setup_entry(
 ) -> None:
     """Set up OpenAI TTS entities from a config entry."""
     _LOGGER.debug("Setting up OpenAI TTS for config entry %s", config_entry.entry_id)
+    
+    # Get entity registry to check for existing entities
+    entity_registry = er.async_get(hass)
     
     # Check if this is a legacy entry (has model/voice data AND version < 2.1)
     is_legacy = (
@@ -111,6 +115,18 @@ async def async_setup_entry(
             _LOGGER.debug("Creating entity with model=%s, voice=%s, speed=%s", 
                          model, voice, speed)
             
+            # Check if an entity with this unique_id already exists
+            unique_id = subentry.data.get(UNIQUE_ID)
+            if unique_id:
+                # Look for existing entities with this unique_id
+                existing_entities = [
+                    entity_id for entity_id, entity in entity_registry.entities.items()
+                    if entity.unique_id == unique_id and entity.platform == DOMAIN
+                ]
+                if existing_entities:
+                    _LOGGER.warning("Found %d existing entities with unique_id %s, will be replaced", 
+                                  len(existing_entities), unique_id)
+            
             # Create engine and entity
             engine = OpenAITTSEngine(api_key, voice, model, speed, url)
             entity = OpenAITTSEntity(hass, subentry, engine, config_entry)
@@ -144,9 +160,28 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         self._engine = engine
         self._config = config
         self._parent_entry = parent_entry  # Store parent entry reference if this is a subentry
+        
+        # Ensure unique_id is set and consistent
         self._attr_unique_id = config.data.get(UNIQUE_ID)
         if not self._attr_unique_id:
-            self._attr_unique_id = f"{config.data.get(CONF_URL)}_{config.data.get(CONF_MODEL)}"
+            # Generate a unique ID based on the configuration
+            import hashlib
+            config_str = f"{config.data.get(CONF_URL)}_{config.data.get(CONF_MODEL)}_{config.data.get(CONF_VOICE)}"
+            self._attr_unique_id = hashlib.md5(config_str.encode()).hexdigest()
+        
+        _LOGGER.debug("Entity initialized with unique_id: %s", self._attr_unique_id)
+        
+        # Set the config entry ID for proper entity registry association
+        # For subentries, we need to use the subentry_id if available
+        if hasattr(config, 'subentry_id'):
+            self._attr_config_entry_id = config.subentry_id
+            _LOGGER.debug("Entity %s associated with subentry_id: %s", self.entity_id, config.subentry_id)
+        elif hasattr(config, 'entry_id'):
+            self._attr_config_entry_id = config.entry_id
+            _LOGGER.debug("Entity %s associated with entry_id: %s", self.entity_id, config.entry_id)
+        else:
+            self._attr_config_entry_id = parent_entry.entry_id if parent_entry else None
+            _LOGGER.warning("Entity %s using parent entry_id: %s", self.entity_id, self._attr_config_entry_id)
         
         # Duration cache to track durations by message hash
         self._duration_cache = {}

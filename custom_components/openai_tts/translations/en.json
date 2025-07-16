@@ -8,10 +8,19 @@
           "api_key": "API Key",
           "url": "API Endpoint (optional)"
         }
+      },
+      "reconfigure": {
+        "title": "Reconfigure OpenAI TTS",
+        "description": "Update API credentials for this integration.",
+        "data": {
+          "api_key": "API Key",
+          "url": "API Endpoint"
+        }
       }
     },
     "abort": {
-      "already_configured": "This instance is already configured"
+      "already_configured": "This instance is already configured",
+      "reconfigure_successful": "Configuration updated successfully"
     },
     "error": {
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
@@ -66,7 +75,8 @@
   },
   "options": {
     "abort": {
-      "no_options_available": "This integration entry has no configurable options. Use the subentries to configure individual TTS agents."
+      "no_options_available": "This integration entry has no configurable options. Use the subentries to configure individual TTS agents.",
+      "not_supported": "Options flow is not supported for this entry"
     },
     "step": {
       "init": {

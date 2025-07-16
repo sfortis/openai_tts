@@ -136,9 +136,28 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
             description_placeholders=user_input,
         )
 
+    # Options flow removed - all entries use reconfigure
+    
+    @classmethod
+    @callback
+    def async_get_supported_subentry_types(cls, config_entry: ConfigEntry) -> dict[str, type[ConfigSubentryFlow]]:
+        """Return the supported subentry types for this integration."""
+        # Check if this is a legacy entry (has model/voice in data AND no subentries)
+        has_model_voice = config_entry.data.get(CONF_MODEL) is not None or config_entry.data.get(CONF_VOICE) is not None
+        has_subentries = hasattr(config_entry, 'subentries') and config_entry.subentries
+        
+        # Only modern parent entries (no model/voice in data OR has subentries) support subentries
+        # Legacy entries (with model/voice but no subentries) do not support subentries
+        is_legacy = has_model_voice and not has_subentries
+        
+        if is_legacy:
+            return {}
+        
+        return {SUBENTRY_TYPE_PROFILE: OpenAITTSProfileSubentryFlow}
+    
     @staticmethod
     @callback
-    def async_get_options_flow(config_entry: ConfigEntry) -> OpenAITTSOptionsFlow:
+    def async_get_options_flow(config_entry: ConfigEntry) -> OptionsFlow:
         """Get the options flow for this handler."""
         return OpenAITTSOptionsFlow(config_entry)
     
@@ -146,22 +165,78 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
     @callback
     def async_supports_options_flow(cls, config_entry: ConfigEntry) -> bool:
         """Return options flow support for this handler."""
-        # Check if this is a subentry
-        is_subentry = hasattr(config_entry, 'subentry_type') and config_entry.subentry_type == SUBENTRY_TYPE_PROFILE
+        # Check if this is a legacy entry (has model/voice in data AND no subentries)
+        has_model_voice = config_entry.data.get(CONF_MODEL) is not None or config_entry.data.get(CONF_VOICE) is not None
+        has_subentries = hasattr(config_entry, 'subentries') and config_entry.subentries
         
-        # Check if this is a legacy entry (has model/voice in data)
-        is_legacy = config_entry.data.get(CONF_MODEL) is not None or config_entry.data.get(CONF_VOICE) is not None
+        # Only legacy entries (with model/voice but no subentries) support options flow
+        # Modern parent entries (with subentries) use reconfigure flow instead
+        is_legacy = has_model_voice and not has_subentries
         
-        # Options flow is only for legacy entries
-        # Modern parent entries have no options
-        # Subentries use reconfigure instead
-        return is_legacy and not is_subentry
+        return is_legacy
     
-    @classmethod
-    @callback
-    def async_get_supported_subentry_types(cls, config_entry: ConfigEntry) -> dict[str, type[ConfigSubentryFlow]]:
-        """Return the supported subentry types for this integration."""
-        return {SUBENTRY_TYPE_PROFILE: OpenAITTSProfileSubentryFlow}
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle reconfiguration of the parent entry."""
+        errors: dict[str, str] = {}
+        
+        # Get the entry ID from context
+        entry_id = self.context.get("entry_id")
+        if not entry_id:
+            return self.async_abort(reason="unknown_error")
+        
+        reconfigure_entry = self.hass.config_entries.async_get_entry(entry_id)
+        if not reconfigure_entry:
+            return self.async_abort(reason="unknown_error")
+        
+        if user_input is not None:
+            try:
+                await validate_user_input(user_input)
+                
+                # Check for duplicate API key (exclude current entry)
+                api_key = user_input.get(CONF_API_KEY)
+                for entry in self._async_current_entries():
+                    if entry.entry_id != reconfigure_entry.entry_id and entry.data.get(CONF_API_KEY) == api_key:
+                        _LOGGER.error("An entry with this API key already exists: %s", entry.title)
+                        errors["base"] = "duplicate_api_key"
+                        break
+                
+                if not errors:
+                    # Update the entry using the recommended helper
+                    from urllib.parse import urlparse
+                    hostname = urlparse(user_input[CONF_URL]).hostname
+                    
+                    # Ensure unique_id doesn't change
+                    await self.async_set_unique_id(reconfigure_entry.unique_id)
+                    self._abort_if_unique_id_mismatch()
+                    
+                    return self.async_update_reload_and_abort(
+                        reconfigure_entry,
+                        data_updates=user_input,
+                        title=f"OpenAI TTS ({hostname})"
+                    )
+                    
+            except HomeAssistantError as e:
+                _LOGGER.exception(str(e))
+                errors["base"] = str(e)
+            except ValueError as e:
+                _LOGGER.exception(str(e))
+                errors["base"] = str(e)
+            except Exception:
+                _LOGGER.exception("Unexpected error")
+                errors["base"] = "unknown_error"
+        
+        # Show the form with current values as defaults
+        current_data = reconfigure_entry.data
+        schema = vol.Schema({
+            vol.Required(CONF_API_KEY, default=current_data.get(CONF_API_KEY, "")): str,
+            vol.Optional(CONF_URL, default=current_data.get(CONF_URL, "https://api.openai.com/v1/audio/speech")): str,
+        })
+        
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=schema,
+            errors=errors,
+        )
 
 
 class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
@@ -395,6 +470,11 @@ class OpenAITTSOptionsFlow(OptionsFlow):
         
         # Check if this is a legacy entry (has model/voice in data)
         is_legacy = self._config_entry.data.get(CONF_MODEL) is not None or self._config_entry.data.get(CONF_VOICE) is not None
+        
+        # Modern parent entries and subentries should not have options flow
+        if not is_legacy or is_profile:
+            _LOGGER.warning("Options flow accessed for non-legacy entry %s, aborting", self._config_entry.entry_id)
+            return self.async_abort(reason="not_supported")
         
         _LOGGER.debug("OptionsFlow init - is_profile: %s, is_legacy: %s, entry_id: %s", 
                      is_profile, is_legacy, self._config_entry.entry_id)

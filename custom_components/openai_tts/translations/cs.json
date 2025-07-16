@@ -12,7 +12,19 @@
           "api_key": "Váš OpenAI API klíč",
           "url": "Základní URL pro OpenAI API (výchozí: https://api.openai.com/v1/audio/speech)"
         }
+      },
+      "reconfigure": {
+        "title": "Překonfigurovat OpenAI TTS",
+        "description": "Aktualizovat přihlašovací údaje API pro tuto integraci.",
+        "data": {
+          "api_key": "API klíč",
+          "url": "Endpoint URL"
+        }
       }
+    },
+    "abort": {
+      "already_configured": "Tato instance je již nakonfigurována",
+      "reconfigure_successful": "Konfigurace byla úspěšně aktualizována"
     },
     "error": {
       "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč.",
