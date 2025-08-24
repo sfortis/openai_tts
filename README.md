@@ -12,7 +12,7 @@ The Groq TTS component for Home Assistant makes it possible to use the Groq API 
 - **Chime option** – Useful for announcements on speakers. *(See Devices → Groq TTS → CONFIGURE button)*
 - **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/groq_tts/chime` folder (MP3).
 - **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → Groq TTS → CONFIGURE button)*
-- **Dynamic voice discovery** – Available models and voices are fetched from the Groq API during setup.
+- **Dynamic model discovery** – Available models are fetched from the Groq API during setup; voices are selected from a built-in list.
 - **Per-call options** – Voice and normalization can be changed when calling `tts.speak`.
 - **In-memory caching** – Frequently used phrases are cached to reduce API calls.
 
@@ -28,7 +28,7 @@ visit: (https://console.groq.com/)
 - `playai-tts-arabic`
 
 ### Voices
-The integration discovers available voices automatically. As of now, Groq offers the following options:
+The integration provides the following built-in voice options from Groq:
 
 - `Ahmad-PlayAI`
 - `Amira-PlayAI`

@@ -59,11 +59,10 @@ async def fetch_available(endpoint: str, api_key: str | None = None) -> list[str
     return []
 
 async def get_dynamic_options(api_key: str | None) -> tuple[list[str], list[str]]:
-    """Return lists of models and voices, falling back to constants on error."""
+    """Return a dynamic list of models and the built-in voices."""
     models_endpoint = "https://api.groq.com/openai/v1/models"
-    voices_endpoint = "https://api.groq.com/openai/v1/voices"
     models = await fetch_available(models_endpoint, api_key) or MODELS
-    voices = await fetch_available(voices_endpoint, api_key) or VOICES
+    voices = VOICES
     return models, voices
 
 async def validate_user_input(user_input: dict):
