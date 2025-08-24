@@ -27,6 +27,7 @@ aiohttp_mod.async_get_clientsession = lambda hass: None
 sys.modules.setdefault("homeassistant.helpers.aiohttp_client", aiohttp_mod)
 sys.modules.setdefault("aiohttp", types.ModuleType("aiohttp"))
 sys.modules["aiohttp"].ClientSession = object
+sys.modules["aiohttp"].ClientError = Exception
 vol_mod = types.ModuleType("voluptuous")
 vol_mod.Schema = lambda x: x
 vol_mod.Optional = lambda *args, **kwargs: None
@@ -61,6 +62,7 @@ spec_cf.loader.exec_module(config_flow)
 spec_engine = spec_from_file_location(f"{pkg_name}.groqtts_engine", COMP_DIR / "groqtts_engine.py")
 groqtts_engine = module_from_spec(spec_engine)
 spec_engine.loader.exec_module(groqtts_engine)
+sys.modules["groqtts_engine"] = groqtts_engine
 
 validate_user_input = config_flow.validate_user_input
 get_chime_options = config_flow.get_chime_options
@@ -87,8 +89,8 @@ def test_get_chime_options():
 
 
 class DummySession:
-    async def post(self, *args, **kwargs):
-        raise Exception("boom")
+    def post(self, *args, **kwargs):
+        raise sys.modules["aiohttp"].ClientError("boom")
 
 
 class DummyHass:
