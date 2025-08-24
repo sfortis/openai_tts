@@ -101,6 +101,8 @@ class DummyHass:
 async def test_async_get_tts_network_error():
     engine = GroqTTSEngine(None, "voice", "model", "http://example.com")
 
-    with patch("groqtts_engine.async_get_clientsession", return_value=DummySession()):
+    with patch.object(
+        groqtts_engine, "async_get_clientsession", return_value=DummySession()
+    ):
         with pytest.raises(HomeAssistantError):
             await engine.async_get_tts(DummyHass(), "hi")
