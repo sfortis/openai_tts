@@ -11,9 +11,29 @@ UNIQUE_ID = "unique_id"
 
 MODELS = ["playai-tts", "playai-tts-arabic"]
 VOICES = [
-    "Arista-PlayAI", "Atlas-PlayAI", "Basil-PlayAI", "Briggs-PlayAI", "Calum-PlayAI", "Celeste-PlayAI",
-    "Cheyenne-PlayAI", "Chip-PlayAI", "Cillian-PlayAI", "Deedee-PlayAI", "Fritz-PlayAI", "Gail-PlayAI",
-    "Indigo-PlayAI", "Mamaw-PlayAI", "Mason-PlayAI", "Mikail-PlayAI", "Mitch-PlayAI", "Quinn-PlayAI", "Thunder-PlayAI"
+    "Ahmad-PlayAI",
+    "Amira-PlayAI",
+    "Arista-PlayAI",
+    "Atlas-PlayAI",
+    "Basil-PlayAI",
+    "Briggs-PlayAI",
+    "Calum-PlayAI",
+    "Celeste-PlayAI",
+    "Cheyenne-PlayAI",
+    "Chip-PlayAI",
+    "Cillian-PlayAI",
+    "Deedee-PlayAI",
+    "Fritz-PlayAI",
+    "Gail-PlayAI",
+    "Indigo-PlayAI",
+    "Khalid-PlayAI",
+    "Mamaw-PlayAI",
+    "Mason-PlayAI",
+    "Mikail-PlayAI",
+    "Mitch-PlayAI",
+    "Nasser-PlayAI",
+    "Quinn-PlayAI",
+    "Thunder-PlayAI",
 ]
 
 CONF_CHIME_ENABLE = "chime"

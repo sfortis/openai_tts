@@ -28,10 +28,31 @@ visit: (https://console.groq.com/)
 - `playai-tts-arabic`
 
 ### Voices
+The integration discovers available voices automatically. As of now, Groq offers the following options:
+
+- `Ahmad-PlayAI`
+- `Amira-PlayAI`
 - `Arista-PlayAI`
 - `Atlas-PlayAI`
 - `Basil-PlayAI`
 - `Briggs-PlayAI`
+- `Calum-PlayAI`
+- `Celeste-PlayAI`
+- `Cheyenne-PlayAI`
+- `Chip-PlayAI`
+- `Cillian-PlayAI`
+- `Deedee-PlayAI`
+- `Fritz-PlayAI`
+- `Gail-PlayAI`
+- `Indigo-PlayAI`
+- `Khalid-PlayAI`
+- `Mamaw-PlayAI`
+- `Mason-PlayAI`
+- `Mikail-PlayAI`
+- `Mitch-PlayAI`
+- `Nasser-PlayAI`
+- `Quinn-PlayAI`
+- `Thunder-PlayAI`
 
 > For the latest list of models and voices, see the [Groq TTS documentation](https://console.groq.com/docs/text-to-speech).
 
