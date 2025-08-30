@@ -12,7 +12,6 @@ from homeassistant.components.tts import TextToSpeechEntity
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
-from homeassistant.helpers.entity import generate_entity_id
 from .const import (
     CONF_API_KEY,
     CONF_MODEL,
@@ -23,6 +22,8 @@ from .const import (
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
+    CONF_CACHE_SIZE,
+    DEFAULT_CACHE_SIZE,
 )
 from .groqtts_engine import GroqTTSEngine
 
@@ -39,6 +40,7 @@ async def async_setup_entry(
         config_entry.data[CONF_VOICE],
         config_entry.data[CONF_MODEL],
         config_entry.data[CONF_URL],
+        cache_max=config_entry.options.get(CONF_CACHE_SIZE, DEFAULT_CACHE_SIZE),
     )
     async_add_entities([GroqTTSEntity(hass, config_entry, engine)])
 
@@ -50,11 +52,11 @@ class GroqTTSEntity(TextToSpeechEntity):
         self.hass = hass
         self._engine = engine
         self._config = config
-        self._attr_unique_id = config.data.get(UNIQUE_ID)
+        # Prefer the config entry unique_id; fall back to stored value for backward compatibility
+        self._attr_unique_id = getattr(config, "unique_id", None) or config.data.get(UNIQUE_ID)
         if not self._attr_unique_id:
             self._attr_unique_id = f"{config.data.get(CONF_URL)}_{config.data.get(CONF_MODEL)}"
-        base_name = self._config.data.get(CONF_MODEL, "").upper()
-        self.entity_id = generate_entity_id("tts.groq_tts_{}", base_name.lower(), hass=hass)
+        # Let the registry generate the entity_id based on name/device info
 
     @property
     def default_language(self) -> str:
@@ -62,7 +64,17 @@ class GroqTTSEntity(TextToSpeechEntity):
 
     @property
     def supported_options(self) -> list:
-        return ["chime", "voice", "normalize"]
+        # Must match option keys actually read from service/data
+        return [CONF_CHIME_ENABLE, CONF_VOICE, CONF_NORMALIZE_AUDIO]
+
+    @property
+    def default_options(self) -> dict:
+        """Advertise default options for the TTS service."""
+        return {
+            CONF_CHIME_ENABLE: False,
+            CONF_NORMALIZE_AUDIO: False,
+            CONF_VOICE: self._config.options.get(CONF_VOICE, self._config.data.get(CONF_VOICE)),
+        }
         
     @property
     def supported_languages(self) -> list:
@@ -118,12 +130,16 @@ class GroqTTSEntity(TextToSpeechEntity):
             _LOGGER.debug("Normalization option: %s", normalize_audio)
 
             async def run_ffmpeg(cmd, input_bytes):
-                process = await asyncio.create_subprocess_exec(
-                    *cmd,
-                    stdin=asyncio.subprocess.PIPE,
-                    stdout=asyncio.subprocess.PIPE,
-                    stderr=asyncio.subprocess.PIPE,
-                )
+                try:
+                    process = await asyncio.create_subprocess_exec(
+                        *cmd,
+                        stdin=asyncio.subprocess.PIPE,
+                        stdout=asyncio.subprocess.PIPE,
+                        stderr=asyncio.subprocess.PIPE,
+                    )
+                except FileNotFoundError:
+                    _LOGGER.error("ffmpeg executable not found. Please install ffmpeg or adjust PATH.")
+                    raise Exception("ffmpeg not found")
                 stdout, stderr = await process.communicate(input=input_bytes)
                 if process.returncode != 0:
                     _LOGGER.error("ffmpeg error: %s", stderr.decode())
@@ -136,10 +152,16 @@ class GroqTTSEntity(TextToSpeechEntity):
                         CONF_CHIME_SOUND, self._config.data.get(CONF_CHIME_SOUND, "threetone.mp3")
                     )
                     chime_path = os.path.join(os.path.dirname(__file__), "chime", chime_file)
+                    if not os.path.exists(chime_path):
+                        _LOGGER.error("Chime file not found: %s", chime_path)
+                        return None, None
 
                     if normalize_audio:
                         cmd = [
                             "ffmpeg",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
                             "-y",
                             "-i",
                             chime_path,
@@ -162,6 +184,9 @@ class GroqTTSEntity(TextToSpeechEntity):
                     else:
                         cmd = [
                             "ffmpeg",
+                            "-hide_banner",
+                            "-loglevel",
+                            "error",
                             "-y",
                             "-i",
                             chime_path,
@@ -184,6 +209,9 @@ class GroqTTSEntity(TextToSpeechEntity):
                 else:
                     cmd = [
                         "ffmpeg",
+                        "-hide_banner",
+                        "-loglevel",
+                        "error",
                         "-y",
                         "-i",
                         "pipe:0",
@@ -207,7 +235,7 @@ class GroqTTSEntity(TextToSpeechEntity):
             return "mp3", audio_content
 
         except CancelledError:
-            _LOGGER.exception("TTS task cancelled")
+            _LOGGER.debug("TTS task cancelled")
             return None, None
         except Exception:
             _LOGGER.exception("Unknown error in async_get_tts_audio")

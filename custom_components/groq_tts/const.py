@@ -3,6 +3,7 @@ Constants for Groq TTS custom component
 """
 
 DOMAIN = "groq_tts"
+VERSION = "0.1"
 CONF_API_KEY = "api_key"
 CONF_MODEL = "model"
 CONF_VOICE = "voice"
@@ -39,3 +40,5 @@ VOICES = [
 CONF_CHIME_ENABLE = "chime"
 CONF_CHIME_SOUND = "chime_sound"
 CONF_NORMALIZE_AUDIO = "normalize_audio"
+CONF_CACHE_SIZE = "cache_size"
+DEFAULT_CACHE_SIZE = 256

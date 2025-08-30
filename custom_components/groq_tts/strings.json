@@ -10,10 +10,20 @@
           "voice": "Voice",
           "url": "Enter the Groq TTS endpoint."
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Groq TTS",
+        "description": "Your credentials are no longer valid. Please enter a new API key.",
+        "data": {
+          "api_key": "Groq API key"
+        }
       }
     },
     "error": {
-      "wrong_api_key": "Invalid API key. Please enter a valid API key."
+      "wrong_api_key": "Invalid API key. Please enter a valid API key.",
+      "invalid_url": "Invalid URL. Please enter a valid URL.",
+      "required": "This field is required.",
+      "unknown_error": "Unexpected error — please try again."
     }
   },
   "options": {
@@ -24,7 +34,8 @@
           "chime": "Enable chime sound prior speech (useful for announcements)",
           "chime_sound": "Chime sound",
           "voice": "Voice",
-          "normalize_audio": "Enable loudness for generated audio (uses more CPU)"
+          "normalize_audio": "Enable loudness for generated audio (uses more CPU)",
+          "cache_size": "Audio cache size (items)"
         }
       }
     }
