@@ -1,6 +1,7 @@
 """
 TTS Engine for Groq TTS.
 """
+from __future__ import annotations
 import json
 import logging
 import asyncio
