@@ -34,19 +34,21 @@ class OpenAITTSEngine:
         if voice is None:
             voice = self._voice
 
-        headers = {"Content-Type": "application/json"}
-        if self._api_key:
-            headers["Authorization"] = f"Bearer {self._api_key}"
+        headers = {"Content-Type": "application/json", "Autorisation": f"Bearer {self._api_key}"}
 
         data = {
-            "model": self._model,
-            "input": text,
-            "voice": voice,
-            "response_format": "mp3",
-            "speed": speed
+            "model_id": self._model,
+            "transcript": text,
+            "voice": {
+                "mode": id,
+                "id": voice
+            },
+            "output_format": {
+                "container": "mp3",
+                "bit_rate": 128000,
+                "sample_rate": 44100
+            },
         }
-        if instructions is not None and self._model == "gpt-4o-mini-tts":
-            data["instructions"] = instructions
 
         max_retries = 1
         attempt = 0
@@ -91,8 +93,5 @@ class OpenAITTSEngine:
     @staticmethod
     def get_supported_langs() -> list:
         return [
-            "af", "ar", "hy", "az", "be", "bs", "bg", "ca", "zh", "hr", "cs", "da", "nl", "en",
-            "et", "fi", "fr", "gl", "de", "el", "he", "hi", "hu", "is", "id", "it", "ja", "kn",
-            "kk", "ko", "lv", "lt", "mk", "ms", "mr", "mi", "ne", "no", "fa", "pl", "pt", "ro",
-            "ru", "sr", "sk", "sl", "es", "sw", "sv", "tl", "ta", "th", "tr", "uk", "ur", "vi", "cy"
+            "en", "fr", "de", "es", "pt", "zh", "ja", "hi", "it", "ko", "nl", "pl", "ru", "sv", "tr"
         ]
