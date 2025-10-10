@@ -1,5 +1,5 @@
 {
-    "name": "OpenAI TTS Speech Service",
+    "name": "Cartesia TTS Service",
     "homeassistant": "2024.5.3",
     "render_readme": true,
     "version": "0.2.3"
