@@ -40,6 +40,8 @@ async def async_get_config_entry_diagnostics(
         "chime_sound": redacted_options.get(CONF_CHIME_SOUND),
         "normalize_audio": redacted_options.get(CONF_NORMALIZE_AUDIO, False),
         "cache_size": redacted_options.get(CONF_CACHE_SIZE),
+        # Expose configured cache capacity; runtime cache counts are not tracked here
+        "cache_capacity": redacted_options.get(CONF_CACHE_SIZE),
     }
 
     return {

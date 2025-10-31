@@ -62,6 +62,72 @@ async def fetch_available(hass, endpoint: str, api_key: str | None = None) -> li
         _LOGGER.debug("Error fetching %s: %s", endpoint, err)
     return []
 
+async def async_check_credentials_and_model(
+    hass, api_key: str | None, model: str
+) -> tuple[bool, str | None]:
+    """Validate API key and model by querying Groq models endpoint.
+
+    Returns (ok, error_reason) where error_reason is one of:
+    - "invalid_auth" for 401/403
+    - "cannot_connect" for network/timeouts
+    - "invalid_model" if model not offered by API
+    - "unknown_error" otherwise
+    """
+    try:
+        session = async_get_clientsession(hass)
+        headers = {}
+        if api_key:
+            headers["Authorization"] = f"Bearer {api_key}"
+        async with session.get(
+            "https://api.groq.com/openai/v1/models", headers=headers, timeout=10
+        ) as resp:
+            if resp.status in (401, 403):
+                return False, "invalid_auth"
+            if resp.status < 200 or resp.status >= 300:
+                return False, "unknown_error"
+            # Parse JSON without relying on aiohttp convenience to work in tests
+            from json import loads
+            # Some test stubs may not implement .text(); fall back to read().
+            if hasattr(resp, "text"):
+                text = await resp.text()
+            else:
+                raw = await resp.read()
+                text = raw.decode("utf-8", errors="ignore") if isinstance(raw, (bytes, bytearray)) else str(raw)
+            try:
+                payload = loads(text) if text else {}
+            except Exception:
+                payload = {}
+            items = payload.get("data") or payload
+            offered = set()
+            if isinstance(items, list):
+                for item in items:
+                    if isinstance(item, dict):
+                        name = item.get("id") or item.get("name")
+                        if name:
+                            offered.add(name)
+                    elif isinstance(item, str):
+                        offered.add(item)
+            elif isinstance(items, str):
+                # Attempt to parse stringified list
+                try:
+                    from json import loads as _loads
+                    arr = _loads(items)
+                    if isinstance(arr, list):
+                        for el in arr:
+                            if isinstance(el, str):
+                                offered.add(el)
+                except Exception:
+                    pass
+            # As a last resort, use substring search in raw text
+            if not offered and model and f'"{model}"' not in text:
+                return False, "invalid_model"
+            if offered and model not in offered:
+                return False, "invalid_model"
+            return True, None
+    except Exception as err:  # pylint: disable=broad-except
+        _LOGGER.debug("Credential/model check failed: %s", err)
+        return False, "cannot_connect"
+
 async def get_dynamic_options(hass, api_key: str | None) -> tuple[list[str], list[str]]:
     """Return a dynamic list of models and the built-in voices."""
     models_endpoint = "https://api.groq.com/openai/v1/models"
@@ -141,6 +207,21 @@ class GroqTTSConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 await validate_user_input(user_input)
+                # Live validation: credentials + model
+                ok, reason = await async_check_credentials_and_model(
+                    self.hass,
+                    user_input.get(CONF_API_KEY),
+                    user_input[CONF_MODEL],
+                )
+                if not ok:
+                    if reason in ("invalid_auth", "cannot_connect", "invalid_model"):
+                        errors["base"] = reason
+                    else:
+                        errors["base"] = "unknown_error"
+                        
+                    return self.async_show_form(
+                        step_id="user", data_schema=schema, errors=errors
+                    )
                 # Create a deterministic unique_id from URL + model to avoid duplicates
                 url_value = user_input[CONF_URL]
                 model_value = user_input[CONF_MODEL]
@@ -185,8 +266,8 @@ class GroqTTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
     async def async_step_reauth(self, entry_data: dict[str, Any]) -> data_entry_flow.FlowResult:
         """Handle reauthentication when credentials are invalid."""
-        # Store the entry we're reauthenticating for use in confirm step
-        self._reauth_entry = self.hass.config_entries.async_get_entry(self.context.get("entry_id"))
+        # Use helper to retrieve the entry linked to this flow
+        self._reauth_entry = self._get_reauth_entry()
         return await self.async_step_reauth_confirm()
 
     async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> data_entry_flow.FlowResult:
@@ -202,6 +283,10 @@ class GroqTTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     return self.async_abort(reason="unknown")
                 new_data = dict(reauth_entry.data)
                 new_data[CONF_API_KEY] = api_key
+                # Ensure we are updating the correct entry
+                if unique_id := reauth_entry.unique_id:
+                    await self.async_set_unique_id(unique_id)
+                    self._abort_if_unique_id_mismatch()
                 # Abort current flow, update & reload the entry with new credentials
                 return self.async_update_reload_and_abort(
                     reauth_entry,

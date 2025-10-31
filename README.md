@@ -15,6 +15,7 @@ The Groq TTS component for Home Assistant makes it possible to use the Groq API 
 - **Dynamic model discovery** – Available models are fetched from the Groq API during setup; voices are selected from a built-in list.
 - **Per-call options** – Voice and normalization can be changed when calling `tts.speak`.
 - **In-memory caching** – Frequently used phrases are cached to reduce API calls. Cache size is configurable in options.
+ - **Live validation** – The setup flow verifies your API key and the selected model with Groq before creating the entry.
 
 The integration relies on `ffmpeg` for merging chime sounds and for optional loudness normalization. Ensure `ffmpeg` is installed on the system running Home Assistant.
 
@@ -134,5 +135,6 @@ The integration prevents duplicate configuration entries by generating a determi
 - Unknown errors: Reported as "Unexpected error — please try again".
 - Non-audio API responses: The integration rejects non-audio content from the TTS API and logs details.
 - ffmpeg errors: If ffmpeg fails (e.g., missing binary or bad filter), the TTS call returns no audio and logs an error.
+- Rate limiting or temporary API errors (429/5xx): The integration automatically retries with exponential backoff.
 
 Ensure `ffmpeg` is installed and available in PATH on the Home Assistant host if you enable chime or normalization.

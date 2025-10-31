@@ -24,6 +24,7 @@ from .const import (
     CONF_NORMALIZE_AUDIO,
     CONF_CACHE_SIZE,
     DEFAULT_CACHE_SIZE,
+    VOICES,
 )
 from .groqtts_engine import GroqTTSEngine
 
@@ -79,6 +80,13 @@ class GroqTTSEntity(TextToSpeechEntity):
     @property
     def supported_languages(self) -> list:
         return self._engine.get_supported_langs()
+
+    def async_get_supported_voices(self, language: str) -> list[str] | None:
+        """Return a list of supported voices for a language.
+
+        Groq PlayAI voices are language-agnostic for now; expose the configured list.
+        """
+        return list(VOICES)
 
     @property
     def device_info(self) -> dict:
@@ -228,7 +236,62 @@ class GroqTTSEntity(TextToSpeechEntity):
                         "pipe:1",
                     ]
 
-                audio_content = await run_ffmpeg(cmd, audio_content)
+                try:
+                    if not audio_content:
+                        raise Exception("empty_audio")
+                    audio_content = await run_ffmpeg(cmd, audio_content)
+                except Exception as fferr:
+                    # If normalization was requested, retry once without it to provide audio rather than fail hard
+                    if normalize_audio:
+                        _LOGGER.warning("ffmpeg normalization failed (%s); retrying without normalization", fferr)
+                        normalize_audio = False
+                        if chime_enabled:
+                            cmd = [
+                                "ffmpeg",
+                                "-hide_banner",
+                                "-loglevel",
+                                "error",
+                                "-y",
+                                "-i",
+                                chime_path,
+                                "-i",
+                                "pipe:0",
+                                "-filter_complex",
+                                "[0:a][1:a]concat=n=2:v=0:a=1[out]",
+                                "-map",
+                                "[out]",
+                                "-ac",
+                                "1",
+                                "-ar",
+                                "24000",
+                                "-b:a",
+                                "128k",
+                                "-f",
+                                "mp3",
+                                "pipe:1",
+                            ]
+                        else:
+                            cmd = [
+                                "ffmpeg",
+                                "-hide_banner",
+                                "-loglevel",
+                                "error",
+                                "-y",
+                                "-i",
+                                "pipe:0",
+                                "-ac",
+                                "1",
+                                "-ar",
+                                "24000",
+                                "-b:a",
+                                "128k",
+                                "-f",
+                                "mp3",
+                                "pipe:1",
+                            ]
+                        audio_content = await run_ffmpeg(cmd, audio_content)
+                    else:
+                        raise
 
             overall_duration = (time.monotonic() - overall_start) * 1000
             _LOGGER.debug("Overall TTS processing time: %.2f ms", overall_duration)

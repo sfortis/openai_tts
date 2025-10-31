@@ -53,7 +53,7 @@ class GroqTTSEngine:
             self._cache[cache_key] = content
             return AudioResponse(content)
 
-        max_retries = 1
+        max_retries = 3
         attempt = 0
 
         if self._session is None:
@@ -67,18 +67,30 @@ class GroqTTSEngine:
                     ctype = resp.headers.get("content-type", "")
                     # Treat non-2xx as errors; try to parse JSON body for details
                     if resp.status < 200 or resp.status >= 300:
-                        if resp.status in (401, 403):
-                            raise ConfigEntryAuthFailed("Authentication failed for Groq TTS API")
+                        status = resp.status
+                        if status in (401, 403):
+                            # Import dynamically to align with test stubs overriding module
+                            from importlib import import_module
+                            exc_mod = import_module("homeassistant.exceptions")
+                            raise exc_mod.ConfigEntryAuthFailed("Authentication failed for Groq TTS API")
+                        # Retry on 429/5xx with exponential backoff
+                        if status == 429 or 500 <= status <= 599:
+                            if attempt < max_retries:
+                                attempt += 1
+                                delay = min(8.0, 0.5 * (2 ** (attempt - 1)))
+                                _LOGGER.debug("Groq API HTTP %s, retrying in %.2fs (attempt %d/%d)", status, delay, attempt, max_retries)
+                                await asyncio.sleep(delay)
+                                continue
                         try:
                             if ctype.startswith("application/json"):
                                 payload = json.loads(content.decode("utf-8", errors="ignore"))
                                 detail = payload.get("error") or payload
-                                raise HomeAssistantError(f"Groq API error (HTTP {resp.status}): {detail}")
-                            raise HomeAssistantError(f"Groq API error (HTTP {resp.status})")
+                                raise HomeAssistantError(f"Groq API error (HTTP {status}): {detail}")
+                            raise HomeAssistantError(f"Groq API error (HTTP {status})")
                         except HomeAssistantError:
                             raise
                         except Exception:
-                            raise HomeAssistantError(f"Groq API error (HTTP {resp.status})")
+                            raise HomeAssistantError(f"Groq API error (HTTP {status})")
                     # If JSON arrives on 2xx, check for embedded error structure
                     if ctype.startswith("application/json"):
                         try:
@@ -114,8 +126,9 @@ class GroqTTSEngine:
                     error_hint = " (You may need to accept the PlayAI TTS model terms at https://console.groq.com/playground?model=playai-tts)"
                 if attempt < max_retries:
                     attempt += 1
-                    await asyncio.sleep(1)
-                    _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
+                    delay = min(8.0, 0.5 * (2 ** (attempt - 1)))
+                    _LOGGER.debug("Network error, retrying in %.2fs (attempt %d/%d)", delay, attempt, max_retries)
+                    await asyncio.sleep(delay)
                     continue
                 raise HomeAssistantError(
                     f"Network error occurred while fetching TTS audio (HTTP {status_code}): {error_body}{error_hint}"
@@ -124,8 +137,9 @@ class GroqTTSEngine:
                 _LOGGER.exception("Unknown error in async_get_tts on attempt %d", attempt + 1)
                 if attempt < max_retries:
                     attempt += 1
-                    await asyncio.sleep(1)
-                    _LOGGER.debug("Retrying HTTP call (attempt %d)", attempt + 1)
+                    delay = min(8.0, 0.5 * (2 ** (attempt - 1)))
+                    _LOGGER.debug("Retrying HTTP call in %.2fs (attempt %d/%d)", delay, attempt, max_retries)
+                    await asyncio.sleep(delay)
                     continue
                 raise HomeAssistantError("An unknown error occurred while fetching TTS audio") from exc
 

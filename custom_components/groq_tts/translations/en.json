@@ -10,10 +10,26 @@
           "voice": "Voice",
           "url": "Enter the Groq TTS endpoint."
         }
+      },
+      "reauth_confirm": {
+        "title": "Reauthenticate Groq TTS",
+        "description": "Your credentials are no longer valid. Please enter a new API key.",
+        "data": {
+          "api_key": "Groq API key"
+        }
       }
     },
     "error": {
-      "wrong_api_key": "Invalid API key. Please enter a valid API key."
+      "wrong_api_key": "Invalid API key. Please enter a valid API key.",
+      "invalid_auth": "Invalid API key. Please enter a valid API key.",
+      "cannot_connect": "Cannot connect to Groq API. Check network and try again.",
+      "invalid_model": "Selected model is not available for your account.",
+      "invalid_url": "Invalid URL. Please enter a valid URL.",
+      "required": "This field is required.",
+      "unknown_error": "Unexpected error — please try again."
+    },
+    "abort": {
+      "reauth_successful": "Reauthentication successful"
     }
   },
   "options": {

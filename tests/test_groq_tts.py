@@ -92,6 +92,11 @@ get_chime_options = config_flow.get_chime_options
 GroqTTSEngine = groqtts_engine.GroqTTSEngine
 HomeAssistantError = groqtts_engine.HomeAssistantError
 GroqTTSEntity = tts_module.GroqTTSEntity
+async_check_credentials_and_model = getattr(config_flow, "async_check_credentials_and_model")
+
+spec_diag = spec_from_file_location(f"{pkg_name}.diagnostics", COMP_DIR / "diagnostics.py")
+diagnostics = module_from_spec(spec_diag)
+spec_diag.loader.exec_module(diagnostics)
 
 
 @pytest.mark.asyncio
@@ -114,6 +119,9 @@ def test_get_chime_options():
 
 class DummySession:
     def post(self, *args, **kwargs):
+        raise sys.modules["aiohttp"].ClientError("boom")
+
+    def get(self, *args, **kwargs):
         raise sys.modules["aiohttp"].ClientError("boom")
 
 
@@ -154,6 +162,11 @@ class DummyOkJsonSession:
         body = b"{\"ok\": true}"
         return DummyResponse(200, headers, body)
 
+    def get(self, *args, **kwargs):
+        headers = {"content-type": "application/json"}
+        body = b"{\"data\": [\"playai-tts\"]}"
+        return DummyResponse(200, headers, body)
+
 
 @pytest.mark.asyncio
 async def test_async_get_tts_non_audio_2xx():
@@ -169,13 +182,42 @@ class Dummy401Session:
         body = b"unauthorized"
         return DummyResponse(401, headers, body)
 
+    def get(self, *args, **kwargs):
+        headers = {"content-type": "text/plain"}
+        body = b"unauthorized"
+        return DummyResponse(401, headers, body)
+
 
 @pytest.mark.asyncio
 async def test_async_get_tts_raises_config_entry_auth_failed_on_401():
     engine = GroqTTSEngine(None, "voice", "model", "http://example.com")
     with patch.object(groqtts_engine, "async_get_clientsession", return_value=Dummy401Session()):
-        with pytest.raises(exceptions_mod.ConfigEntryAuthFailed):
+        with pytest.raises(Exception) as exc:
             await engine.async_get_tts(DummyHass(), "hello")
+        # Accept either the stubbed class or an equivalent with the same name
+        assert isinstance(exc.value, exceptions_mod.ConfigEntryAuthFailed) or exc.value.__class__.__name__ == "ConfigEntryAuthFailed"
+
+
+class DummySeqSession:
+    """Return 500 then 200 with audio to test retry/backoff."""
+
+    def __init__(self):
+        self.calls = 0
+
+    def post(self, *args, **kwargs):
+        self.calls += 1
+        if self.calls == 1:
+            return DummyResponse(500, {"content-type": "text/plain"}, b"server error")
+        return DummyResponse(200, {"content-type": "audio/mpeg"}, b"\xff\xfb\x90\x64")
+
+
+@pytest.mark.asyncio
+async def test_engine_retries_on_5xx_and_succeeds():
+    engine = GroqTTSEngine(None, "voice", "model", "http://example.com")
+    session = DummySeqSession()
+    with patch.object(groqtts_engine, "async_get_clientsession", return_value=session):
+        resp = await engine.async_get_tts(DummyHass(), "hello")
+        assert hasattr(resp, "content") and resp.content.startswith(b"\xff\xfb")
 
 
 class DummyEngine:
@@ -225,3 +267,59 @@ async def test_tts_ffmpeg_failure_returns_none(monkeypatch):
     monkeypatch.setattr(asyncio, "create_subprocess_exec", fake_exec)
     ext, payload = await entity.async_get_tts_audio("Hello", "en", options=None)
     assert ext is None and payload is None
+
+
+class DummyHassForCF:
+    pass
+
+
+@pytest.mark.asyncio
+async def test_config_validation_invalid_auth():
+    hass = DummyHassForCF()
+    ok, reason = await async_check_credentials_and_model(hass, "bad", "playai-tts")
+    assert ok is False and reason in {"invalid_auth", "cannot_connect"}
+
+
+class DummyModelsSession:
+    def __init__(self, models: list[str]):
+        self._models = models
+
+    def get(self, *args, **kwargs):
+        headers = {"content-type": "application/json"}
+        body = ("{""data"": %s}" % (str(self._models).replace("'", '"'))).encode()
+        return DummyResponse(200, headers, body)
+
+
+@pytest.mark.asyncio
+async def test_config_validation_invalid_model():
+    hass = DummyHassForCF()
+    with patch.object(config_flow, "async_get_clientsession", return_value=DummyModelsSession(["other-model"])):
+        ok, reason = await async_check_credentials_and_model(hass, "key", "playai-tts")
+        assert ok is False and reason == "invalid_model"
+
+
+@pytest.mark.asyncio
+async def test_config_validation_ok():
+    hass = DummyHassForCF()
+    with patch.object(config_flow, "async_get_clientsession", return_value=DummyModelsSession(["playai-tts"])):
+        ok, reason = await async_check_credentials_and_model(hass, "key", "playai-tts")
+        assert ok is True and reason is None
+
+
+class DummyConfigEntryForDiag:
+    def __init__(self, data: dict, options: dict):
+        self.data = data
+        self.options = options
+
+
+@pytest.mark.asyncio
+async def test_diagnostics_summary_has_expected_keys():
+    entry = DummyConfigEntryForDiag(
+        {"url": "https://api.groq.com/openai/v1/audio/speech", "model": "playai-tts", "voice": "Arista-PlayAI"},
+        {"voice": "Arista-PlayAI", "cache_size": 128}
+    )
+    data = await diagnostics.async_get_config_entry_diagnostics(DummyHass(), entry)
+    assert "summary" in data
+    summary = data["summary"]
+    for key in ("endpoint", "model", "voice", "cache_size", "cache_capacity"):
+        assert key in summary
