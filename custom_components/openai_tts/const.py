@@ -27,3 +27,6 @@ CONF_PAUSE_PLAYBACK = "pause_playback"
 
 # Profile name for sub-entries
 CONF_PROFILE_NAME = "profile_name"
+
+# Key for storing message-to-duration cache in hass.data
+MESSAGE_DURATIONS_KEY = "message_durations"

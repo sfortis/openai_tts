@@ -16,15 +16,25 @@
           "api_key": "API Key",
           "url": "API Endpoint"
         }
+      },
+      "reauth_confirm": {
+        "title": "Re-authenticate OpenAI TTS",
+        "description": "The API key for {title} is no longer valid. Please enter a new API key.",
+        "data": {
+          "api_key": "API Key"
+        }
       }
     },
     "error": {
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
+      "invalid_api_key": "Invalid API key. Please check your API key and try again.",
+      "cannot_connect": "Cannot connect to OpenAI API. Please check your network and API endpoint.",
       "duplicate_api_key": "An entry with this API key already exists. Each integration entry must have a unique API key."
     },
     "abort": {
       "already_configured": "This instance is already configured",
-      "reconfigure_successful": "Configuration updated successfully"
+      "reconfigure_successful": "Configuration updated successfully",
+      "reauth_successful": "Re-authentication successful"
     }
   },
   "options": {

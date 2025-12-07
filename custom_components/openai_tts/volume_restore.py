@@ -20,7 +20,7 @@ from homeassistant.const import (
 )
 from homeassistant.helpers import entity_registry
 
-from .const import DOMAIN, CONF_VOLUME_RESTORE, CONF_PAUSE_PLAYBACK
+from .const import DOMAIN, CONF_VOLUME_RESTORE, CONF_PAUSE_PLAYBACK, MESSAGE_DURATIONS_KEY
 from .utils import (
     get_media_player_state,
     call_media_player_service,
@@ -47,6 +47,26 @@ PLATFORM_VOLUME_DELAYS = {
 
 # Fallback duration when TTS duration cannot be determined
 FALLBACK_DURATION_MS = 10000  # 10 seconds in milliseconds
+
+
+def _get_message_hash(message: str) -> str:
+    """Get a hash for a message to use as cache key (must match tts.py)."""
+    import hashlib
+    return hashlib.md5(message.encode()).hexdigest()[:16]
+
+
+def _get_cached_duration(hass: HomeAssistant, message: str) -> int | None:
+    """Get cached duration for a message from the shared cache."""
+    msg_hash = _get_message_hash(message)
+    cache = hass.data.get(DOMAIN, {}).get(MESSAGE_DURATIONS_KEY, {})
+    cached = cache.get(msg_hash)
+    if cached:
+        duration_ms = cached.get('duration_ms')
+        if duration_ms:
+            _LOGGER.info("Found cached duration for message: %d ms (hash: %s)", duration_ms, msg_hash)
+            return duration_ms
+    _LOGGER.debug("No cached duration found for message hash: %s (cache has %d entries)", msg_hash, len(cache))
+    return None
 
 
 class OptimizedVolumeRestorer:
@@ -208,38 +228,88 @@ class OptimizedVolumeRestorer:
             _LOGGER.info("Player preparation complete. Original volumes: %s", self._original_volumes)
     
     async def restore_with_duration(self, duration_ms: int) -> None:
-        """Restore volumes after TTS playback using known duration."""
+        """Restore volumes after TTS playback using known duration.
+
+        Each speaker runs in its own async task with platform-specific timing.
+        """
         # Ensure preparation is complete
         if not self._preparation_complete:
             _LOGGER.warning("Restoration called before preparation complete")
             await asyncio.sleep(0.5)
-        
-        _LOGGER.debug("Starting volume restoration with duration %d ms", duration_ms)
-        
-        # For Sonos, use a shorter pre-restoration delay
-        has_sonos = any(self._detect_platform(entity_id) == "sonos" for entity_id in self.entity_ids)
-        
-        if has_sonos:
-            # For Sonos, reduce the buffer significantly since announcement feature handles transitions
-            # We only need to account for network latency, not transition time
-            max_buffer = 200  # Much shorter buffer for Sonos
-            _LOGGER.debug("Using reduced buffer for Sonos announcement feature")
-        else:
-            # Calculate total wait time with platform-specific buffers
-            max_buffer = max(self._platform_buffers.values()) if self._platform_buffers else 600
-        
-        total_wait_ms = duration_ms + max_buffer
-        
-        _LOGGER.debug("Volume restoration timer: TTS %d ms + buffer %d ms = %.1f seconds total", 
-                     duration_ms, max_buffer, total_wait_ms / 1000)
-        
-        # Wait for TTS to complete
-        start_time = asyncio.get_event_loop().time()
+
+        task_start_time = asyncio.get_running_loop().time()
+        _LOGGER.info("=== STARTING PARALLEL RESTORATION at %.3f ===", task_start_time)
+        _LOGGER.info("Duration: %d ms, Speakers: %d", duration_ms, len(self._original_volumes))
+
+        # Create independent tasks for each speaker
+        restore_tasks = []
+
+        for entity_id, original_volume in self._original_volumes.items():
+            platform = self._detect_platform(entity_id)
+            buffer_ms = self._platform_buffers.get(entity_id, PLATFORM_BUFFERS.get(platform, 500))
+
+            # Sonos buffer - needs enough time for audio to finish
+            if platform == "sonos":
+                buffer_ms = 500
+
+            _LOGGER.info("Creating task for %s: duration=%d, buffer=%d, total_wait=%d ms",
+                        entity_id, duration_ms, buffer_ms, duration_ms + buffer_ms)
+
+            # Create independent task for this speaker
+            task = asyncio.create_task(
+                self._restore_speaker_independent(entity_id, original_volume, duration_ms, buffer_ms)
+            )
+            restore_tasks.append(task)
+            _LOGGER.info("Task created for %s at %.3f", entity_id, asyncio.get_running_loop().time())
+
+        # Schedule media resume tasks (run after longest duration)
+        if self._playing_media:
+            max_wait = duration_ms + max(self._platform_buffers.values(), default=500)
+            for entity_id in self._playing_media:
+                task = asyncio.create_task(
+                    self._resume_media_after_delay(entity_id, max_wait)
+                )
+                restore_tasks.append(task)
+
+        # Wait for all restoration tasks to complete
+        if restore_tasks:
+            results = await asyncio.gather(*restore_tasks, return_exceptions=True)
+            success_count = sum(1 for r in results if r is True)
+            if success_count > 0:
+                _LOGGER.info("Successfully restored %d speakers", success_count)
+
+    async def _restore_speaker_independent(
+        self, entity_id: str, original_volume: float, duration_ms: int, buffer_ms: int
+    ) -> bool:
+        """Restore a single speaker's volume independently with its own timing."""
+        total_wait_ms = duration_ms + buffer_ms
+        start_time = asyncio.get_running_loop().time()
+
+        _LOGGER.info("%s: STARTING wait - %d ms (duration) + %d ms (buffer) = %.1f seconds",
+                     entity_id, duration_ms, buffer_ms, total_wait_ms / 1000)
+
+        # Wait for this speaker's specific duration
         await asyncio.sleep(total_wait_ms / 1000)
-        actual_wait = (asyncio.get_event_loop().time() - start_time) * 1000
-        
-        # Restore volumes and resume in parallel
-        await self._restore_all_parallel()
+
+        elapsed = (asyncio.get_running_loop().time() - start_time) * 1000
+        _LOGGER.info("%s: FINISHED wait after %.0f ms, now restoring volume",
+                     entity_id, elapsed)
+
+        # Restore volume
+        result = await self._restore_volume_safe(entity_id, original_volume)
+
+        _LOGGER.info("%s: Volume restore completed (success=%s)", entity_id, result)
+        return result
+
+    async def _resume_media_after_delay(self, entity_id: str, delay_ms: int) -> bool:
+        """Resume media playback after a delay."""
+        await asyncio.sleep(delay_ms / 1000)
+        try:
+            await call_media_player_service(self.hass, SERVICE_MEDIA_PLAY, entity_id)
+            return True
+        except Exception as e:
+            _LOGGER.error("Failed to resume media on %s: %s", entity_id, e)
+            return False
     
     async def _restore_all_parallel(self) -> None:
         """Restore volumes and resume media in parallel."""
@@ -437,12 +507,12 @@ async def announce(
         
         _LOGGER.debug("TTS entity %s state: %s", tts_entity, tts_entity_state.state)
         
-        # Start preparing players immediately (non-blocking) - no volume setting yet
+        # Start preparing players immediately (non-blocking)
         prepare_task = None
         if restorer:
             prepare_task = asyncio.create_task(
                 restorer.prepare_parallel(
-                    target_volume=None,  # Don't set volume during preparation
+                    target_volume=None,  # Don't set volume yet
                     pause_playback=pause_enabled
                 )
             )
@@ -457,14 +527,8 @@ async def announce(
         try:
             for attempt in range(max_retries):
                 try:
-                    # Ensure preparation is complete before attempting to play
-                    if prepare_task:
-                        if not prepare_task.done():
-                            await prepare_task
-                    
-                    # Don't change volume yet - wait until after TTS generation
                     if attempt == 0:
-                        _LOGGER.debug("Calling TTS speak service with entity: %s", tts_entity)
+                        _LOGGER.debug("Generating TTS audio first (without players)")
                     
                     # Check if entity exists
                     tts_state = hass.states.get(tts_entity)
@@ -472,6 +536,11 @@ async def announce(
                         _LOGGER.error("TTS entity %s not found in states!", tts_entity)
                     else:
                         _LOGGER.debug("TTS entity %s found, state: %s", tts_entity, tts_state.state)
+                    
+                    # Ensure preparation is complete before attempting to play
+                    if prepare_task:
+                        if not prepare_task.done():
+                            await prepare_task
                     
                     # Prepare service data for HA's speak service
                     service_data = {
@@ -483,10 +552,23 @@ async def announce(
                     
                     # Store whether we need to change volume later
                     need_volume_change = restorer and tts_volume is not None
-                    
+
+                    # Initialize playback_start_time before try block to avoid undefined variable
+                    playback_start_time = asyncio.get_running_loop().time()
+
+                    # Capture duration BEFORE calling speak to detect changes
+                    pre_speak_state = hass.states.get(tts_entity)
+                    pre_speak_duration = pre_speak_state.attributes.get('media_duration') if pre_speak_state else None
+                    pre_speak_timestamp = pre_speak_state.last_changed if pre_speak_state else None
+                    _LOGGER.debug("Pre-speak duration: %s ms, timestamp: %s", pre_speak_duration, pre_speak_timestamp)
+
+                    # Set volume BEFORE calling speak (audio starts playing during the call!)
+                    if need_volume_change:
+                        _LOGGER.info("Setting volume BEFORE speak (for streaming)")
+                        await restorer._set_volume_for_all_players(tts_volume, skip_delay=True)
+
                     # Call TTS service to generate and play audio
-                    # Note: This is atomic - we can't separate generation from playback
-                    tts_start = asyncio.get_event_loop().time()
+                    tts_start = asyncio.get_running_loop().time()
                     await hass.services.async_call(
                         TTS_DOMAIN,
                         "speak",
@@ -494,49 +576,102 @@ async def announce(
                         target={"entity_id": tts_entity},
                         blocking=True,
                     )
-                    
-                    tts_generation_time = (asyncio.get_event_loop().time() - tts_start) * 1000
+
+                    tts_end_time = asyncio.get_running_loop().time()
+                    tts_generation_time = (tts_end_time - tts_start) * 1000
                     _LOGGER.info("TTS speak service call completed in %.0f ms", tts_generation_time)
-                    
-                    # Wait a short time to check if TTS actually succeeded
-                    # The speak service doesn't raise exceptions for TTS generation failures
-                    await asyncio.sleep(0.5)
-                    
-                    # Wait for TTS generation to complete by monitoring engine_active flag
+
+                    # Check if TTS is actively generating audio
+                    tts_state = hass.states.get(tts_entity)
+                    engine_active = tts_state.attributes.get('engine_active', False) if tts_state else False
+
+                    # Check if HA served cached audio (fast response + engine not active)
+                    # HA cache hit: speak returns very quickly (< 200ms) and engine was never activated
+                    ha_cache_hit = tts_generation_time < 200 and not engine_active
+
+                    # Determine when playback actually started:
+                    # - Streaming: playback starts during speak call (at tts_start)
+                    # - Non-streaming (chime/normalize): playback starts AFTER speak returns (at tts_end_time)
+                    # - HA cache hit: playback starts immediately when speak is called
+                    if ha_cache_hit:
+                        # HA served cached audio - playback started at speak call
+                        playback_start_time = tts_start
+                        _LOGGER.debug("HA cache hit - playback started at speak call")
+                    elif tts_generation_time > 500:
+                        # Long generation time = non-streaming, playback starts after speak returns
+                        playback_start_time = tts_end_time
+                        _LOGGER.debug("Non-streaming detected - playback starts after speak returns")
+                    else:
+                        # Short generation time but not cache = streaming, playback started at speak
+                        playback_start_time = tts_start
+                        _LOGGER.debug("Streaming detected - playback started at speak call")
+
+                    # Only use cached duration if engine is NOT active (true cached audio from HA)
+                    # If engine is active, audio is being regenerated and duration may change
+                    if not engine_active:
+                        cached_duration = _get_cached_duration(hass, message)
+                        if cached_duration:
+                            _LOGGER.info("Using cached duration (engine idle): %d ms", cached_duration)
+                            duration_ms = cached_duration
+                            tts_success = True
+                            break
+                        elif ha_cache_hit:
+                            # HA served cached audio but we don't have duration - use fallback immediately
+                            _LOGGER.warning("HA served cached audio but no duration in cache - using fallback")
+                            duration_ms = FALLBACK_DURATION_MS
+                            tts_success = True
+                            break
+                    else:
+                        _LOGGER.info("Engine active - waiting for fresh duration (not using cache)")
+
+                    # Not in shared cache yet - TTS is generating new audio
+                    # Wait for TTS generation to complete
                     max_wait_time = 30  # seconds
-                    check_interval = 0.1  # seconds - faster checking for better timing
+                    check_interval = 0.2  # seconds
                     waited_time = 0
-                    volume_changed = False
-                    
+                    volume_changed = True  # Already set above
+
                     while waited_time < max_wait_time:
                         tts_state = hass.states.get(tts_entity)
-                        if tts_state and hasattr(tts_state, 'attributes'):
-                            # Check if engine is still generating audio
-                            if not tts_state.attributes.get('engine_active', False):
-                                # Engine is done - change volume NOW if we haven't already
-                                if need_volume_change and not volume_changed:
-                                    _LOGGER.info("TTS generation complete, changing volume immediately")
-                                    await restorer._set_volume_for_all_players(tts_volume, skip_delay=True)
-                                    volume_changed = True
-                                    # Small delay to let volume change take effect
-                                    await asyncio.sleep(0.1)
-                                
-                                # Check for duration
-                                entity_duration = tts_state.attributes.get('media_duration')
-                                if entity_duration:
-                                    duration_ms = entity_duration
-                                    _LOGGER.info("Got media duration from TTS entity: %d ms (after %.1fs wait)", duration_ms, waited_time)
+                        engine_active = tts_state.attributes.get('engine_active', False) if tts_state else False
+
+                        # Engine finished - check shared cache for duration
+                        if not engine_active and (volume_changed or waited_time > 0.5):
+                            # IMPORTANT: For chime/normalize audio, playback starts NOW
+                            # (when engine finishes), not when speak was called!
+                            playback_start_time = asyncio.get_running_loop().time()
+                            _LOGGER.info("Engine finished - playback starts NOW (chime/normalize mode)")
+
+                            # Wait briefly for duration to be stored
+                            for _ in range(30):  # Up to 3 seconds
+                                await asyncio.sleep(0.1)
+                                cached_duration = _get_cached_duration(hass, message)
+                                if cached_duration:
+                                    duration_ms = cached_duration
+                                    _LOGGER.info("Got duration from wait loop: %d ms (full duration, no elapsed)", duration_ms)
                                     tts_success = True
                                     break
                             else:
-                                _LOGGER.debug("TTS engine still active, waiting... (%.1fs)", waited_time)
-                        
+                                # Fallback: use entity state or default
+                                entity_duration = tts_state.attributes.get('media_duration') if tts_state else None
+                                if entity_duration and entity_duration != pre_speak_duration:
+                                    duration_ms = int(entity_duration)
+                                    _LOGGER.info("Using entity duration: %d ms", duration_ms)
+                                    tts_success = True
+                                else:
+                                    duration_ms = FALLBACK_DURATION_MS
+                                    _LOGGER.warning("Using fallback duration: %d ms", duration_ms)
+                                    tts_success = True
+
+                            break
+
                         await asyncio.sleep(check_interval)
                         waited_time += check_interval
-                    
+
                     if not tts_success:
-                        _LOGGER.warning("TTS generation timed out or no duration available")
-                        tts_success = False
+                        _LOGGER.warning("TTS generation timed out")
+                        duration_ms = FALLBACK_DURATION_MS
+                        tts_success = True
                     
                     # Success - break out of retry loop
                     break
@@ -561,10 +696,15 @@ async def announce(
             if not duration_ms:
                 _LOGGER.warning("No duration available from TTS entity, using 10 second fallback timer")
                 duration_ms = FALLBACK_DURATION_MS
-            
+
             # Handle restoration with the known duration
             if restorer:
-                await restorer.restore_with_duration(duration_ms)
+                # Account for time already elapsed since playback started
+                elapsed_ms = int((asyncio.get_running_loop().time() - playback_start_time) * 1000)
+                remaining_ms = max(0, duration_ms - elapsed_ms)
+                _LOGGER.info("TTS: %d ms elapsed, %d ms remaining of %d ms total",
+                           elapsed_ms, remaining_ms, duration_ms)
+                await restorer.restore_with_duration(remaining_ms)
         else:
             # TTS failed - restore volumes immediately without waiting
             _LOGGER.warning("TTS generation failed, restoring volumes immediately")

@@ -12,6 +12,7 @@ import voluptuous as vol
 from homeassistant.const import Platform, ATTR_ENTITY_ID
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 
@@ -41,7 +42,6 @@ _LOGGER = logging.getLogger(__name__)
 PLATFORMS: list[str] = [Platform.TTS]
 SERVICE_NAME = "say"
 SUBENTRY_TYPE_PROFILE = "profile"
-CONF_PROFILE_NAME = "profile_name"
 
 # Service Schema
 SAY_SCHEMA = vol.Schema(
@@ -445,21 +445,58 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             
             # Validate TTS entity
             tts_entity = data["tts_entity"]
-            if not hass.states.get(tts_entity):
+            tts_state = hass.states.get(tts_entity)
+            if not tts_state:
                 raise ValueError(f"TTS entity {tts_entity} not found")
-            
-            # Get service data (excluding entity_id)
+
+            # Get TTS entity's default options from its config
+            # Look up the entity to get its default_options property
+            entity_defaults = {}
+            entity_reg = er.async_get(hass)
+            entity_entry = entity_reg.async_get(tts_entity)
+            if entity_entry and entity_entry.config_subentry_id:
+                # This is a subentry-based entity - find the parent and subentry
+                for entry in hass.config_entries.async_entries(DOMAIN):
+                    if hasattr(entry, 'subentries') and entry.subentries:
+                        for subentry_id, subentry in entry.subentries.items():
+                            if subentry_id == entity_entry.config_subentry_id:
+                                entity_defaults = {
+                                    "chime": subentry.data.get(CONF_CHIME_ENABLE, False),
+                                    "chime_sound": subentry.data.get(CONF_CHIME_SOUND, "threetone.mp3"),
+                                    "normalize_audio": subentry.data.get(CONF_NORMALIZE_AUDIO, False),
+                                }
+                                _LOGGER.debug("Found entity defaults from subentry: %s", entity_defaults)
+                                break
+            elif entity_entry and entity_entry.config_entry_id:
+                # Legacy entry - get from config entry options
+                config_entry = hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+                if config_entry:
+                    entity_defaults = {
+                        "chime": config_entry.options.get(CONF_CHIME_ENABLE, config_entry.data.get(CONF_CHIME_ENABLE, False)),
+                        "chime_sound": config_entry.options.get(CONF_CHIME_SOUND, config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3")),
+                        "normalize_audio": config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, False)),
+                    }
+                    _LOGGER.debug("Found entity defaults from config entry: %s", entity_defaults)
+
+            # Get service data - use entity defaults for options not explicitly set
             message = data["message"]
             language = data.get("language", "en")
+
+            # For chime/normalize_audio: use service call value if provided, else entity default
+            # Note: data.get("chime") returns None if not in call, False if explicitly set to False
+            chime_value = data.get("chime") if "chime" in data else entity_defaults.get("chime", False)
+            normalize_value = data.get("normalize_audio") if "normalize_audio" in data else entity_defaults.get("normalize_audio", False)
+            chime_sound_value = data.get("chime_sound") if "chime_sound" in data else entity_defaults.get("chime_sound")
+
             options = {
                 "voice": data.get("voice"),
                 "speed": data.get("speed"),
                 "instructions": data.get("instructions"),
-                "chime": data.get("chime", False),
-                "chime_sound": data.get("chime_sound"),
-                "normalize_audio": data.get("normalize_audio", False),
+                "chime": chime_value,
+                "chime_sound": chime_sound_value,
+                "normalize_audio": normalize_value,
             }
-            
+
             # Remove None values
             options = {k: v for k, v in options.items() if v is not None}
             

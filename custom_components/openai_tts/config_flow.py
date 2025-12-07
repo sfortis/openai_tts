@@ -9,6 +9,7 @@ import voluptuous as vol
 import logging
 from urllib.parse import urlparse
 import uuid
+import aiohttp
 
 from homeassistant import data_entry_flow
 from homeassistant.config_entries import (
@@ -20,7 +21,7 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 from homeassistant.helpers.selector import selector, TextSelector, TextSelectorConfig, TextSelectorType, TemplateSelector
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ConfigEntryAuthFailed
 from homeassistant.core import callback
 
 from .const import (
@@ -39,17 +40,82 @@ from .const import (
     CONF_INSTRUCTIONS,
     CONF_VOLUME_RESTORE,
     CONF_PAUSE_PLAYBACK,
+    CONF_PROFILE_NAME,
 )
 
-CONF_PROFILE_NAME = "profile_name"
 SUBENTRY_TYPE_PROFILE = "profile"
 
 _LOGGER = logging.getLogger(__name__)
 
+# Custom exceptions for API validation
+class InvalidAPIKey(HomeAssistantError):
+    """Error to indicate invalid API key."""
+
+class CannotConnect(HomeAssistantError):
+    """Error to indicate connection failure."""
+
 def generate_entry_id() -> str:
     return str(uuid.uuid4())
 
-async def validate_user_input(user_input: dict):
+async def async_validate_api_key(api_key: str, url: str) -> bool:
+    """Validate the API key by making a minimal test request.
+
+    Args:
+        api_key: The OpenAI API key to validate
+        url: The API endpoint URL
+
+    Returns:
+        True if validation succeeds
+
+    Raises:
+        InvalidAPIKey: If the API key is invalid (401/403)
+        CannotConnect: If unable to connect to the API
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {api_key}"
+    }
+
+    # Make a minimal TTS request to validate the API key
+    # Using minimal text to reduce cost
+    payload = {
+        "model": "tts-1",
+        "input": ".",
+        "voice": "alloy",
+        "response_format": "mp3",
+    }
+
+    try:
+        async with aiohttp.ClientSession() as session:
+            async with session.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=aiohttp.ClientTimeout(total=10)
+            ) as response:
+                if response.status == 401:
+                    _LOGGER.error("API key validation failed: Unauthorized (401)")
+                    raise InvalidAPIKey("Invalid API key")
+                elif response.status == 403:
+                    _LOGGER.error("API key validation failed: Forbidden (403)")
+                    raise InvalidAPIKey("API key does not have required permissions")
+                elif response.status >= 400:
+                    _LOGGER.error("API validation failed with status %d", response.status)
+                    raise CannotConnect(f"API returned status {response.status}")
+
+                # Success - we got audio data back
+                _LOGGER.debug("API key validation successful")
+                return True
+
+    except aiohttp.ClientError as err:
+        _LOGGER.error("Connection error during API validation: %s", err)
+        raise CannotConnect(f"Cannot connect to API: {err}") from err
+    except TimeoutError as err:
+        _LOGGER.error("Timeout during API validation")
+        raise CannotConnect("Connection timed out") from err
+
+async def validate_user_input(user_input: dict) -> None:
+    """Validate user input for config flow."""
     if user_input.get(CONF_API_KEY) is None:
         raise ValueError("API key is required")
 
@@ -89,9 +155,11 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
         if user_input is not None:
             try:
                 await validate_user_input(user_input)
-                
+
                 # Check for duplicate API key
                 api_key = user_input.get(CONF_API_KEY)
+                api_url = user_input.get(CONF_URL, "https://api.openai.com/v1/audio/speech")
+
                 for entry in self._async_current_entries():
                     if entry.data.get(CONF_API_KEY) == api_key:
                         _LOGGER.error("An entry with this API key already exists: %s", entry.title)
@@ -102,7 +170,10 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                             data_schema=self.data_schema,
                             errors=errors,
                         )
-                
+
+                # Validate API key by making a test request
+                await async_validate_api_key(api_key, api_url)
+
                 # Use API key as the unique identifier (hashed for privacy)
                 import hashlib
                 api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
@@ -116,6 +187,10 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except data_entry_flow.AbortFlow:
                 return self.async_abort(reason="already_configured")
+            except InvalidAPIKey:
+                errors["base"] = "invalid_api_key"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
             except HomeAssistantError as e:
                 _LOGGER.exception(str(e))
                 errors["base"] = str(e)
@@ -171,7 +246,53 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
         is_legacy = has_model_voice and not has_subentries
         
         return is_legacy
-    
+
+    async def async_step_reauth(self, entry_data: dict[str, Any]) -> ConfigFlowResult:
+        """Handle reauthorization flow triggered by auth failure."""
+        self._reauth_entry = self.hass.config_entries.async_get_entry(
+            self.context.get("entry_id")
+        )
+        return await self.async_step_reauth_confirm()
+
+    async def async_step_reauth_confirm(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
+        """Handle reauthorization confirmation."""
+        errors: dict[str, str] = {}
+
+        if user_input is not None:
+            try:
+                api_key = user_input.get(CONF_API_KEY)
+                api_url = self._reauth_entry.data.get(CONF_URL, "https://api.openai.com/v1/audio/speech")
+
+                # Validate the new API key
+                await async_validate_api_key(api_key, api_url)
+
+                # Update the entry with new credentials
+                self.hass.config_entries.async_update_entry(
+                    self._reauth_entry,
+                    data={**self._reauth_entry.data, CONF_API_KEY: api_key},
+                )
+                await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
+                return self.async_abort(reason="reauth_successful")
+
+            except InvalidAPIKey:
+                errors["base"] = "invalid_api_key"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
+            except Exception:
+                _LOGGER.exception("Unexpected error during reauth")
+                errors["base"] = "unknown_error"
+
+        return self.async_show_form(
+            step_id="reauth_confirm",
+            data_schema=vol.Schema({
+                vol.Required(CONF_API_KEY): str,
+            }),
+            errors=errors,
+            description_placeholders={
+                "title": self._reauth_entry.title if self._reauth_entry else "OpenAI TTS"
+            },
+        )
+
     async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
         """Handle reconfiguration of the parent entry."""
         errors: dict[str, str] = {}
@@ -456,12 +577,12 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
 
 class OpenAITTSOptionsFlow(OptionsFlow):
     """Handle options flow for OpenAI TTS."""
-    
-    def __init__(self, config_entry):
+
+    def __init__(self, config_entry: ConfigEntry) -> None:
         """Initialize options flow."""
         self._config_entry = config_entry
-    
-    async def async_step_init(self, user_input: dict | None = None):
+
+    async def async_step_init(self, user_input: dict | None = None) -> ConfigFlowResult:
         # Check if this is a profile (subentry) or main entry
         is_profile = hasattr(self._config_entry, 'subentry_type') and self._config_entry.subentry_type == SUBENTRY_TYPE_PROFILE
         
