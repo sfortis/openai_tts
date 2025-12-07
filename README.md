@@ -23,7 +23,7 @@ index/introducing-our-next-generation-audio-models/)
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
 ### ⭐ New Features in 3.5
-- **TTS Streaming** – Reduced latency with streaming support (HA 2025.7+).
+- **TTS Streaming** – Reduced latency with streaming support (HA 2025.7+). *Note: Streaming is disabled when chime or audio normalization is enabled.*
 - **Reconfigure** – Allows changing the API key and URL endpoint without recreating the entity.
 - **Sub-entries support** – Support for sub-entries, HA 2025.7 required.
 - **Volume restoration** – Improved timing and logic for volume restoration.
