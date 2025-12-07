@@ -83,7 +83,10 @@ class OpenAITTSEngine:
         if model is None:
             model = self._model
 
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            "User-Agent": "HomeAssistant-OpenAI-TTS"
+        }
         if self._api_key:
             headers["Authorization"] = f"Bearer {self._api_key}"
 
@@ -174,7 +177,8 @@ class OpenAITTSEngine:
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._api_key}"
+            "Authorization": f"Bearer {self._api_key}",
+            "User-Agent": "HomeAssistant-OpenAI-TTS"
         }
 
         payload = {
