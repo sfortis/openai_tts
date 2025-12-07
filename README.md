@@ -22,10 +22,12 @@ index/introducing-our-next-generation-audio-models/)
 - **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
-### ⭐ New Features in 3.4b5
+### ⭐ New Features in 3.5
+- **TTS Streaming** – Reduced latency with streaming support (HA 2025.7+).
 - **Reconfigure** – Allows changing the API key and URL endpoint without recreating the entity.
 - **Sub-entries support** – Support for sub-entries, HA 2025.7 required.
-- **Volume restoration** – Improved logic and persist entity attributes after restarting home assistant.
+- **Volume restoration** – Improved timing and logic for volume restoration.
+- **Diagnostics** – Added diagnostics support for troubleshooting.
 
 ### *Caution! You need an OpenAI API key and some balance available in your OpenAI account!* ###
 visit: (https://platform.openai.com/docs/pricing)
