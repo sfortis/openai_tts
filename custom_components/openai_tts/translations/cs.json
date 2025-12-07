@@ -16,14 +16,24 @@
           "api_key": "API klíč",
           "url": "API Endpoint"
         }
+      },
+      "reauth_confirm": {
+        "title": "Znovu ověřit OpenAI TTS",
+        "description": "API klíč pro {title} již není platný. Zadejte prosím nový API klíč.",
+        "data": {
+          "api_key": "API klíč"
+        }
       }
     },
     "abort": {
       "already_configured": "Tato instance je již nakonfigurována",
-      "reconfigure_successful": "Konfigurace byla úspěšně aktualizována"
+      "reconfigure_successful": "Konfigurace byla úspěšně aktualizována",
+      "reauth_successful": "Opětovné ověření bylo úspěšné"
     },
     "error": {
       "wrong_api_key": "Neplatný API klíč. Zadejte prosím platný API klíč.",
+      "invalid_api_key": "Neplatný API klíč. Zkontrolujte prosím svůj API klíč a zkuste to znovu.",
+      "cannot_connect": "Nelze se připojit k OpenAI API. Zkontrolujte prosím síť a API endpoint.",
       "duplicate_api_key": "Integrace s tímto API klíčem již existuje. Každá integrace musí mít jedinečný API klíč."
     }
   },

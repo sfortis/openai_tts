@@ -16,14 +16,24 @@
           "api_key": "API-Schlüssel",
           "url": "API-Endpunkt"
         }
+      },
+      "reauth_confirm": {
+        "title": "OpenAI TTS erneut authentifizieren",
+        "description": "Der API-Schlüssel für {title} ist nicht mehr gültig. Bitte geben Sie einen neuen API-Schlüssel ein.",
+        "data": {
+          "api_key": "API-Schlüssel"
+        }
       }
     },
     "abort": {
       "already_configured": "Diese Instanz ist bereits konfiguriert",
-      "reconfigure_successful": "Konfiguration erfolgreich aktualisiert"
+      "reconfigure_successful": "Konfiguration erfolgreich aktualisiert",
+      "reauth_successful": "Erneute Authentifizierung erfolgreich"
     },
     "error": {
       "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein.",
+      "invalid_api_key": "Ungültiger API-Schlüssel. Bitte überprüfen Sie Ihren API-Schlüssel und versuchen Sie es erneut.",
+      "cannot_connect": "Verbindung zur OpenAI-API nicht möglich. Bitte überprüfen Sie Ihr Netzwerk und den API-Endpunkt.",
       "duplicate_api_key": "Ein Eintrag mit diesem API-Schlüssel existiert bereits. Jeder Integrationseintrag muss einen eindeutigen API-Schlüssel haben."
     }
   },
