@@ -38,6 +38,7 @@ from .const import (
     VOICES,
     MESSAGE_DURATIONS_KEY,
     CONF_PROFILE_NAME,
+    SUPPORTED_LANGUAGES,
 )
 
 SUBENTRY_TYPE_PROFILE = "profile"
@@ -444,7 +445,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @property
     def supported_languages(self) -> list[str]:
-        return ["en"]
+        return SUPPORTED_LANGUAGES
 
     @property
     def supported_options(self) -> list[str]:
