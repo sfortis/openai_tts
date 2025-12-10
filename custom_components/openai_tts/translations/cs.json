@@ -3,9 +3,9 @@
     "step": {
       "user": {
         "title": "Přidat OpenAI TTS službu",
-        "description": "Nastavte OpenAI TTS integraci pro vytvoření TTS agentů.",
+        "description": "Nastavte OpenAI TTS integraci pro vytvoření TTS agentů. API key je vyžadován pro OpenAI, volitelný pro custom endpoints.",
         "data": {
-          "api_key": "API klíč",
+          "api_key": "API Key (vyžadován pro OpenAI, volitelný pro custom endpoints)",
           "url": "API Endpoint (volitelné)"
         }
       },

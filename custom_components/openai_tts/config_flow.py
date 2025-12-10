@@ -30,6 +30,7 @@ from .const import (
     CONF_VOICE,
     CONF_SPEED,
     CONF_URL,
+    DEFAULT_URL,
     DOMAIN,
     MODELS,
     VOICES,
@@ -116,8 +117,12 @@ async def async_validate_api_key(api_key: str, url: str) -> bool:
 
 async def validate_user_input(user_input: dict) -> None:
     """Validate user input for config flow."""
-    if user_input.get(CONF_API_KEY) is None:
-        raise ValueError("API key is required")
+    api_url = user_input.get(CONF_URL, DEFAULT_URL)
+    api_key = user_input.get(CONF_API_KEY)
+
+    # API key is only required for the default OpenAI endpoint
+    if api_url == DEFAULT_URL and not api_key:
+        raise ValueError("API key is required for OpenAI API")
 
 def get_chime_options() -> list[dict[str, str]]:
     """Scan chime folder and return dropdown options."""
@@ -145,8 +150,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 1  # Increment for subentry flow support
     
     data_schema = vol.Schema({
-        vol.Required(CONF_API_KEY): str,
-        vol.Optional(CONF_URL, default="https://api.openai.com/v1/audio/speech"): str,
+        vol.Optional(CONF_API_KEY, default=""): str,
+        vol.Optional(CONF_URL, default=DEFAULT_URL): str,
     })
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> ConfigFlowResult:
@@ -156,28 +161,37 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
             try:
                 await validate_user_input(user_input)
 
-                # Check for duplicate API key
-                api_key = user_input.get(CONF_API_KEY)
-                api_url = user_input.get(CONF_URL, "https://api.openai.com/v1/audio/speech")
+                api_key = user_input.get(CONF_API_KEY, "")
+                api_url = user_input.get(CONF_URL, DEFAULT_URL)
+                is_custom_endpoint = api_url != DEFAULT_URL
 
-                for entry in self._async_current_entries():
-                    if entry.data.get(CONF_API_KEY) == api_key:
-                        _LOGGER.error("An entry with this API key already exists: %s", entry.title)
-                        errors["base"] = "duplicate_api_key"
-                        # Show the form again with the error
-                        return self.async_show_form(
-                            step_id="user",
-                            data_schema=self.data_schema,
-                            errors=errors,
-                        )
+                # Check for duplicate API key (only if API key is provided)
+                if api_key:
+                    for entry in self._async_current_entries():
+                        if entry.data.get(CONF_API_KEY) == api_key:
+                            _LOGGER.error("An entry with this API key already exists: %s", entry.title)
+                            errors["base"] = "duplicate_api_key"
+                            return self.async_show_form(
+                                step_id="user",
+                                data_schema=self.data_schema,
+                                errors=errors,
+                            )
 
-                # Validate API key by making a test request
-                await async_validate_api_key(api_key, api_url)
+                # Validate API key by making a test request (only for OpenAI or if key is provided)
+                if api_key:
+                    await async_validate_api_key(api_key, api_url)
 
-                # Use API key as the unique identifier (hashed for privacy)
+                # Generate unique ID
                 import hashlib
-                api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
-                unique_id = f"openai_tts_{api_key_hash}"
+                if api_key:
+                    # Use API key hash for unique ID
+                    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+                    unique_id = f"openai_tts_{api_key_hash}"
+                else:
+                    # Use URL hash for custom endpoints without API key
+                    url_hash = hashlib.sha256(api_url.encode()).hexdigest()[:16]
+                    unique_id = f"openai_tts_{url_hash}"
+
                 user_input[UNIQUE_ID] = unique_id
                 await self.async_set_unique_id(unique_id)
                 hostname = urlparse(user_input[CONF_URL]).hostname

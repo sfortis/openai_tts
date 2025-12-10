@@ -3,9 +3,9 @@
     "step": {
       "user": {
         "title": "Add OpenAI TTS Service",
-        "description": "Set up OpenAI TTS integration to create TTS agents.",
+        "description": "Set up OpenAI TTS integration to create TTS agents. API key is required for OpenAI, optional for custom endpoints.",
         "data": {
-          "api_key": "API Key",
+          "api_key": "API Key (required for OpenAI, optional for custom endpoints)",
           "url": "API Endpoint (optional)"
         }
       },

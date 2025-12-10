@@ -3,10 +3,10 @@
     "step": {
       "user": {
         "title": "Προσθήκη υπηρεσίας OpenAI TTS",
-        "description": "Ρυθμίστε την ενσωμάτωση OpenAI TTS για να δημιουργήσετε πράκτορες TTS.",
+        "description": "Ρυθμίστε την ενσωμάτωση OpenAI TTS για να δημιουργήσετε πράκτορες TTS. Το API key απαιτείται για OpenAI, προαιρετικό για custom endpoints.",
         "data": {
-          "api_key": "Κλειδί API",
-          "url": "Διεύθυνση API (προαιρετικό)"
+          "api_key": "API Key (απαιτείται για OpenAI, προαιρετικό για custom endpoints)",
+          "url": "API Endpoint (προαιρετικό)"
         }
       },
       "reconfigure": {

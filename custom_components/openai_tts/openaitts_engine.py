@@ -177,9 +177,10 @@ class OpenAITTSEngine:
 
         headers = {
             "Content-Type": "application/json",
-            "Authorization": f"Bearer {self._api_key}",
             "User-Agent": "HomeAssistant-OpenAI-TTS"
         }
+        if self._api_key:
+            headers["Authorization"] = f"Bearer {self._api_key}"
 
         payload = {
             "model": model,

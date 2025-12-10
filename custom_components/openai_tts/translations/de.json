@@ -3,10 +3,10 @@
     "step": {
       "user": {
         "title": "OpenAI TTS-Dienst hinzufügen",
-        "description": "Richten Sie die OpenAI TTS-Integration ein, um TTS-Agenten zu erstellen.",
+        "description": "Richten Sie die OpenAI TTS-Integration ein, um TTS-Agenten zu erstellen. API Key ist für OpenAI erforderlich, für custom endpoints optional.",
         "data": {
-          "api_key": "API-Schlüssel",
-          "url": "API-Endpunkt (optional)"
+          "api_key": "API Key (für OpenAI erforderlich, für custom endpoints optional)",
+          "url": "API Endpoint (optional)"
         }
       },
       "reconfigure": {
