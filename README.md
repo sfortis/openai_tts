@@ -22,6 +22,10 @@ index/introducing-our-next-generation-audio-models/)
 - **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
+### ⭐ New Features in 3.6
+- **Optional API key for custom endpoints** – API key is only required for OpenAI. Local/custom TTS servers can work without authentication.
+- **Multi-language support** – 54 languages now available in HA Assist pipeline settings.
+
 ### ⭐ New Features in 3.5
 - **TTS Streaming** – Reduced latency with streaming support (HA 2025.7+). *Note: Streaming is disabled when chime or audio normalization is enabled.*
 - **Reconfigure** – Allows changing the API key and URL endpoint without recreating the entity.
@@ -29,8 +33,10 @@ index/introducing-our-next-generation-audio-models/)
 - **Volume restoration** – Improved timing and logic for volume restoration.
 - **Diagnostics** – Added diagnostics support for troubleshooting.
 
-### *Caution! You need an OpenAI API key and some balance available in your OpenAI account!* ###
+### *Caution! For OpenAI, you need an API key and some balance available in your OpenAI account!* ###
 visit: (https://platform.openai.com/docs/pricing)
+
+*Note: API key is optional when using custom endpoints (local TTS servers).*
 
 ## ⭐New TTS say action
 
@@ -51,19 +57,15 @@ data:
   normalize_audio: true  # Normalize audio (for small speakers)
 ```
 
-## HACS installation ( *preferred!* ) 
+## HACS installation ( *preferred!* )
 
-1. Go to the sidebar HACS menu 
+1. Go to the sidebar HACS menu
 
-2. Click on the 3-dot overflow menu in the upper right and select the "Custom Repositories" item.
+2. Search for "OpenAI TTS" in the integrations
 
-3. Copy/paste https://github.com/sfortis/openai_tts into the "Repository" textbox and select "Integration" for the category entry.
+3. Click on the integration and download it. Restart Home Assistant to apply the component.
 
-4. Click on "Add" to add the custom repository.
-
-5. You can then click on the "OpenAI TTS Speech Services" repository entry and download it. Restart Home Assistant to apply the component.
-
-6. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
+4. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
 
 ## Manual installation
 
