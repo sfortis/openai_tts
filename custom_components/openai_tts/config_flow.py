@@ -177,8 +177,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                                 errors=errors,
                             )
 
-                # Validate API key by making a test request (only for OpenAI or if key is provided)
-                if api_key:
+                # Validate API key by making a test request (only for default OpenAI endpoint)
+                if api_key and not is_custom_endpoint:
                     await async_validate_api_key(api_key, api_url)
 
                 # Generate unique ID
