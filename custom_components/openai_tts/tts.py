@@ -43,7 +43,7 @@ from .const import (
 
 SUBENTRY_TYPE_PROFILE = "profile"
 from .openaitts_engine import OpenAITTSEngine, StreamingAudioResponse
-from .utils import get_media_duration, process_audio
+from .utils import get_media_duration, process_audio, detect_audio_format
 from homeassistant.exceptions import MaxLengthExceeded
 
 _LOGGER = logging.getLogger(__name__)
@@ -854,9 +854,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
         audio_data = audio_response.content
 
-        # Process audio if needed (chime, normalization)
-        if chime_enable or normalize_audio:
-            _LOGGER.debug("Processing audio with chime=%s, normalize=%s", chime_enable, normalize_audio)
+        # Check if audio is WAV (some custom TTS backends return WAV instead of MP3)
+        is_wav = detect_audio_format(audio_data) == "wav"
+
+        # Process audio if needed (chime, normalization, or WAV conversion)
+        if chime_enable or normalize_audio or is_wav:
+            _LOGGER.debug("Processing audio with chime=%s, normalize=%s, is_wav=%s", chime_enable, normalize_audio, is_wav)
 
             # Get chime file path
             chime_path = None
@@ -999,10 +1002,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             
             # Save state to persistent storage
             await self._save_persisted_state()
-            
-            # Process audio if needed (chime, normalization)
-            if chime_enable or normalize_audio:
-                _LOGGER.debug("Processing audio with chime=%s, normalize=%s", chime_enable, normalize_audio)
+
+            # Check if audio is WAV (some custom TTS backends return WAV instead of MP3)
+            is_wav = detect_audio_format(audio_data) == "wav"
+
+            # Process audio if needed (chime, normalization, or WAV conversion)
+            if chime_enable or normalize_audio or is_wav:
+                _LOGGER.debug("Processing audio with chime=%s, normalize=%s, is_wav=%s", chime_enable, normalize_audio, is_wav)
                 
                 # Get chime file path
                 chime_path = None

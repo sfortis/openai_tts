@@ -21,6 +21,60 @@ from homeassistant.components.media_player import (
 
 _LOGGER = logging.getLogger(__name__)
 
+
+def detect_audio_format(audio_data: bytes) -> str:
+    """
+    Detect audio format from raw bytes.
+
+    Args:
+        audio_data: Raw audio bytes
+
+    Returns:
+        "wav" if WAV format, "mp3" otherwise
+    """
+    if len(audio_data) < 4:
+        return "mp3"
+
+    # WAV files start with "RIFF"
+    if audio_data[:4] == b'RIFF':
+        return "wav"
+
+    return "mp3"
+
+
+def ensure_wav_chimes(chime_dir: str) -> None:
+    """
+    Ensure WAV versions of all MP3 chimes exist.
+    Converts MP3 chimes to WAV if the WAV version doesn't exist.
+
+    Args:
+        chime_dir: Path to the chime directory
+    """
+    if not os.path.isdir(chime_dir):
+        _LOGGER.warning("Chime directory not found: %s", chime_dir)
+        return
+
+    for filename in os.listdir(chime_dir):
+        if filename.endswith(".mp3"):
+            mp3_path = os.path.join(chime_dir, filename)
+            wav_path = os.path.join(chime_dir, filename[:-4] + ".wav")
+
+            if not os.path.exists(wav_path):
+                _LOGGER.info("Converting chime to WAV: %s", filename)
+                try:
+                    cmd = [
+                        "ffmpeg", "-y",
+                        "-i", mp3_path,
+                        "-ac", "1",
+                        "-ar", "24000",
+                        wav_path
+                    ]
+                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                    _LOGGER.debug("Created WAV chime: %s", wav_path)
+                except Exception as e:
+                    _LOGGER.error("Failed to convert chime %s to WAV: %s", filename, e)
+
+
 def get_media_duration(file_path: str) -> float:
     """
     Get the duration of a media file in seconds.
@@ -169,30 +223,46 @@ async def process_audio(
 ) -> Tuple[str, bytes, float]:
     """
     Process audio content with optional chime and normalization.
-    
+
     Args:
         hass: HomeAssistant instance
         audio_content: Raw audio content bytes
         output_path: Optional output path
         chime_enabled: Whether to add chime
-        chime_path: Path to chime file
+        chime_path: Path to chime file (MP3)
         normalize_audio: Whether to normalize audio
-        
+
     Returns:
         Tuple of (format, processed_audio, processing_time_ms)
     """
     import time
-    
+
     start_time = time.monotonic()
     ffmpeg_start_time = None
     ffmpeg_time = 0
-    
-    # Create a temporary file for TTS audio
+
+    # Detect audio format from TTS response
+    audio_format = detect_audio_format(audio_content)
+    _LOGGER.debug("Detected TTS audio format: %s", audio_format)
+
+    # If chime is enabled and TTS is WAV, use WAV chime instead
+    actual_chime_path = chime_path
+    if chime_enabled and chime_path and audio_format == "wav":
+        wav_chime_path = chime_path.replace(".mp3", ".wav")
+        if os.path.exists(wav_chime_path):
+            actual_chime_path = wav_chime_path
+            _LOGGER.debug("Using WAV chime for WAV TTS: %s", wav_chime_path)
+        else:
+            _LOGGER.warning("WAV chime not found: %s, falling back to MP3", wav_chime_path)
+
+    # Create a temporary file for TTS audio with correct extension
+    file_suffix = f".{audio_format}"
+
     def write_temp_file():
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tts_file:
+        with tempfile.NamedTemporaryFile(suffix=file_suffix, delete=False) as tts_file:
             tts_file.write(audio_content)
             return tts_file.name
-    
+
     tts_path = await hass.async_add_executor_job(write_temp_file)
     
     try:
@@ -205,26 +275,26 @@ async def process_audio(
             final_output_path = await hass.async_add_executor_job(create_temp_output)
         
         # Process based on options
-        if chime_enabled and chime_path:
+        if chime_enabled and actual_chime_path:
             if normalize_audio:
                 # Chime + normalization
                 cmd = build_ffmpeg_command(
                     final_output_path,
-                    [chime_path, tts_path],
+                    [actual_chime_path, tts_path],
                     normalize_audio=True
                 )
             else:
                 # Chime only (using concat demuxer)
                 def write_concat_list():
                     with tempfile.NamedTemporaryFile(mode="w", delete=False) as list_file:
-                        list_file.write(f"file '{chime_path}'\n")
+                        list_file.write(f"file '{actual_chime_path}'\n")
                         list_file.write(f"file '{tts_path}'\n")
                         return list_file.name
                 list_path = await hass.async_add_executor_job(write_concat_list)
-                
+
                 cmd = build_ffmpeg_command(
                     final_output_path,
-                    [chime_path, tts_path],  # Still need this for command structure
+                    [actual_chime_path, tts_path],
                     normalize_audio=False,
                     is_concat=True,
                     concat_list_path=list_path
@@ -239,21 +309,31 @@ async def process_audio(
             )
         
         else:
-            # No processing needed, just read the file
-            def read_original():
-                with open(tts_path, "rb") as f:
-                    return f.read()
-            
-            final_audio = await hass.async_add_executor_job(read_original)
-            
-            # Get duration
-            duration = await hass.async_add_executor_job(get_media_duration, tts_path)
-            
-            # Clean up and return
-            await hass.async_add_executor_job(os.remove, tts_path)
-            
-            total_time = (time.monotonic() - start_time) * 1000
-            return "mp3", final_audio, total_time
+            # No chime or normalization needed
+            if audio_format == "wav":
+                # WAV input needs conversion to MP3 for HA compatibility
+                _LOGGER.debug("Converting WAV to MP3 for Home Assistant compatibility")
+                cmd = build_ffmpeg_command(
+                    final_output_path,
+                    [tts_path],
+                    normalize_audio=False
+                )
+            else:
+                # MP3 input, no processing needed - just read the file
+                def read_original():
+                    with open(tts_path, "rb") as f:
+                        return f.read()
+
+                final_audio = await hass.async_add_executor_job(read_original)
+
+                # Get duration
+                duration = await hass.async_add_executor_job(get_media_duration, tts_path)
+
+                # Clean up and return
+                await hass.async_add_executor_job(os.remove, tts_path)
+
+                total_time = (time.monotonic() - start_time) * 1000
+                return "mp3", final_audio, total_time
         
         # Run ffmpeg command
         _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))

@@ -35,7 +35,7 @@ from .const import (
     CONF_URL,
 )
 from .volume_restore import announce
-from .utils import normalize_entity_ids
+from .utils import normalize_entity_ids, ensure_wav_chimes
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -300,11 +300,17 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OpenAI TTS and register the openai_tts.say service."""
-    _LOGGER.debug("async_setup_entry called for %s (version %s.%s)", 
+    _LOGGER.debug("async_setup_entry called for %s (version %s.%s)",
                  entry.entry_id, entry.version, entry.minor_version)
     # Store entry for reference
     hass.data.setdefault(DOMAIN, {})
-    
+
+    # Ensure WAV versions of chimes exist (only once per HA instance)
+    if "chimes_converted" not in hass.data[DOMAIN]:
+        chime_dir = os.path.join(os.path.dirname(__file__), "chime")
+        await hass.async_add_executor_job(ensure_wav_chimes, chime_dir)
+        hass.data[DOMAIN]["chimes_converted"] = True
+
     # Migration is now handled during async_migrate_entry, no need for pending migration
     
     # Determine entry type clearly
