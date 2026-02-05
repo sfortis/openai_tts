@@ -63,16 +63,18 @@ class OpenAITTSEngine:
         voice: str | None = None,
         model: str | None = None,
         instructions: str | None = None,
+        extra_payload: str | None = None,
         stream: bool = False,
         on_first_chunk: Optional[Callable[[], None]] = None
     ) -> Union[AudioResponse, StreamingAudioResponse]:
         """TTS request with optional streaming support.
-        
+
         Args:
             text: Text to convert to speech
             speed: Speech speed (0.25-4.0)
             voice: Voice to use
             instructions: Optional instructions for the model
+            extra_payload: JSON string with extra parameters to merge into the request
             stream: If True, returns StreamingAudioResponse for lower latency
             on_first_chunk: Callback when first chunk is received (streaming only)
         """
@@ -100,10 +102,21 @@ class OpenAITTSEngine:
         # Include instructions if provided
         if instructions is not None:
             payload["instructions"] = instructions
-        
+
+        # Merge extra payload if provided (for custom backends)
+        if extra_payload:
+            try:
+                extra = json.loads(extra_payload)
+                if isinstance(extra, dict):
+                    payload.update(extra)
+                    _LOGGER.debug("Merged extra payload: %s", extra)
+            except json.JSONDecodeError as e:
+                _LOGGER.warning("Invalid extra_payload JSON, ignoring: %s", e)
+
         # Debug logging for payload
-        _LOGGER.debug("TTS API payload: model=%s, voice=%s, speed=%s, instructions=%s", 
-                     model, voice, speed, instructions)
+        _LOGGER.debug("TTS API payload: model=%s, voice=%s, speed=%s, instructions=%s, extra_keys=%s",
+                     model, voice, speed, instructions,
+                     [k for k in payload.keys() if k not in ("model", "input", "voice", "response_format", "speed", "instructions")])
 
         max_retries = 1
         attempt = 0
@@ -153,7 +166,8 @@ class OpenAITTSEngine:
         speed: float | None = None,
         voice: str | None = None,
         model: str | None = None,
-        instructions: str | None = None
+        instructions: str | None = None,
+        extra_payload: str | None = None
     ) -> AsyncGenerator[bytes, None]:
         """Stream TTS audio from OpenAI API.
 
@@ -164,6 +178,7 @@ class OpenAITTSEngine:
             voice: Voice to use
             model: Model to use
             instructions: Optional instructions for the model
+            extra_payload: JSON string with extra parameters to merge into the request
 
         Yields:
             Audio data chunks as bytes
@@ -193,6 +208,16 @@ class OpenAITTSEngine:
         # Include instructions if provided
         if instructions is not None:
             payload["instructions"] = instructions
+
+        # Merge extra payload if provided (for custom backends)
+        if extra_payload:
+            try:
+                extra = json.loads(extra_payload)
+                if isinstance(extra, dict):
+                    payload.update(extra)
+                    _LOGGER.debug("Merged extra payload: %s", extra)
+            except json.JSONDecodeError as e:
+                _LOGGER.warning("Invalid extra_payload JSON, ignoring: %s", e)
 
         _LOGGER.debug("Streaming TTS API request: model=%s, voice=%s, speed=%s, format=%s",
                      model, voice, speed, response_format)

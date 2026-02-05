@@ -543,6 +543,7 @@ async def announce(
                             await prepare_task
                     
                     # Prepare service data for HA's speak service
+                    # extra_payload is now in supported_options, so we pass all options
                     service_data = {
                         "message": message,
                         "language": language,

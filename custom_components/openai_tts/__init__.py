@@ -17,15 +17,16 @@ from homeassistant.helpers import config_validation as cv, device_registry as dr
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 
 from .const import (
-    DOMAIN, 
-    CONF_MODEL, 
-    CONF_VOICE, 
-    CONF_SPEED, 
+    DOMAIN,
+    CONF_MODEL,
+    CONF_VOICE,
+    CONF_SPEED,
     VOICES,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
+    CONF_EXTRA_PAYLOAD,
     CONF_VOLUME_RESTORE,
     CONF_PAUSE_PLAYBACK,
     CONF_PROFILE_NAME,
@@ -49,9 +50,10 @@ SAY_SCHEMA = vol.Schema(
         vol.Required("tts_entity"): cv.entity_id,
         vol.Required("message"): cv.string,
         vol.Optional("language", default="en"): cv.string,
-        vol.Optional("voice"): vol.In(VOICES),
+        vol.Optional("voice"): cv.string,  # Allow any voice name for custom backends
         vol.Optional("speed"): vol.All(vol.Coerce(float), vol.Range(min=0.25, max=4.0)),
         vol.Optional("instructions"): cv.string,
+        vol.Optional(CONF_EXTRA_PAYLOAD): cv.string,  # JSON string for custom backend parameters
         vol.Optional("chime", default=False): cv.boolean,
         vol.Optional("chime_sound"): cv.string,
         vol.Optional("normalize_audio", default=False): cv.boolean,
@@ -407,12 +409,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if not is_subentry and not hass.services.has_service(DOMAIN, SERVICE_NAME):
         # Check if this is truly the first setup or a main entry
         all_entries = hass.config_entries.async_entries(DOMAIN)
-        main_entries = [e for e in all_entries if not hasattr(e, 'parent_entry_id') or e.parent_entry_id is None]
-        
-        # Register if this is the first main/legacy entry being set up
+        # Filter to only enabled main entries (not disabled, not subentries)
+        main_entries = [
+            e for e in all_entries
+            if (not hasattr(e, 'parent_entry_id') or e.parent_entry_id is None)
+            and e.disabled_by is None
+        ]
+
+        # Register if this is the first enabled main/legacy entry being set up
         if main_entries and entry.entry_id == main_entries[0].entry_id:
             should_register_service = True
-            _LOGGER.debug("This is the first main/legacy entry, will register service")
+            _LOGGER.debug("This is the first enabled main/legacy entry, will register service")
     
     _LOGGER.debug("Service registration check - is_subentry: %s, is_legacy: %s, has_service: %s, should_register: %s", 
                  is_subentry, is_legacy_entry, hass.services.has_service(DOMAIN, SERVICE_NAME), should_register_service)
@@ -498,6 +505,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 "voice": data.get("voice"),
                 "speed": data.get("speed"),
                 "instructions": data.get("instructions"),
+                CONF_EXTRA_PAYLOAD: data.get(CONF_EXTRA_PAYLOAD),
                 "chime": chime_value,
                 "chime_sound": chime_sound_value,
                 "normalize_audio": normalize_value,

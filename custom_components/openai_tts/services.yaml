@@ -26,10 +26,11 @@ say:
     # Voice Settings
     voice:
       name: Voice
-      description: Voice to use for speech generation (overrides entity default).
+      description: Voice to use for speech generation (overrides entity default). For custom TTS backends, you can type any voice name.
       required: false
       selector:
         select:
+          custom_value: true
           options:
             - label: Alloy (Neutral)
               value: alloy
@@ -64,9 +65,19 @@ say:
           mode: slider
     instructions:
       name: Instructions
-      description: Custom instructions for the TTS engine (e.g., "speak like a pirate").
+      description: Speaking style instructions for OpenAI gpt-4o-mini-tts model (e.g., "speak like a pirate"). May not be supported by custom backends.
       required: false
       example: "Speak with enthusiasm"
+      selector:
+        text:
+          multiline: true
+    extra_payload:
+      name: Extra Payload
+      description: >-
+        Additional JSON payload to merge with the API request. Useful for custom
+        TTS backends that need extra parameters.
+      required: false
+      example: '{"temperature": 0.7}'
       selector:
         text:
           multiline: true
