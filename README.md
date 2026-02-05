@@ -24,6 +24,11 @@ index/introducing-our-next-generation-audio-models/)
 - **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
+### ⭐ New Features in 3.7
+- **WAV audio support** – Custom TTS backends that return WAV audio are now supported (auto-converted to MP3).
+- **Custom voice names** – Use any voice name for custom TTS backends (not limited to OpenAI voices).
+- **Extra payload support** – Pass custom JSON parameters to TTS backends via the `extra_payload` field.
+
 ### ⭐ New Features in 3.6
 - **Optional API key for custom endpoints** – API key is only required for OpenAI. Local/custom TTS servers can work without authentication.
 - **Multi-language support** – 54 languages now available in HA Assist pipeline settings.
@@ -42,7 +47,7 @@ visit: (https://platform.openai.com/docs/pricing)
 
 ## ⭐New TTS say action
 
-```
+```yaml
 service: openai_tts.say
 target:
   entity_id: media_player.living_room_speaker
@@ -57,6 +62,8 @@ data:
   pause_playback: true  # Pause any music playing during the announcement
   chime: true  # Add a chime sound before the announcement
   normalize_audio: true  # Normalize audio (for small speakers)
+  voice: my_custom_voice  # Use any voice name (for custom TTS backends)
+  extra_payload: '{"temperature": 0.8}'  # Custom JSON for TTS backend
 ```
 
 ## HACS installation ( *preferred!* )
