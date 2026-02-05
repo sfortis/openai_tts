@@ -694,8 +694,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             config_instructions = self._get_config_value(CONF_INSTRUCTIONS)
             instructions = service_instructions if service_instructions is not None else config_instructions
 
-            # Handle extra_payload for custom backends
-            extra_payload = options.get(CONF_EXTRA_PAYLOAD)
+            # Handle extra_payload for custom backends (service call overrides config)
+            extra_payload = options.get(CONF_EXTRA_PAYLOAD) or self._get_config_value(CONF_EXTRA_PAYLOAD)
 
             # Step 3: Determine if we can use streaming
             can_stream = self._can_use_streaming(full_text, options)

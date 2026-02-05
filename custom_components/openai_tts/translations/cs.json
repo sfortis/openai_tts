@@ -56,7 +56,8 @@
             "chime": "Povolit zvukový signál",
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
-            "instructions": "Vlastní pokyny (volitelné, pouze pro podporované modely)"
+            "instructions": "Vlastní pokyny (volitelné, pouze pro podporované modely)",
+            "extra_payload": "Extra JSON payload (volitelné, pro vlastní TTS backendy)"
           }
         },
         "reconfigure": {
@@ -69,7 +70,8 @@
             "chime": "Povolit zvukový signál",
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
-            "instructions": "Vlastní pokyny (volitelné, pouze pro podporované modely)"
+            "instructions": "Vlastní pokyny (volitelné, pouze pro podporované modely)",
+            "extra_payload": "Extra JSON payload (volitelné, pro vlastní TTS backendy)"
           }
         }
       },

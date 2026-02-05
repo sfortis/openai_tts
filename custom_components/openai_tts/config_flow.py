@@ -39,6 +39,7 @@ from .const import (
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
+    CONF_EXTRA_PAYLOAD,
     CONF_VOLUME_RESTORE,
     CONF_PAUSE_PLAYBACK,
     CONF_PROFILE_NAME,
@@ -322,25 +323,32 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
         
         if user_input is not None:
             try:
+                # Ensure cleared optional fields are explicitly empty
+                if CONF_API_KEY not in user_input:
+                    user_input[CONF_API_KEY] = ""
+                if CONF_URL not in user_input:
+                    user_input[CONF_URL] = DEFAULT_URL
+
                 await validate_user_input(user_input)
-                
+
                 # Check for duplicate API key (exclude current entry)
                 api_key = user_input.get(CONF_API_KEY)
-                for entry in self._async_current_entries():
-                    if entry.entry_id != reconfigure_entry.entry_id and entry.data.get(CONF_API_KEY) == api_key:
-                        _LOGGER.error("An entry with this API key already exists: %s", entry.title)
-                        errors["base"] = "duplicate_api_key"
-                        break
-                
+                if api_key:
+                    for entry in self._async_current_entries():
+                        if entry.entry_id != reconfigure_entry.entry_id and entry.data.get(CONF_API_KEY) == api_key:
+                            _LOGGER.error("An entry with this API key already exists: %s", entry.title)
+                            errors["base"] = "duplicate_api_key"
+                            break
+
                 if not errors:
                     # Update the entry using the recommended helper
                     from urllib.parse import urlparse
                     hostname = urlparse(user_input[CONF_URL]).hostname
-                    
+
                     # Ensure unique_id doesn't change
                     await self.async_set_unique_id(reconfigure_entry.unique_id)
                     self._abort_if_unique_id_mismatch()
-                    
+
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
                         data_updates=user_input,
@@ -357,11 +365,12 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"
         
-        # Show the form with current values as defaults
+        # Show the form with current values as suggested (not default)
+        # Using suggested_value allows users to clear these fields
         current_data = reconfigure_entry.data
         schema = vol.Schema({
-            vol.Required(CONF_API_KEY, default=current_data.get(CONF_API_KEY, "")): str,
-            vol.Optional(CONF_URL, default=current_data.get(CONF_URL, "https://api.openai.com/v1/audio/speech")): str,
+            vol.Optional(CONF_API_KEY, description={"suggested_value": current_data.get(CONF_API_KEY, "")}): str,
+            vol.Optional(CONF_URL, description={"suggested_value": current_data.get(CONF_URL, DEFAULT_URL)}): str,
         })
         
         return self.async_show_form(
@@ -414,12 +423,13 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "chime_sound": CONF_CHIME_SOUND,
                     "normalize_audio": CONF_NORMALIZE_AUDIO,
                     "instructions": CONF_INSTRUCTIONS,
+                    "extra_payload": CONF_EXTRA_PAYLOAD,
                 }
-                
+
                 for key, value in user_input.items():
                     mapped_key = key_mapping.get(key, key)
-                    # Handle empty instructions - convert to None
-                    if key == "instructions" and value == "":
+                    # Handle empty string fields - convert to None
+                    if key in ("instructions", "extra_payload") and value == "":
                         mapped_input[mapped_key] = None
                     else:
                         mapped_input[mapped_key] = value
@@ -480,8 +490,14 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "select": {"options": chime_opts}
             }),
             vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
+            vol.Optional(
+                "extra_payload",
+                description={
+                    "suggested_value": ""
+                },
+            ): TemplateSelector(),
         })
-        
+
         return self.async_show_form(
             step_id="user",
             data_schema=profile_schema,
@@ -514,17 +530,24 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "chime_sound": CONF_CHIME_SOUND,
                     "normalize_audio": CONF_NORMALIZE_AUDIO,
                     "instructions": CONF_INSTRUCTIONS,
+                    "extra_payload": CONF_EXTRA_PAYLOAD,
                 }
-                
+
                 mapped_input = {}
                 for key, value in user_input.items():
                     mapped_key = key_mapping.get(key, key)
-                    # Handle empty instructions - convert to None
-                    if key == "instructions" and value == "":
+                    # Handle empty string fields - convert to None
+                    if key in ("instructions", "extra_payload") and value == "":
                         mapped_input[mapped_key] = None
                     else:
                         mapped_input[mapped_key] = value
-                
+
+                # Explicitly clear optional text fields if not in user_input
+                # (HA omits empty Optional fields from submission)
+                for field, const in [("instructions", CONF_INSTRUCTIONS), ("extra_payload", CONF_EXTRA_PAYLOAD)]:
+                    if field not in user_input:
+                        mapped_input[const] = None
+
                 # Keep the original profile name and unique ID
                 updated_data = {**subentry.data, **mapped_input}
                 
@@ -580,8 +603,14 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "select": {"options": chime_opts}
             }),
             vol.Optional("normalize_audio", default=existing_data.get(CONF_NORMALIZE_AUDIO, False)): selector({"boolean": {}}),
+            vol.Optional(
+                "extra_payload",
+                description={
+                    "suggested_value": existing_data.get(CONF_EXTRA_PAYLOAD) or ""
+                },
+            ): TemplateSelector(),
         })
-        
+
         return self.async_show_form(
             step_id="reconfigure",
             data_schema=reconfigure_schema,

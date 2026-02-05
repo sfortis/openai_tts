@@ -56,7 +56,8 @@
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
-            "instructions": "Custom instructions (optional, for supported models only)"
+            "instructions": "Custom instructions (optional, for supported models only)",
+            "extra_payload": "Extra JSON payload (optional, for custom TTS backends)"
           }
         },
         "reconfigure": {
@@ -69,7 +70,8 @@
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
-            "instructions": "Custom instructions (optional, for supported models only)"
+            "instructions": "Custom instructions (optional, for supported models only)",
+            "extra_payload": "Extra JSON payload (optional, for custom TTS backends)"
           }
         }
       },
