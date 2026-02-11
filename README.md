@@ -25,9 +25,9 @@ index/introducing-our-next-generation-audio-models/)
 - **Performance Optimizations** – Improved audio processing for faster TTS responses.
 
 ### ⭐ New Features in 3.7
-- **WAV audio support** – Custom TTS backends that return WAV audio are now supported (auto-converted to MP3).
-- **Custom voice names** – Use any voice name for custom TTS backends (not limited to OpenAI voices).
-- **Extra payload support** – Pass custom JSON parameters to TTS backends via the `extra_payload` field.
+- **WAV audio support** - Custom TTS backends that return WAV audio are now supported (auto-converted to MP3).
+- **Custom voice names** - Use any voice name for custom TTS backends (not limited to OpenAI voices).
+- **Extra payload support** - Pass custom JSON parameters to TTS backends via the `extra_payload` field in service calls or in the TTS agent config.
 
 ### ⭐ New Features in 3.6
 - **Optional API key for custom endpoints** – API key is only required for OpenAI. Local/custom TTS servers can work without authentication.
