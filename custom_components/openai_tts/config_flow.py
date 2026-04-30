@@ -20,8 +20,8 @@ from homeassistant.config_entries import (
     ConfigFlowResult,
     SubentryFlowResult,
 )
-from homeassistant.helpers.selector import selector, TextSelector, TextSelectorConfig, TextSelectorType, TemplateSelector
-from homeassistant.exceptions import HomeAssistantError, ConfigEntryAuthFailed
+from homeassistant.helpers.selector import selector, TemplateSelector
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import callback
 
 from .const import (

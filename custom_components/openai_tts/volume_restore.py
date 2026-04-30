@@ -5,7 +5,7 @@ import asyncio
 import logging
 from typing import Dict, List, Optional, Set, Any
 
-from homeassistant.core import HomeAssistant, Event, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.components.media_player import (
     ATTR_MEDIA_VOLUME_LEVEL,
     SERVICE_MEDIA_PAUSE,
@@ -16,10 +16,10 @@ from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
 from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
-    EVENT_STATE_CHANGED,
 )
 from homeassistant.helpers import entity_registry
 
+from .cache import DURATION_FAILED_SENTINEL, hash_message
 from .const import DOMAIN, CONF_VOLUME_RESTORE, CONF_PAUSE_PLAYBACK, MESSAGE_DURATIONS_KEY
 from .utils import (
     get_media_player_state,
@@ -49,23 +49,36 @@ PLATFORM_VOLUME_DELAYS = {
 FALLBACK_DURATION_MS = 10000  # 10 seconds in milliseconds
 
 
-def _get_message_hash(message: str) -> str:
-    """Get a hash for a message to use as cache key (must match tts.py)."""
-    import hashlib
-    return hashlib.md5(message.encode()).hexdigest()[:16]
-
-
 def _get_cached_duration(hass: HomeAssistant, message: str) -> int | None:
-    """Get cached duration for a message from the shared cache."""
-    msg_hash = _get_message_hash(message)
+    """Look up the cached playback duration for ``message`` (set by the TTS entity).
+
+    Returns:
+        - positive int: real duration in ms
+        - ``DURATION_FAILED_SENTINEL`` (0): TTS generation failed; caller
+          should NOT keep polling and should NOT play any audio
+        - None: no entry yet (TTS still in flight, or never seen)
+    """
+    msg_hash = hash_message(message)
     cache = hass.data.get(DOMAIN, {}).get(MESSAGE_DURATIONS_KEY, {})
     cached = cache.get(msg_hash)
     if cached:
-        duration_ms = cached.get('duration_ms')
+        duration_ms = cached.get("duration_ms")
+        if duration_ms == DURATION_FAILED_SENTINEL:
+            _LOGGER.info(
+                "TTS generation failed for message (hash: %s), skipping audio wait",
+                msg_hash,
+            )
+            return DURATION_FAILED_SENTINEL
         if duration_ms:
-            _LOGGER.info("Found cached duration for message: %d ms (hash: %s)", duration_ms, msg_hash)
+            _LOGGER.info(
+                "Found cached duration for message: %d ms (hash: %s)",
+                duration_ms, msg_hash,
+            )
             return duration_ms
-    _LOGGER.debug("No cached duration found for message hash: %s (cache has %d entries)", msg_hash, len(cache))
+    _LOGGER.debug(
+        "No cached duration found for message hash: %s (cache has %d entries)",
+        msg_hash, len(cache),
+    )
     return None
 
 
@@ -231,11 +244,21 @@ class OptimizedVolumeRestorer:
         """Restore volumes after TTS playback using known duration.
 
         Each speaker runs in its own async task with platform-specific timing.
+
+        ``duration_ms == 0`` is the failure-sentinel path: TTS produced no
+        audio, so we skip the playback wait entirely and only need to roll
+        the volume back to its original value (still useful because we may
+        have raised the volume in anticipation of playback).
         """
         # Ensure preparation is complete
         if not self._preparation_complete:
             _LOGGER.warning("Restoration called before preparation complete")
             await asyncio.sleep(0.5)
+
+        if duration_ms == 0:
+            _LOGGER.info(
+                "Skipping playback wait (TTS produced no audio); restoring volumes immediately"
+            )
 
         task_start_time = asyncio.get_running_loop().time()
         _LOGGER.info("=== STARTING PARALLEL RESTORATION at %.3f ===", task_start_time)
@@ -611,12 +634,19 @@ async def announce(
                     # If engine is active, audio is being regenerated and duration may change
                     if not engine_active:
                         cached_duration = _get_cached_duration(hass, message)
+                        if cached_duration == DURATION_FAILED_SENTINEL:
+                            _LOGGER.info(
+                                "Skipping playback wait: prior TTS attempt was a failure"
+                            )
+                            duration_ms = 0
+                            tts_success = True
+                            break
                         if cached_duration:
                             _LOGGER.info("Using cached duration (engine idle): %d ms", cached_duration)
                             duration_ms = cached_duration
                             tts_success = True
                             break
-                        elif ha_cache_hit:
+                        if ha_cache_hit:
                             # HA served cached audio but we don't have duration - use fallback immediately
                             _LOGGER.warning("HA served cached audio but no duration in cache - using fallback")
                             duration_ms = FALLBACK_DURATION_MS
@@ -643,17 +673,25 @@ async def announce(
                             playback_start_time = asyncio.get_running_loop().time()
                             _LOGGER.info("Engine finished - playback starts NOW (chime/normalize mode)")
 
-                            # Wait briefly for duration to be stored
+                            # Wait briefly for duration to be stored.
+                            # Three possible outcomes per iteration:
+                            #   1. positive duration -> playback proceeds normally
+                            #   2. failure sentinel  -> TTS failed; skip wait
+                            #   3. None              -> still loading, keep polling
+                            tts_failed = False
                             for _ in range(30):  # Up to 3 seconds
                                 await asyncio.sleep(0.1)
                                 cached_duration = _get_cached_duration(hass, message)
+                                if cached_duration == DURATION_FAILED_SENTINEL:
+                                    tts_failed = True
+                                    break
                                 if cached_duration:
                                     duration_ms = cached_duration
                                     _LOGGER.info("Got duration from wait loop: %d ms (full duration, no elapsed)", duration_ms)
                                     tts_success = True
                                     break
                             else:
-                                # Fallback: use entity state or default
+                                # 3-second poll exhausted without resolution.
                                 entity_duration = tts_state.attributes.get('media_duration') if tts_state else None
                                 if entity_duration and entity_duration != pre_speak_duration:
                                     duration_ms = int(entity_duration)
@@ -664,6 +702,11 @@ async def announce(
                                     _LOGGER.warning("Using fallback duration: %d ms", duration_ms)
                                     tts_success = True
 
+                            if tts_failed:
+                                # No audio will play. Skip restoration wait
+                                # and let the outer flow restore volume now.
+                                duration_ms = 0
+                                tts_success = True
                             break
 
                         await asyncio.sleep(check_interval)
@@ -693,19 +736,25 @@ async def announce(
         
         # Only proceed with restoration if TTS was successful
         if tts_success:
-            # If we still don't have duration, use a safe fallback
-            if not duration_ms:
+            # ``duration_ms == 0`` is the explicit failure sentinel; do NOT
+            # promote it back to the 10s fallback - the wait was already
+            # short-circuited on purpose.
+            if duration_ms is None:
                 _LOGGER.warning("No duration available from TTS entity, using 10 second fallback timer")
                 duration_ms = FALLBACK_DURATION_MS
 
             # Handle restoration with the known duration
             if restorer:
-                # Account for time already elapsed since playback started
-                elapsed_ms = int((asyncio.get_running_loop().time() - playback_start_time) * 1000)
-                remaining_ms = max(0, duration_ms - elapsed_ms)
-                _LOGGER.info("TTS: %d ms elapsed, %d ms remaining of %d ms total",
-                           elapsed_ms, remaining_ms, duration_ms)
-                await restorer.restore_with_duration(remaining_ms)
+                if duration_ms == 0:
+                    # No audio playing; skip elapsed math, just restore volumes.
+                    await restorer.restore_with_duration(0)
+                else:
+                    # Account for time already elapsed since playback started
+                    elapsed_ms = int((asyncio.get_running_loop().time() - playback_start_time) * 1000)
+                    remaining_ms = max(0, duration_ms - elapsed_ms)
+                    _LOGGER.info("TTS: %d ms elapsed, %d ms remaining of %d ms total",
+                               elapsed_ms, remaining_ms, duration_ms)
+                    await restorer.restore_with_duration(remaining_ms)
         else:
             # TTS failed - restore volumes immediately without waiting
             _LOGGER.warning("TTS generation failed, restoring volumes immediately")

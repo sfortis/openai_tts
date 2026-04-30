@@ -2,33 +2,27 @@
 """Custom integration for OpenAI TTS."""
 from __future__ import annotations
 
-import asyncio
 import logging
 import os
 import uuid
-from typing import List, Dict, Any, Optional, Union
 
 import voluptuous as vol
-from homeassistant.const import Platform, ATTR_ENTITY_ID
-from homeassistant.core import HomeAssistant, ServiceCall
-from homeassistant.config_entries import ConfigEntry, ConfigSubentry
-from homeassistant.exceptions import ConfigEntryAuthFailed, ConfigEntryNotReady
-from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
+from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.const import Platform
+from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 
 from .const import (
     DOMAIN,
     CONF_MODEL,
     CONF_VOICE,
     CONF_SPEED,
-    VOICES,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
-    CONF_VOLUME_RESTORE,
-    CONF_PAUSE_PLAYBACK,
     CONF_PROFILE_NAME,
     DEFAULT_URL,
     CONF_API_KEY,
@@ -199,9 +193,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             chime_sound = config_entry.options.get(CONF_CHIME_SOUND, config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
             normalize = config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, False))
             instructions = config_entry.options.get(CONF_INSTRUCTIONS, config_entry.data.get(CONF_INSTRUCTIONS))
-            volume_restore = config_entry.options.get(CONF_VOLUME_RESTORE, config_entry.data.get(CONF_VOLUME_RESTORE, False))
-            pause_playback = config_entry.options.get(CONF_PAUSE_PLAYBACK, config_entry.data.get(CONF_PAUSE_PLAYBACK, False))
-            
+
             # Create parent entry data (only API config)
             parent_data = {
                 CONF_API_KEY: config_entry.data[CONF_API_KEY],

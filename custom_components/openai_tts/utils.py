@@ -7,10 +7,10 @@ import logging
 import os
 import subprocess
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union, cast
+from typing import Any, Callable, Dict, List, Optional, Tuple, Union
 
 import asyncio
-from homeassistant.core import HomeAssistant, callback
+from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import StateType
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
@@ -40,6 +40,63 @@ def detect_audio_format(audio_data: bytes) -> str:
         return "wav"
 
     return "mp3"
+
+
+# Magic-byte signatures used to verify that a TTS response actually
+# contains audio of the expected format. Defends against the cache-poisoning
+# class of bug (issue #64) where an HTTP 200 carries a JSON/HTML error body.
+_MP3_MAGIC: Tuple[bytes, ...] = (
+    b"ID3",                               # ID3v2 tag at start
+    b"\xff\xfb", b"\xff\xfa", b"\xff\xf3",
+    b"\xff\xf2", b"\xff\xfd", b"\xff\xfc",  # MPEG audio frame sync variants
+)
+_WAV_MAGIC: Tuple[bytes, ...] = (b"RIFF",)
+_OPUS_MAGIC: Tuple[bytes, ...] = (b"OggS",)
+
+# Default minimum byte count below which a TTS response is too short
+# to plausibly contain real audio (a JSON `{"error":...}` is ~50 bytes).
+_DEFAULT_MIN_AUDIO_BYTES = 256
+
+
+def is_valid_audio(
+    audio_data: Optional[bytes],
+    expected_format: str = "mp3",
+    min_size: int = _DEFAULT_MIN_AUDIO_BYTES,
+) -> bool:
+    """Return True if ``audio_data`` looks like real audio of ``expected_format``.
+
+    Used as a last-line defense before handing audio to the Home Assistant
+    TTS cache. If this returns False we MUST refuse to cache, otherwise the
+    bad bytes will be served back to media players forever (issue #64).
+
+    Args:
+        audio_data: Raw bytes returned by the TTS backend.
+        expected_format: ``"mp3"``, ``"wav"`` or ``"opus"``.
+        min_size: Reject anything smaller than this many bytes. The default
+            is generous enough to allow very short clips while still rejecting
+            typical JSON / HTML error bodies.
+
+    Returns:
+        True only when both the size and the magic bytes look like the
+        expected format.
+    """
+    if not audio_data or len(audio_data) < min_size:
+        return False
+
+    fmt = expected_format.lower()
+    if fmt == "mp3":
+        return audio_data.startswith(_MP3_MAGIC)
+    if fmt == "wav":
+        # Some backends return WAV when MP3 was requested; accept either.
+        return audio_data.startswith(_WAV_MAGIC) or audio_data.startswith(_MP3_MAGIC)
+    if fmt == "opus":
+        return audio_data.startswith(_OPUS_MAGIC)
+
+    # Unknown format: reject obvious text/JSON/HTML payloads.
+    first = audio_data[:1]
+    if first in (b"{", b"<", b"["):
+        return False
+    return True
 
 
 def ensure_wav_chimes(chime_dir: str) -> None:
@@ -238,8 +295,6 @@ async def process_audio(
     import time
 
     start_time = time.monotonic()
-    ffmpeg_start_time = None
-    ffmpeg_time = 0
 
     # Detect audio format from TTS response
     audio_format = detect_audio_format(audio_content)
@@ -326,21 +381,15 @@ async def process_audio(
 
                 final_audio = await hass.async_add_executor_job(read_original)
 
-                # Get duration
-                duration = await hass.async_add_executor_job(get_media_duration, tts_path)
-
                 # Clean up and return
                 await hass.async_add_executor_job(os.remove, tts_path)
 
                 total_time = (time.monotonic() - start_time) * 1000
                 return "mp3", final_audio, total_time
-        
+
         # Run ffmpeg command
         _LOGGER.debug("Executing ffmpeg command: %s", " ".join(cmd))
-        ffmpeg_start_time = time.monotonic()
-        
-        # When using asyncio.run, we need to simplify execution to avoid event loop conflicts
-        # Just run synchronously since this whole function is being wrapped in asyncio.run()
+
         try:
             _LOGGER.debug("Running ffmpeg in executor")
             await hass.async_add_executor_job(
@@ -349,18 +398,13 @@ async def process_audio(
         except Exception as exc:
             _LOGGER.error("Error executing ffmpeg: %s", exc)
             raise
-            
-        ffmpeg_time = (time.monotonic() - ffmpeg_start_time) * 1000
-        
+
         # Read the processed file
         def read_file():
             with open(final_output_path, "rb") as f:
                 return f.read()
-        
+
         final_audio = await hass.async_add_executor_job(read_file)
-        
-        # Get duration from processed file
-        duration = await hass.async_add_executor_job(get_media_duration, final_output_path)
         
         # Final clean up of temporary files
         def cleanup_files():
@@ -380,7 +424,7 @@ async def process_audio(
         return "mp3", final_audio, total_time
     
     except Exception as e:
-        # Clean up in case of error
+        # Best-effort cleanup of any temp files we created during this call.
         def error_cleanup():
             try:
                 os.remove(tts_path)
@@ -388,11 +432,11 @@ async def process_audio(
                     os.remove(final_output_path)
                 if 'list_path' in locals():
                     os.remove(list_path)
-            except:
+            except OSError:
                 pass
-        
+
         await hass.async_add_executor_job(error_cleanup)
-        
+
         _LOGGER.error("Error processing audio: %s", e)
         raise HomeAssistantError(f"Error processing audio: {e}") from e
 

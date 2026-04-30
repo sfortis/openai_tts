@@ -4,3 +4,7 @@
 # But keep README.md and CONTRIBUTING.md
 !README.md
 !CONTRIBUTING.md
+
+# Python bytecode
+__pycache__/
+*.pyc
