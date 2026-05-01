@@ -48,3 +48,12 @@ class OpenAIInvalidResponseError(OpenAITTSError):
     Catches the cache-poisoning class of bugs where a misbehaving proxy
     or custom backend returns an error JSON / HTML page with status 200.
     """
+
+
+class OpenAINetworkError(OpenAITTSError):
+    """Could not even reach the API (DNS / TCP / TLS / connection refused).
+
+    Distinct from ``OpenAITTSError`` so the health tracker can surface a
+    ``network_error`` status separate from generic / unknown failures.
+    Typical causes: custom backend offline, DNS misconfig, network down.
+    """

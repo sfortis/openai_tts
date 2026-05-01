@@ -26,6 +26,7 @@ import aiohttp
 
 from .exceptions import (
     OpenAIAuthError,
+    OpenAINetworkError,
     OpenAIQuotaExceededError,
     OpenAIRateLimitError,
     OpenAIServerError,
@@ -65,7 +66,7 @@ def _is_retryable(exc: BaseException) -> bool:
     """Auth/quota errors will fail again immediately, so don't waste a retry."""
     if isinstance(exc, (OpenAIAuthError, OpenAIQuotaExceededError)):
         return False
-    if isinstance(exc, (OpenAIRateLimitError, OpenAIServerError)):
+    if isinstance(exc, (OpenAIRateLimitError, OpenAIServerError, OpenAINetworkError)):
         return True
     if isinstance(exc, (URLError, aiohttp.ClientError)):
         return True
@@ -268,7 +269,7 @@ class OpenAITTSEngine:
                     attempt + 1, net_err,
                 )
                 if attempt >= max_retries:
-                    raise OpenAITTSError(
+                    raise OpenAINetworkError(
                         f"Network error fetching TTS audio: {net_err}"
                     ) from net_err
                 attempt += 1
@@ -392,7 +393,7 @@ class OpenAITTSEngine:
                 raise
             except aiohttp.ClientError as e:
                 _LOGGER.error("Network error during TTS streaming: %s", e)
-                raise OpenAITTSError(
+                raise OpenAINetworkError(
                     f"Network error during TTS streaming: {e}"
                 ) from e
             except asyncio.CancelledError:

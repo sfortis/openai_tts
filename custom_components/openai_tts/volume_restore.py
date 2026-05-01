@@ -19,6 +19,11 @@ from homeassistant.const import (
 )
 from homeassistant.helpers import entity_registry
 
+from .api_health import (
+    API_STATUS_AUTH_FAILED,
+    API_STATUS_QUOTA_EXCEEDED,
+    OpenAITTSHealthTracker,
+)
 from .cache import DURATION_FAILED_SENTINEL, hash_message
 from .const import DOMAIN, CONF_VOLUME_RESTORE, CONF_PAUSE_PLAYBACK, MESSAGE_DURATIONS_KEY
 from .utils import (
@@ -26,6 +31,36 @@ from .utils import (
     call_media_player_service,
     set_media_player_volume,
 )
+
+# Health statuses that guarantee the next API call will fail. When the
+# tts_entity's tracker is in one of these states, ``announce()`` aborts
+# before tts.speak runs - calling it anyway would only wake up the
+# media_player (chime + music interruption) for audio that will never play.
+PERSISTENT_FAILURE_STATUSES = frozenset({
+    API_STATUS_AUTH_FAILED,
+    API_STATUS_QUOTA_EXCEEDED,
+})
+
+HEALTH_TRACKER_KEY_SUFFIX = "_health_tracker"
+
+
+def _resolve_tracker_for_tts_entity(
+    hass: HomeAssistant, tts_entity: str
+) -> OpenAITTSHealthTracker | None:
+    """Find the health tracker that owns ``tts_entity``.
+
+    Subentries inherit their parent's tracker. Legacy entries are their
+    own parent. Returns None when no tracker is registered (e.g. ghost
+    entities not tied to any config entry).
+    """
+    er = entity_registry.async_get(hass)
+    entry = er.async_get(tts_entity)
+    if entry is None or entry.config_entry_id is None:
+        return None
+    parent_entry_id = entry.config_entry_id
+    return hass.data.get(DOMAIN, {}).get(
+        f"{parent_entry_id}{HEALTH_TRACKER_KEY_SUFFIX}"
+    )
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -484,9 +519,29 @@ async def announce(
     tts_volume: Optional[float] = None,
     pause_playback: Optional[bool] = None,
 ) -> None:
-    """Optimized TTS announcement with parallel operations for reduced latency."""
+    """Optimized TTS announcement with parallel operations for reduced latency.
+
+    Aborts immediately when the entity's API tracker is in a persistent
+    failure state (auth_failed / quota_exceeded). This avoids waking up
+    cast devices (chime + music interrupt) for a request that has zero
+    chance of producing audio.
+    """
     options = options.copy() if options else {}
-    
+
+    # Pre-flight: skip when we know the API call will fail. This avoids
+    # the cast/Sonos waking up (chime + music interruption) for audio that
+    # will never arrive.
+    tracker = _resolve_tracker_for_tts_entity(hass, tts_entity)
+    if tracker is not None and tracker.status in PERSISTENT_FAILURE_STATUSES:
+        _LOGGER.warning(
+            "Skipping TTS announcement on %s: API status is %s. "
+            "Resolve the issue (recharge balance / fix API key), then retry. "
+            "Last error: %s",
+            tts_entity, tracker.status,
+            tracker.data.get("last_error_message"),
+        )
+        return
+
     # Get configuration
     entries = hass.config_entries.async_entries(DOMAIN)
     config_entry = entries[0] if entries else None

@@ -13,6 +13,7 @@ from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant, ServiceCall
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 
+from .api_health import OpenAITTSHealthTracker
 from .const import (
     DOMAIN,
     CONF_MODEL,
@@ -34,9 +35,10 @@ from .utils import normalize_entity_ids, ensure_wav_chimes
 
 _LOGGER = logging.getLogger(__name__)
 
-PLATFORMS: list[str] = [Platform.TTS]
+PLATFORMS: list[str] = [Platform.TTS, Platform.SENSOR]
 SERVICE_NAME = "say"
 SUBENTRY_TYPE_PROFILE = "profile"
+HEALTH_TRACKER_KEY = "_health_tracker"
 
 # Service Schema
 SAY_SCHEMA = vol.Schema(
@@ -355,7 +357,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     
     # Store entry reference
     hass.data[DOMAIN][entry.entry_id] = entry
-    
+
+    # Each parent entry owns one health tracker that the binary sensor and the
+    # TTS engine share. Subentries inherit their parent's tracker.
+    if not is_subentry:
+        tracker = OpenAITTSHealthTracker(hass, entry)
+        hass.data[DOMAIN][f"{entry.entry_id}{HEALTH_TRACKER_KEY}"] = tracker
+
     # Forward to platforms based on entry type
     if is_subentry:
         # Subentries are handled by the parent's platform setup
@@ -588,9 +596,13 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Remove stored entry
     if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
         hass.data[DOMAIN].pop(entry.entry_id)
-    
+
+    # Drop the per-entry health tracker
+    if DOMAIN in hass.data:
+        hass.data[DOMAIN].pop(f"{entry.entry_id}{HEALTH_TRACKER_KEY}", None)
+
     # If this is the main entry, check if we need to clean up
     if not is_subentry and not is_legacy_entry and DOMAIN in hass.data and "main_entry" in hass.data[DOMAIN]:
         hass.data[DOMAIN].pop("main_entry", None)
-    
+
     return unload_ok

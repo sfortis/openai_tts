@@ -29,6 +29,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
 
+from .api_health import OpenAITTSHealthTracker
 from .audio_metadata import embed_duration_in_audio
 from .cache import MessageDurationCache
 from .const import (
@@ -64,10 +65,22 @@ _LOGGER = logging.getLogger(__name__)
 SUBENTRY_TYPE_PROFILE = "profile"
 STORAGE_VERSION = 1
 STORAGE_KEY = "openai_tts_state"
+HEALTH_TRACKER_KEY = "_health_tracker"
 
 # Streaming is only worthwhile beyond this length and when no post-processing
 # is required (chime / normalization both need the complete audio first).
 MIN_STREAMING_TEXT_LENGTH = 60
+
+
+def _resolve_health_tracker(
+    hass: HomeAssistant, parent_entry_id: str | None
+) -> OpenAITTSHealthTracker | None:
+    """Look up the parent entry's health tracker, if registered."""
+    if not parent_entry_id:
+        return None
+    return hass.data.get(DOMAIN, {}).get(
+        f"{parent_entry_id}{HEALTH_TRACKER_KEY}"
+    )
 
 
 async def async_setup_entry(
@@ -179,6 +192,14 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{self.entity_id}")
         self._stored_data: dict = {}
         self._duration_cache = MessageDurationCache(hass, self.entity_id)
+
+        # The health tracker lives on the parent entry. Subentries inherit it
+        # via parent_entry; legacy entries are their own parent.
+        parent_entry_id = (
+            parent_entry.entry_id if parent_entry is not None
+            else getattr(config, "entry_id", None)
+        )
+        self._health_tracker = _resolve_health_tracker(hass, parent_entry_id)
 
         _LOGGER.info(
             "OpenAI TTS entity created: %s (engine speed: %s)",
@@ -484,10 +505,17 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         self._duration_cache.store(message, duration_ms)
         self.async_write_ha_state()
         await self._save_persisted_state()
+        # A successful TTS call is also the most reliable signal that the
+        # API is healthy; the health tracker uses this to clear any prior
+        # quota/auth/rate-limit state.
+        if self._health_tracker is not None:
+            self._health_tracker.record_success()
         return duration_ms
 
     async def _handle_engine_error(self, err: BaseException) -> None:
         """Translate engine errors into the right HA-side reaction."""
+        if self._health_tracker is not None:
+            self._health_tracker.record_error(err)
         if isinstance(err, OpenAIAuthError):
             _LOGGER.error(
                 "OpenAI TTS auth failed for %s, raising reauth: %s",
@@ -736,7 +764,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 raise
 
             # Stream completed cleanly: record duration so volume_restore
-            # can find it in the shared cache by message hash.
+            # can find it in the shared cache by message hash, and tell the
+            # health tracker that the API is responsive.
             if all_chunks:
                 complete_audio = b"".join(all_chunks)
                 duration_ms = await self._get_audio_duration(complete_audio)
@@ -744,6 +773,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 self._duration_cache.store(text, duration_ms)
                 self.async_write_ha_state()
                 await self._save_persisted_state()
+                if self._health_tracker is not None:
+                    self._health_tracker.record_success()
                 _LOGGER.info(
                     "Streaming complete: %d bytes, %d ms",
                     len(complete_audio), duration_ms,
