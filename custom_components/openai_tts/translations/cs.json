@@ -108,5 +108,21 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "api_status": {
+        "name": "Stav",
+        "state": {
+          "ok": "OK",
+          "auth_failed": "Selhání ověření",
+          "quota_exceeded": "Vyčerpán limit",
+          "rate_limited": "Omezen rychlostí",
+          "server_error": "Chyba serveru",
+          "network_error": "Chyba sítě",
+          "unknown_error": "Neznámá chyba"
+        }
+      }
+    }
   }
 }

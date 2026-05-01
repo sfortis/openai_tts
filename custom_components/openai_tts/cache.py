@@ -32,9 +32,40 @@ DEFAULT_MAX_SHARED_ENTRIES = 50
 DURATION_FAILED_SENTINEL = 0
 
 
-def hash_message(message: str) -> str:
-    """Return a stable short hash for ``message``."""
-    return hashlib.md5(message.encode()).hexdigest()[:16]
+def hash_message(
+    message: str,
+    *,
+    voice: str | None = None,
+    model: str | None = None,
+    speed: float | None = None,
+    entity_id: str | None = None,
+) -> str:
+    """Return a stable short hash that uniquely identifies a TTS request.
+
+    The hash is keyed on **everything that affects audio duration**, not
+    just the message text:
+
+    * different voices/models/speeds produce different durations even for
+      the same text, so a message-only key would return stale durations
+      (volume_restore would then mis-time the restoration);
+    * the same profile name might exist on two parent entries, so include
+      the entity_id to keep their caches isolated.
+
+    All extra parameters are optional for backwards compatibility - older
+    callers that only have ``message`` will keep working but will not get
+    cross-profile isolation.
+    """
+    parts = [message]
+    if entity_id:
+        parts.append(f"|e={entity_id}")
+    if voice:
+        parts.append(f"|v={voice}")
+    if model:
+        parts.append(f"|m={model}")
+    if speed is not None:
+        parts.append(f"|s={speed}")
+    payload = "".join(parts).encode()
+    return hashlib.md5(payload).hexdigest()[:16]
 
 
 class MessageDurationCache:
@@ -87,9 +118,24 @@ class MessageDurationCache:
             len(self._local),
         )
 
-    def store(self, message: str, duration_ms: int) -> None:
-        """Record duration for ``message`` in both local and shared caches."""
-        msg_hash = hash_message(message)
+    def store(
+        self,
+        message: str,
+        duration_ms: int,
+        *,
+        voice: str | None = None,
+        model: str | None = None,
+        speed: float | None = None,
+    ) -> None:
+        """Record duration for ``message`` in both local and shared caches.
+
+        ``voice``/``model``/``speed`` are folded into the cache key so the
+        same text under different profiles/voices doesn't collide.
+        """
+        msg_hash = hash_message(
+            message, voice=voice, model=model, speed=speed,
+            entity_id=self._entity_id,
+        )
         self._local[msg_hash] = duration_ms
 
         if len(self._local) > self._max_local:
@@ -101,18 +147,40 @@ class MessageDurationCache:
             "Stored duration %d ms for message hash %s", duration_ms, msg_hash
         )
 
-    def get(self, message: str) -> Optional[int]:
+    def get(
+        self,
+        message: str,
+        *,
+        voice: str | None = None,
+        model: str | None = None,
+        speed: float | None = None,
+    ) -> Optional[int]:
         """Return cached duration for ``message`` or None."""
-        return self._local.get(hash_message(message))
+        return self._local.get(
+            hash_message(
+                message, voice=voice, model=model, speed=speed,
+                entity_id=self._entity_id,
+            )
+        )
 
-    def mark_failed(self, message: str) -> None:
+    def mark_failed(
+        self,
+        message: str,
+        *,
+        voice: str | None = None,
+        model: str | None = None,
+        speed: float | None = None,
+    ) -> None:
         """Publish a 'TTS failed' sentinel to the shared cache.
 
         Does NOT touch ``self._local`` (we don't want failed messages
         persisted across restarts). The sentinel is consumed by
         ``volume_restore`` to abort its polling loop early.
         """
-        msg_hash = hash_message(message)
+        msg_hash = hash_message(
+            message, voice=voice, model=model, speed=speed,
+            entity_id=self._entity_id,
+        )
         shared = self._ensure_shared_dict()
         shared[msg_hash] = {
             "duration_ms": DURATION_FAILED_SENTINEL,

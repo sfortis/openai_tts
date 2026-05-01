@@ -321,8 +321,11 @@ async def process_audio(
     tts_path = await hass.async_add_executor_job(write_temp_file)
     
     try:
-        # Determine final output path
+        # Determine final output path. ``caller_owns_output`` tracks whether
+        # the path came from the caller; if so, we must NOT delete it during
+        # cleanup (the caller is responsible for its own file).
         final_output_path = output_path
+        caller_owns_output = output_path is not None
         if not final_output_path:
             def create_temp_output():
                 with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as out_file:
@@ -406,12 +409,16 @@ async def process_audio(
 
         final_audio = await hass.async_add_executor_job(read_file)
         
-        # Final clean up of temporary files
+        # Final clean up of temporary files. We only own the output file
+        # when the caller did not provide ``output_path``; otherwise the
+        # caller is responsible for it (issue: previous code unconditionally
+        # deleted it, which silently broke any caller that passed a path).
         def cleanup_files():
             try:
                 os.remove(tts_path)
-                os.remove(final_output_path)
-                
+                if not caller_owns_output:
+                    os.remove(final_output_path)
+
                 # Remove concat list file if it was created
                 if chime_enabled and not normalize_audio and 'list_path' in locals():
                     os.remove(list_path)
@@ -428,7 +435,7 @@ async def process_audio(
         def error_cleanup():
             try:
                 os.remove(tts_path)
-                if 'final_output_path' in locals():
+                if 'final_output_path' in locals() and not caller_owns_output:
                     os.remove(final_output_path)
                 if 'list_path' in locals():
                     os.remove(list_path)

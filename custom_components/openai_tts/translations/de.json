@@ -108,5 +108,21 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "api_status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "auth_failed": "Authentifizierung fehlgeschlagen",
+          "quota_exceeded": "Kontingent überschritten",
+          "rate_limited": "Ratenbegrenzt",
+          "server_error": "Serverfehler",
+          "network_error": "Netzwerkfehler",
+          "unknown_error": "Unbekannter Fehler"
+        }
+      }
+    }
   }
 }

@@ -107,5 +107,21 @@
         "subentry_not_found": "TTS agent not found"
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "api_status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "auth_failed": "Authentication failed",
+          "quota_exceeded": "Quota exceeded",
+          "rate_limited": "Rate limited",
+          "server_error": "Server error",
+          "network_error": "Network error",
+          "unknown_error": "Unknown error"
+        }
+      }
+    }
   }
 }

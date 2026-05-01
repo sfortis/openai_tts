@@ -44,6 +44,22 @@ PERSISTENT_FAILURE_STATUSES = frozenset({
 HEALTH_TRACKER_KEY_SUFFIX = "_health_tracker"
 
 
+def _resolve_config_entry_for_tts_entity(
+    hass: HomeAssistant, tts_entity: str
+):
+    """Return the parent ConfigEntry that owns ``tts_entity``, or None.
+
+    Used so flags like volume_restore / pause_playback come from the
+    integration entry that actually produced the entity, not from an
+    unrelated ``entries[0]`` in multi-account setups.
+    """
+    er = entity_registry.async_get(hass)
+    entry = er.async_get(tts_entity)
+    if entry is None or entry.config_entry_id is None:
+        return None
+    return hass.config_entries.async_get_entry(entry.config_entry_id)
+
+
 def _resolve_tracker_for_tts_entity(
     hass: HomeAssistant, tts_entity: str
 ) -> OpenAITTSHealthTracker | None:
@@ -84,8 +100,22 @@ PLATFORM_VOLUME_DELAYS = {
 FALLBACK_DURATION_MS = 10000  # 10 seconds in milliseconds
 
 
-def _get_cached_duration(hass: HomeAssistant, message: str) -> int | None:
+def _get_cached_duration(
+    hass: HomeAssistant,
+    message: str,
+    *,
+    tts_entity: str | None = None,
+    voice: str | None = None,
+    model: str | None = None,
+    speed: float | None = None,
+) -> int | None:
     """Look up the cached playback duration for ``message`` (set by the TTS entity).
+
+    The cache is keyed on ``(message, voice, model, speed, entity_id)`` to
+    avoid cross-profile/voice collisions where the same text would otherwise
+    return a stale duration. All extra params are optional - missing context
+    falls back to a message-only lookup which is still useful for older
+    cached entries.
 
     Returns:
         - positive int: real duration in ms
@@ -93,9 +123,23 @@ def _get_cached_duration(hass: HomeAssistant, message: str) -> int | None:
           should NOT keep polling and should NOT play any audio
         - None: no entry yet (TTS still in flight, or never seen)
     """
-    msg_hash = hash_message(message)
     cache = hass.data.get(DOMAIN, {}).get(MESSAGE_DURATIONS_KEY, {})
-    cached = cache.get(msg_hash)
+
+    # Try the precise key first (matches what the entity stored).
+    primary_hash = hash_message(
+        message,
+        voice=voice, model=model, speed=speed,
+        entity_id=tts_entity,
+    )
+    cached = cache.get(primary_hash)
+    msg_hash = primary_hash
+
+    # Fallback: legacy entries hashed by message-only.
+    if cached is None and (voice or model or speed or tts_entity):
+        legacy_hash = hash_message(message)
+        cached = cache.get(legacy_hash)
+        if cached is not None:
+            msg_hash = legacy_hash
     if cached:
         duration_ms = cached.get("duration_ms")
         if duration_ms == DURATION_FAILED_SENTINEL:
@@ -542,17 +586,18 @@ async def announce(
         )
         return
 
-    # Get configuration
-    entries = hass.config_entries.async_entries(DOMAIN)
-    config_entry = entries[0] if entries else None
-    
+    # Get configuration from the entry that owns this tts_entity, NOT
+    # entries[0] (which would apply the wrong integration's volume_restore /
+    # pause_playback flags in a multi-account setup).
+    config_entry = _resolve_config_entry_for_tts_entity(hass, tts_entity)
+
     restore_enabled = (
-        tts_volume is not None or 
+        tts_volume is not None or
         (config_entry and config_entry.options.get(CONF_VOLUME_RESTORE, False))
     )
-    
+
     pause_enabled = (
-        pause_playback if pause_playback is not None 
+        pause_playback if pause_playback is not None
         else (config_entry and config_entry.options.get(CONF_PAUSE_PLAYBACK, False))
     )
     
@@ -688,7 +733,13 @@ async def announce(
                     # Only use cached duration if engine is NOT active (true cached audio from HA)
                     # If engine is active, audio is being regenerated and duration may change
                     if not engine_active:
-                        cached_duration = _get_cached_duration(hass, message)
+                        cached_duration = _get_cached_duration(
+                            hass, message,
+                            tts_entity=tts_entity,
+                            voice=options.get("voice"),
+                            model=options.get("model"),
+                            speed=options.get("speed"),
+                        )
                         if cached_duration == DURATION_FAILED_SENTINEL:
                             _LOGGER.info(
                                 "Skipping playback wait: prior TTS attempt was a failure"
@@ -736,7 +787,13 @@ async def announce(
                             tts_failed = False
                             for _ in range(30):  # Up to 3 seconds
                                 await asyncio.sleep(0.1)
-                                cached_duration = _get_cached_duration(hass, message)
+                                cached_duration = _get_cached_duration(
+                                    hass, message,
+                                    tts_entity=tts_entity,
+                                    voice=options.get("voice"),
+                                    model=options.get("model"),
+                                    speed=options.get("speed"),
+                                )
                                 if cached_duration == DURATION_FAILED_SENTINEL:
                                     tts_failed = True
                                     break

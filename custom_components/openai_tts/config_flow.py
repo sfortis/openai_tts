@@ -195,6 +195,10 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
                 user_input[UNIQUE_ID] = unique_id
                 await self.async_set_unique_id(unique_id)
+                # Catches the custom-endpoint-without-API-key duplicate case
+                # that the explicit duplicate_api_key check above can't see
+                # (no API key to compare).
+                self._abort_if_unique_id_configured()
                 hostname = urlparse(user_input[CONF_URL]).hostname
                 return self.async_create_entry(
                     title=f"OpenAI TTS ({hostname})",
@@ -331,8 +335,11 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
                 await validate_user_input(user_input)
 
+                api_key = user_input.get(CONF_API_KEY, "")
+                api_url = user_input.get(CONF_URL, DEFAULT_URL)
+                is_custom_endpoint = api_url != DEFAULT_URL
+
                 # Check for duplicate API key (exclude current entry)
-                api_key = user_input.get(CONF_API_KEY)
                 if api_key:
                     for entry in self._async_current_entries():
                         if entry.entry_id != reconfigure_entry.entry_id and entry.data.get(CONF_API_KEY) == api_key:
@@ -340,10 +347,16 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                             errors["base"] = "duplicate_api_key"
                             break
 
+                # Validate the new API key the same way initial setup does,
+                # so reconfigure can't quietly save an invalid key that
+                # would only fail at runtime.
+                if not errors and api_key and not is_custom_endpoint:
+                    await async_validate_api_key(api_key, api_url)
+
                 if not errors:
                     # Update the entry using the recommended helper
                     from urllib.parse import urlparse
-                    hostname = urlparse(user_input[CONF_URL]).hostname
+                    hostname = urlparse(api_url).hostname
 
                     # Ensure unique_id doesn't change
                     await self.async_set_unique_id(reconfigure_entry.unique_id)
@@ -354,7 +367,11 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                         data_updates=user_input,
                         title=f"OpenAI TTS ({hostname})"
                     )
-                    
+
+            except InvalidAPIKey:
+                errors["base"] = "invalid_api_key"
+            except CannotConnect:
+                errors["base"] = "cannot_connect"
             except HomeAssistantError as e:
                 _LOGGER.exception(str(e))
                 errors["base"] = str(e)
@@ -406,14 +423,14 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 if not profile_name:
                     raise ValueError("Profile name is required")
                 
-                # Check if profile name already exists in subentries
+                # Check if profile name already exists in this parent's subentries.
+                # Modern HA stores subentries on the parent's ``subentries`` dict;
+                # the legacy ``parent_entry_id`` attribute does not exist on the
+                # newer ConfigSubentry type, so the old loop never matched.
                 parent_entry = self._get_entry()
-                # Get all config entries and filter for subentries of this parent
-                all_entries = self.hass.config_entries.async_entries(DOMAIN)
-                for entry in all_entries:
-                    if (hasattr(entry, 'parent_entry_id') and 
-                        entry.parent_entry_id == parent_entry.entry_id and
-                        entry.data.get(CONF_PROFILE_NAME) == profile_name):
+                existing_subentries = getattr(parent_entry, "subentries", {}) or {}
+                for sub in existing_subentries.values():
+                    if sub.data.get(CONF_PROFILE_NAME) == profile_name:
                         raise ValueError("Profile name already exists")
                 
                 # Map string keys to constants

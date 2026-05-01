@@ -108,5 +108,21 @@
         }
       }
     }
+  },
+  "entity": {
+    "sensor": {
+      "api_status": {
+        "name": "Κατάσταση",
+        "state": {
+          "ok": "Εντάξει",
+          "auth_failed": "Αποτυχία ταυτοποίησης",
+          "quota_exceeded": "Εξάντληση πιστώσεων",
+          "rate_limited": "Περιορισμός ρυθμού",
+          "server_error": "Σφάλμα διακομιστή",
+          "network_error": "Σφάλμα δικτύου",
+          "unknown_error": "Άγνωστο σφάλμα"
+        }
+      }
+    }
   }
 }
