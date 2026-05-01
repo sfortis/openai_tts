@@ -60,6 +60,73 @@ def _resolve_config_entry_for_tts_entity(
     return hass.config_entries.async_get_entry(entry.config_entry_id)
 
 
+def _detect_playback_pattern(tts_state) -> str:
+    """Return ``'cache_hit'``, ``'streaming'`` or ``'atomic'``.
+
+    Reads ONLY the entity's published attributes (no timing inference):
+
+    * ``engine_active=False`` and ``playback_mode is None``
+      -> the engine never ran for this request, so HA must be serving
+         from its TTS cache.
+    * ``playback_mode == 'streaming'``
+      -> the engine streamed chunks; the cast device has been receiving
+         and (likely) playing audio while the engine was active.
+    * ``playback_mode == 'atomic'`` (or anything else)
+      -> chime/normalize/short-atomic; cast was idle until the engine
+         finished assembling the full audio.
+    """
+    if tts_state is None:
+        return "atomic"
+    mode = tts_state.attributes.get("playback_mode")
+    engine_active = tts_state.attributes.get("engine_active", False)
+    if not engine_active and mode is None:
+        return "cache_hit"
+    if mode == "streaming":
+        return "streaming"
+    return "atomic"
+
+
+def _resolve_unique_id(hass: HomeAssistant, tts_entity: str) -> str | None:
+    """Return the registry unique_id for ``tts_entity``, or None.
+
+    We hash the cache key on unique_id rather than entity_id because users
+    may rename entities in the UI; the unique_id is the only identifier
+    that stays stable across renames and is what the entity itself uses
+    when storing.
+    """
+    er = entity_registry.async_get(hass)
+    entry = er.async_get(tts_entity)
+    return entry.unique_id if entry else None
+
+
+def _resolve_effective_voice_model_speed(
+    hass: HomeAssistant,
+    tts_entity: str,
+    options: Dict[str, Any],
+) -> tuple[str | None, str | None, float | None]:
+    """Return the effective ``(voice, model, speed)`` for this announcement.
+
+    Service-call values win; otherwise we fall back to the entity's
+    ``current_voice`` / ``current_model`` / ``current_speed`` attributes
+    which the TTS entity publishes from its resolved config. This is what
+    ``tts.py`` itself uses when it stores the duration cache, so matching
+    on the same triple is essential to avoid hash mismatches.
+    """
+    state = hass.states.get(tts_entity)
+    attrs = state.attributes if state else {}
+
+    voice = options.get("voice") or attrs.get("current_voice")
+    model = options.get("model") or attrs.get("current_model")
+    raw_speed = options.get("speed")
+    if raw_speed is None:
+        raw_speed = attrs.get("current_speed")
+    try:
+        speed = float(raw_speed) if raw_speed is not None else None
+    except (TypeError, ValueError):
+        speed = None
+    return voice, model, speed
+
+
 def _resolve_tracker_for_tts_entity(
     hass: HomeAssistant, tts_entity: str
 ) -> OpenAITTSHealthTracker | None:
@@ -83,7 +150,7 @@ _LOGGER = logging.getLogger(__name__)
 # Platform-specific buffer times (milliseconds)
 PLATFORM_BUFFERS = {
     "sonos": 800,       # Sonos network sync buffer (reduced from 1200)
-    "cast": 700,        # Chromecast casting buffer (reduced from 1000)
+    "cast": 2500,       # Chromecast: app warm-up + decoder buffer + end-of-playback flush
     "alexa": 600,       # Alexa cloud buffer (reduced from 800)
     "default": 300      # Default buffer for local players (reduced from 400)
 }
@@ -709,36 +776,41 @@ async def announce(
                     tts_state = hass.states.get(tts_entity)
                     engine_active = tts_state.attributes.get('engine_active', False) if tts_state else False
 
-                    # Check if HA served cached audio (fast response + engine not active)
-                    # HA cache hit: speak returns very quickly (< 200ms) and engine was never activated
-                    ha_cache_hit = tts_generation_time < 200 and not engine_active
-
-                    # Determine when playback actually started:
-                    # - Streaming: playback starts during speak call (at tts_start)
-                    # - Non-streaming (chime/normalize): playback starts AFTER speak returns (at tts_end_time)
-                    # - HA cache hit: playback starts immediately when speak is called
-                    if ha_cache_hit:
-                        # HA served cached audio - playback started at speak call
-                        playback_start_time = tts_start
-                        _LOGGER.debug("HA cache hit - playback started at speak call")
-                    elif tts_generation_time > 500:
-                        # Long generation time = non-streaming, playback starts after speak returns
-                        playback_start_time = tts_end_time
-                        _LOGGER.debug("Non-streaming detected - playback starts after speak returns")
-                    else:
-                        # Short generation time but not cache = streaming, playback started at speak
-                        playback_start_time = tts_start
-                        _LOGGER.debug("Streaming detected - playback started at speak call")
+                    # Pattern is still useful for the wait-loop below to know
+                    # whether the engine ever runs (cache_hit) or has to be
+                    # waited on. But for playback timing we use a single
+                    # deterministic rule:
+                    #
+                    #   playback_start_time = tts_end_time
+                    #
+                    # The HA tts.speak service blocks until the target
+                    # media_player has accepted the URL and is ready - which
+                    # is the closest signal we have to actual playback start.
+                    # This works for cache hits (returns ~instant), cast
+                    # streaming (returns after warm-up), atomic (returns
+                    # after audio assembled) - all without timing heuristics
+                    # or platform-specific branches.
+                    pattern = _detect_playback_pattern(tts_state)
+                    ha_cache_hit = pattern == "cache_hit"
+                    playback_start_time = tts_end_time
+                    _LOGGER.debug(
+                        "Pattern: %s - playback start = tts_end_time", pattern
+                    )
 
                     # Only use cached duration if engine is NOT active (true cached audio from HA)
                     # If engine is active, audio is being regenerated and duration may change
                     if not engine_active:
+                        eff_voice, eff_model, eff_speed = (
+                            _resolve_effective_voice_model_speed(
+                                hass, tts_entity, options
+                            )
+                        )
                         cached_duration = _get_cached_duration(
                             hass, message,
-                            tts_entity=tts_entity,
-                            voice=options.get("voice"),
-                            model=options.get("model"),
-                            speed=options.get("speed"),
+                            tts_entity=_resolve_unique_id(hass, tts_entity),
+                            voice=eff_voice,
+                            model=eff_model,
+                            speed=eff_speed,
                         )
                         if cached_duration == DURATION_FAILED_SENTINEL:
                             _LOGGER.info(
@@ -774,10 +846,17 @@ async def announce(
 
                         # Engine finished - check shared cache for duration
                         if not engine_active and (volume_changed or waited_time > 0.5):
-                            # IMPORTANT: For chime/normalize audio, playback starts NOW
-                            # (when engine finishes), not when speak was called!
-                            playback_start_time = asyncio.get_running_loop().time()
-                            _LOGGER.info("Engine finished - playback starts NOW (chime/normalize mode)")
+                            # We already set playback_start_time = tts_end_time
+                            # above, which is the deterministic anchor for ALL
+                            # patterns. Don't second-guess it here based on
+                            # what the engine did during the wait - the
+                            # tts.speak service either has or hasn't returned,
+                            # and that boundary is what matches actual cast
+                            # playback start.
+                            _LOGGER.info(
+                                "Engine finished - keeping playback_start_time "
+                                "= tts_end_time (deterministic)"
+                            )
 
                             # Wait briefly for duration to be stored.
                             # Three possible outcomes per iteration:
@@ -785,14 +864,20 @@ async def announce(
                             #   2. failure sentinel  -> TTS failed; skip wait
                             #   3. None              -> still loading, keep polling
                             tts_failed = False
+                            eff_voice, eff_model, eff_speed = (
+                                _resolve_effective_voice_model_speed(
+                                    hass, tts_entity, options
+                                )
+                            )
+                            entity_unique_id = _resolve_unique_id(hass, tts_entity)
                             for _ in range(30):  # Up to 3 seconds
                                 await asyncio.sleep(0.1)
                                 cached_duration = _get_cached_duration(
                                     hass, message,
-                                    tts_entity=tts_entity,
-                                    voice=options.get("voice"),
-                                    model=options.get("model"),
-                                    speed=options.get("speed"),
+                                    tts_entity=entity_unique_id,
+                                    voice=eff_voice,
+                                    model=eff_model,
+                                    speed=eff_speed,
                                 )
                                 if cached_duration == DURATION_FAILED_SENTINEL:
                                     tts_failed = True

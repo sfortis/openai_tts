@@ -67,9 +67,13 @@ STORAGE_VERSION = 1
 STORAGE_KEY = "openai_tts_state"
 HEALTH_TRACKER_KEY = "_health_tracker"
 
-# Streaming is only worthwhile beyond this length and when no post-processing
-# is required (chime / normalization both need the complete audio first).
-MIN_STREAMING_TEXT_LENGTH = 60
+# Stream as soon as we have anything to say. The previous 60-char floor
+# was meant to avoid streaming overhead for trivially short clips, but in
+# practice every TTS response (>= ~2s of audio) benefits from streaming -
+# atomic mode adds 5+ seconds of silence before playback starts. We keep
+# the threshold variable instead of removing the check so behaviour stays
+# easy to tune from one place.
+MIN_STREAMING_TEXT_LENGTH = 1
 
 
 def _resolve_health_tracker(
@@ -189,9 +193,20 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
         self._engine_active = False
         self._last_duration_ms: int | None = None
+        # ``playback_mode`` lets ``volume_restore`` know whether the cast
+        # device has been playing while the engine is still active
+        # (``streaming``) or has been idle waiting for full audio
+        # (``atomic``). Exposed via extra_state_attributes so volume_restore
+        # doesn't have to guess from timing heuristics.
+        self._playback_mode: str | None = None
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{self.entity_id}")
         self._stored_data: dict = {}
-        self._duration_cache = MessageDurationCache(hass, self.entity_id)
+        # Key the duration cache on ``unique_id`` (stable across user-initiated
+        # entity renames), NOT ``entity_id`` (which is whatever the user has
+        # in the registry and can drift from the profile-derived entity_id we
+        # compute internally). volume_restore looks up by unique_id for the
+        # same reason.
+        self._duration_cache = MessageDurationCache(hass, self._attr_unique_id)
 
         # The health tracker lives on the parent entry. Subentries inherit it
         # via parent_entry; legacy entries are their own parent.
@@ -268,6 +283,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         return {
             "media_duration": self._last_duration_ms,
             "engine_active": self._engine_active,
+            "playback_mode": self._playback_mode,
             "message_cache_size": self._duration_cache.size,
             "available_voices": VOICES,
             "current_voice": self._get_config_value(CONF_VOICE) or self._engine._voice,
@@ -585,6 +601,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self.entity_id, message[:50], language,
         )
 
+        # Reset mode FIRST so volume_restore can distinguish "engine running
+        # right now" from "engine never ran" (= HA cache hit).
+        self._playback_mode = None
         self._engine_active = True
         self.async_write_ha_state()
 
@@ -598,6 +617,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             can_stream = (
                 not resolved["chime_enable"] and not resolved["normalize_audio"]
             )
+            # The legacy contract path is always atomic from the
+            # media_player's perspective: HA buffers the whole tuple
+            # before play_media.
+            self._playback_mode = "atomic"
+            self.async_write_ha_state()
 
             try:
                 audio_data = await self._engine_get_blocking(
@@ -685,6 +709,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         """
         _LOGGER.info("async_stream_tts_audio called for entity %s", self.entity_id)
 
+        # Reset mode FIRST so volume_restore can distinguish "engine running
+        # right now" from "engine never ran" (= HA cache hit).
+        self._playback_mode = None
         self._engine_active = True
         self.async_write_ha_state()
 
@@ -696,6 +723,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         resolved = self._resolve_options(options)
         audio_format = "mp3"
         can_stream = self._can_use_streaming(full_text, options)
+
+        # Tell volume_restore deterministically which path we're taking, so
+        # it doesn't have to infer from speak-call latency. Must be set
+        # BEFORE the response is returned to HA, since volume_restore reads
+        # it the moment tts.speak completes.
+        self._playback_mode = "streaming" if can_stream else "atomic"
+        self.async_write_ha_state()
 
         _LOGGER.info(
             "Streaming TTS - voice: %s, model: %s, speed: %s, format: %s, "
