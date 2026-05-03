@@ -12,7 +12,90 @@ DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 UNIQUE_ID = "unique_id"
 
 MODELS = ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"]
-VOICES = ["alloy", "ash", "ballad", "coral", "echo", "fable", "onyx", "nova", "sage", "shimmer"]
+# All 13 OpenAI built-in voices. ``ballad``, ``verse``, ``marin`` and
+# ``cedar`` are exclusive to ``gpt-4o-mini-tts``; the legacy ``tts-1`` /
+# ``tts-1-hd`` models reject them. ``marin`` and ``cedar`` are OpenAI's
+# recommended highest-quality voices.
+VOICES = [
+    "alloy", "ash", "ballad", "cedar", "coral", "echo", "fable",
+    "marin", "nova", "onyx", "sage", "shimmer", "verse",
+]
+
+# Per-model voice support. Used by config_flow to render only the
+# voices that the chosen model can actually render, and by the service
+# call layer to reject incompatible (model, voice) combinations early
+# rather than letting OpenAI return an unhelpful 400.
+_LEGACY_TTS_VOICES = [
+    "alloy", "ash", "coral", "echo", "fable", "nova", "onyx", "sage", "shimmer",
+]
+VOICES_BY_MODEL: dict[str, list[str]] = {
+    "tts-1": _LEGACY_TTS_VOICES,
+    "tts-1-hd": _LEGACY_TTS_VOICES,
+    "gpt-4o-mini-tts": VOICES,  # 13 voices, supports all
+}
+
+
+def voices_for_model(model: str | None) -> list[str]:
+    """Return the supported voices for ``model``.
+
+    Falls back to the full ``VOICES`` list for unknown / custom backend
+    models so we don't accidentally restrict choice for users targeting
+    Chatterbox / TTS Web UI / etc.
+    """
+    if not model:
+        return VOICES
+    return VOICES_BY_MODEL.get(model, VOICES)
+
+
+# Human-readable suffixes shown in voice pickers so users can spot at
+# a glance which voices need ``gpt-4o-mini-tts`` and which two are
+# OpenAI's "best quality" recommendation.
+_VOICE_DESCRIPTIONS: dict[str, str] = {
+    "alloy": "Neutral",
+    "ash": "Calm",
+    "ballad": "Warm · gpt-4o-mini-tts only",
+    "cedar": "Recommended · gpt-4o-mini-tts only",
+    "coral": "Friendly",
+    "echo": "Smooth",
+    "fable": "Expressive",
+    "marin": "Recommended · gpt-4o-mini-tts only",
+    "nova": "Energetic",
+    "onyx": "Authoritative",
+    "sage": "Thoughtful",
+    "shimmer": "Gentle",
+    "verse": "Versatile · gpt-4o-mini-tts only",
+}
+
+
+def voice_options(voices: list[str]) -> list[dict[str, str]]:
+    """Return ``{label, value}`` options for ``voices`` (preserves order).
+
+    Used by config_flow to render the voice picker with the same
+    descriptive labels as the services.yaml dropdown.
+    """
+    return [
+        {
+            "value": v,
+            "label": (
+                f"{v.capitalize()} ({_VOICE_DESCRIPTIONS[v]})"
+                if v in _VOICE_DESCRIPTIONS
+                else v.capitalize()
+            ),
+        }
+        for v in voices
+    ]
+
+
+def is_openai_endpoint(url: str | None) -> bool:
+    """True when ``url`` points at OpenAI's official TTS endpoint.
+
+    Used to decide whether the voice picker should be a fixed dropdown
+    (OpenAI - finite voice catalogue) or a free-text input (custom
+    backends with arbitrary voice IDs).
+    """
+    if not url:
+        return True  # default endpoint is OpenAI
+    return "api.openai.com" in url.lower()
 
 # Supported languages (OpenAI TTS auto-detects from text, this list is for HA UI)
 # Based on OpenAI Whisper model language support

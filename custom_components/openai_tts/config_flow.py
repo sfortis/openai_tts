@@ -33,7 +33,9 @@ from .const import (
     DEFAULT_URL,
     DOMAIN,
     MODELS,
-    VOICES,
+    is_openai_endpoint,
+    voice_options,
+    voices_for_model,
     UNIQUE_ID,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
@@ -151,6 +153,11 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
     MINOR_VERSION = 1  # Increment for subentry flow support
     
     data_schema = vol.Schema({
+        # Optional friendly name shown in the "Add TTS agent" parent
+        # picker and the integrations list. Useful when the user
+        # juggles more than one OpenAI account, otherwise both entries
+        # would show as "OpenAI TTS (api.openai.com)".
+        vol.Optional("name", default=""): str,
         vol.Optional(CONF_API_KEY, default=""): str,
         vol.Optional(CONF_URL, default=DEFAULT_URL): str,
     })
@@ -200,8 +207,18 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # (no API key to compare).
                 self._abort_if_unique_id_configured()
                 hostname = urlparse(user_input[CONF_URL]).hostname
+                # Use the user-supplied account name when provided, so
+                # the "Add TTS agent" parent picker shows something
+                # meaningful ("OpenAI - Personal" / "OpenAI - Work")
+                # rather than two identical "OpenAI TTS (api.openai.com)"
+                # rows. Falls back to hostname when name is empty.
+                custom_name = (user_input.get("name") or "").strip()
+                if custom_name:
+                    title = f"OpenAI TTS - {custom_name}"
+                else:
+                    title = f"OpenAI TTS ({hostname})"
                 return self.async_create_entry(
-                    title=f"OpenAI TTS ({hostname})",
+                    title=title,
                     data=user_input,
                 )
             except data_entry_flow.AbortFlow:
@@ -362,10 +379,15 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(reconfigure_entry.unique_id)
                     self._abort_if_unique_id_mismatch()
 
+                    custom_name = (user_input.get("name") or "").strip()
+                    if custom_name:
+                        new_title = f"OpenAI TTS - {custom_name}"
+                    else:
+                        new_title = f"OpenAI TTS ({hostname})"
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
                         data_updates=user_input,
-                        title=f"OpenAI TTS ({hostname})"
+                        title=new_title,
                     )
 
             except InvalidAPIKey:
@@ -383,9 +405,16 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "unknown_error"
         
         # Show the form with current values as suggested (not default)
-        # Using suggested_value allows users to clear these fields
+        # Using suggested_value allows users to clear these fields.
+        # Pre-fill the name field by reverse-extracting it from the
+        # current title - keeps the disambiguation editable.
         current_data = reconfigure_entry.data
+        current_title = reconfigure_entry.title or ""
+        current_name = ""
+        if current_title.startswith("OpenAI TTS - "):
+            current_name = current_title[len("OpenAI TTS - "):]
         schema = vol.Schema({
+            vol.Optional("name", description={"suggested_value": current_name}): str,
             vol.Optional(CONF_API_KEY, description={"suggested_value": current_data.get(CONF_API_KEY, "")}): str,
             vol.Optional(CONF_URL, description={"suggested_value": current_data.get(CONF_URL, DEFAULT_URL)}): str,
         })
@@ -399,7 +428,14 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
 class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
     """Handle a subentry flow for OpenAI TTS profiles."""
-    
+
+    # Carries selections from step 1 (profile name + model) into step 2
+    # (voice + audio options) so we can render the voice picker against
+    # the chosen model. Reconfigure also reuses ``_step1_model``.
+    _step1_profile_name: str = ""
+    _step1_model: str = "tts-1"
+    _reconfigure_subentry: Any = None
+
     async def async_step_init(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Handle initialization with data (for migration)."""
         # This is called when flow is initiated with data directly
@@ -413,69 +449,43 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         return await self.async_step_user()
     
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        """Handle the initial step for profile creation."""
+        """Step 1 of profile creation: profile name + model.
+
+        Splitting the flow into two steps lets us render the voice
+        picker in step 2 with options filtered by the model the user
+        just chose - guided UX, no chance of picking a voice the model
+        rejects (e.g. ``marin`` on ``tts-1``).
+        """
         errors: dict[str, str] = {}
-        
+
         if user_input is not None:
             try:
-                # Validate profile name is unique
                 profile_name = user_input.get(CONF_PROFILE_NAME, "")
                 if not profile_name:
                     raise ValueError("Profile name is required")
-                
-                # Check if profile name already exists in this parent's subentries.
-                # Modern HA stores subentries on the parent's ``subentries`` dict;
-                # the legacy ``parent_entry_id`` attribute does not exist on the
-                # newer ConfigSubentry type, so the old loop never matched.
+
+                # Reject duplicates here so the user sees the error
+                # before investing in step 2.
                 parent_entry = self._get_entry()
                 existing_subentries = getattr(parent_entry, "subentries", {}) or {}
                 for sub in existing_subentries.values():
                     if sub.data.get(CONF_PROFILE_NAME) == profile_name:
                         raise ValueError("Profile name already exists")
-                
-                # Map string keys to constants
-                mapped_input = {}
-                key_mapping = {
-                    "chime": CONF_CHIME_ENABLE,
-                    "chime_sound": CONF_CHIME_SOUND,
-                    "normalize_audio": CONF_NORMALIZE_AUDIO,
-                    "instructions": CONF_INSTRUCTIONS,
-                    "extra_payload": CONF_EXTRA_PAYLOAD,
-                }
 
-                for key, value in user_input.items():
-                    mapped_key = key_mapping.get(key, key)
-                    # Handle empty string fields - convert to None
-                    if key in ("instructions", "extra_payload") and value == "":
-                        mapped_input[mapped_key] = None
-                    else:
-                        mapped_input[mapped_key] = value
-                
-                # Create unique ID for this profile
-                entry_id = generate_entry_id()
-                mapped_input[UNIQUE_ID] = entry_id
-                
-                # Don't call async_set_unique_id in subentry flows
-                # Subentry unique IDs are handled differently than main entry unique IDs
-                
-                # Create the subentry
-                return self.async_create_entry(
-                    title=profile_name,
-                    data=mapped_input,
-                )
-                
+                # Stash step-1 selections on the flow so step 2 can read
+                # them and show the right voice list.
+                self._step1_profile_name = profile_name
+                self._step1_model = user_input.get(CONF_MODEL, "tts-1")
+                return await self.async_step_voice_audio()
+
             except ValueError as e:
                 _LOGGER.exception(str(e))
                 errors["base"] = str(e)
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"
-        
-        # Get chime options
-        chime_opts = await async_get_chime_options(self.hass)
-        
-        # Schema for profile creation
-        profile_schema = vol.Schema({
+
+        step1_schema = vol.Schema({
             vol.Required(CONF_PROFILE_NAME): str,
             vol.Required(CONF_MODEL, default="tts-1"): selector({
                 "select": {
@@ -485,63 +495,29 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "custom_value": True,
                 }
             }),
-            vol.Required(CONF_VOICE, default="shimmer"): selector({
-                "select": {
-                    "options": VOICES,
-                    "mode": "dropdown",
-                    "sort": True,
-                    "custom_value": True,
-                }
-            }),
-            vol.Optional(
-                "instructions",
-                description={
-                    "suggested_value": ""
-                },
-            ): TemplateSelector(),
-            vol.Optional(CONF_SPEED, default=1.0): selector({
-                "number": {"min": 0.25, "max": 4.0, "step": 0.05, "mode": "slider"}
-            }),
-            vol.Optional("chime", default=False): selector({"boolean": {}}),
-            vol.Optional("chime_sound", default="threetone.mp3"): selector({
-                "select": {"options": chime_opts}
-            }),
-            vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
-            vol.Optional(
-                "extra_payload",
-                description={
-                    "suggested_value": ""
-                },
-            ): TemplateSelector(),
         })
 
         return self.async_show_form(
             step_id="user",
-            data_schema=profile_schema,
+            data_schema=step1_schema,
             errors=errors,
         )
-    
-    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        """Handle reconfiguration of a profile."""
+
+    async def async_step_voice_audio(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Step 2 of profile creation: voice + audio options.
+
+        Renders the voice picker with options filtered by the model
+        chosen in step 1. For non-OpenAI endpoints (custom backends
+        like Chatterbox), falls back to a free-text voice input
+        because we have no idea what the backend's voice catalogue
+        looks like.
+        """
         errors: dict[str, str] = {}
-        
-        try:
-            subentry = self._get_reconfigure_subentry()
-        except Exception as e:
-            _LOGGER.error("Failed to get reconfigure subentry: %s", e)
-            return self.async_abort(reason="subentry_not_found")
-        
-        if not subentry:
-            _LOGGER.error("Reconfigure subentry is None")
-            return self.async_abort(reason="subentry_not_found")
-        
-        # Log subentry info - subentries have limited attributes in the config flow context
-        subentry_info = f"{subentry.title} (profile: {subentry.data.get(CONF_PROFILE_NAME, 'unknown')})"
-        _LOGGER.debug("Reconfiguring subentry: %s", subentry_info)
-        
+
         if user_input is not None:
             try:
-                # Map string keys to constants
                 key_mapping = {
                     "chime": CONF_CHIME_ENABLE,
                     "chime_sound": CONF_CHIME_SOUND,
@@ -549,30 +525,167 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
                 }
-
-                mapped_input = {}
+                mapped_input: dict[str, Any] = {
+                    CONF_PROFILE_NAME: self._step1_profile_name,
+                    CONF_MODEL: self._step1_model,
+                }
                 for key, value in user_input.items():
                     mapped_key = key_mapping.get(key, key)
-                    # Handle empty string fields - convert to None
                     if key in ("instructions", "extra_payload") and value == "":
                         mapped_input[mapped_key] = None
                     else:
                         mapped_input[mapped_key] = value
 
-                # Explicitly clear optional text fields if not in user_input
-                # (HA omits empty Optional fields from submission)
-                for field, const in [("instructions", CONF_INSTRUCTIONS), ("extra_payload", CONF_EXTRA_PAYLOAD)]:
+                mapped_input[UNIQUE_ID] = generate_entry_id()
+                return self.async_create_entry(
+                    title=self._step1_profile_name,
+                    data=mapped_input,
+                )
+            except Exception:
+                _LOGGER.exception("Unexpected error")
+                errors["base"] = "unknown_error"
+
+        chime_opts = await async_get_chime_options(self.hass)
+        parent_entry = self._get_entry()
+        endpoint_url = parent_entry.data.get(CONF_URL) if parent_entry else None
+        is_openai = is_openai_endpoint(endpoint_url)
+        allowed_voices = voices_for_model(self._step1_model)
+        default_voice = "shimmer" if "shimmer" in allowed_voices else allowed_voices[0]
+
+        if is_openai:
+            # ``custom_value`` is OFF on OpenAI endpoints so the picker
+            # cannot accept a voice the model rejects. Custom backends
+            # below get a free-text input instead.
+            voice_field: Any = selector({
+                "select": {
+                    "options": voice_options(allowed_voices),
+                    "mode": "dropdown",
+                    "sort": False,
+                    "custom_value": False,
+                }
+            })
+        else:
+            # Custom backend (e.g. Chatterbox) - we don't know the
+            # voice catalogue, so let the user type whatever the
+            # backend understands.
+            voice_field = selector({"text": {}})
+
+        step2_schema = vol.Schema({
+            vol.Required(CONF_VOICE, default=default_voice): voice_field,
+            vol.Optional(CONF_SPEED, default=1.0): selector({
+                "number": {"min": 0.25, "max": 4.0, "step": 0.05, "mode": "slider"}
+            }),
+            vol.Optional("instructions", description={"suggested_value": ""}): TemplateSelector(),
+            vol.Optional("chime", default=False): selector({"boolean": {}}),
+            vol.Optional("chime_sound", default="threetone.mp3"): selector({
+                "select": {"options": chime_opts}
+            }),
+            vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
+            vol.Optional("extra_payload", description={"suggested_value": ""}): TemplateSelector(),
+        })
+
+        return self.async_show_form(
+            step_id="voice_audio",
+            data_schema=step2_schema,
+            errors=errors,
+            description_placeholders={"model": self._step1_model},
+        )
+    
+    async def async_step_reconfigure(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
+        """Reconfigure step 1: pick the model.
+
+        Mirrors create flow: model first (so step 2 can filter the
+        voice picker by it), audio settings second. Lets the user
+        switch from tts-1 → gpt-4o-mini-tts and immediately see the
+        marin/cedar/ballad/verse voices that the new model unlocks.
+        """
+        errors: dict[str, str] = {}
+
+        try:
+            subentry = self._get_reconfigure_subentry()
+        except Exception as e:
+            _LOGGER.error("Failed to get reconfigure subentry: %s", e)
+            return self.async_abort(reason="subentry_not_found")
+
+        if not subentry:
+            _LOGGER.error("Reconfigure subentry is None")
+            return self.async_abort(reason="subentry_not_found")
+
+        self._reconfigure_subentry = subentry
+        existing_data = subentry.data
+        _LOGGER.debug(
+            "Reconfiguring subentry: %s (profile: %s)",
+            subentry.title,
+            existing_data.get(CONF_PROFILE_NAME, "unknown"),
+        )
+
+        if user_input is not None:
+            try:
+                self._step1_model = user_input.get(CONF_MODEL, "tts-1")
+                return await self.async_step_reconfigure_voice()
+            except Exception:
+                _LOGGER.exception("Unexpected error")
+                errors["base"] = "unknown_error"
+
+        existing_model = existing_data.get(CONF_MODEL, "tts-1")
+        step1_schema = vol.Schema({
+            vol.Required(CONF_MODEL, default=existing_model): selector({
+                "select": {
+                    "options": MODELS,
+                    "mode": "dropdown",
+                    "sort": True,
+                    "custom_value": True,
+                }
+            }),
+        })
+
+        return self.async_show_form(
+            step_id="reconfigure",
+            data_schema=step1_schema,
+            errors=errors,
+        )
+
+    async def async_step_reconfigure_voice(
+        self, user_input: dict[str, Any] | None = None
+    ) -> SubentryFlowResult:
+        """Reconfigure step 2: voice + audio settings.
+
+        Voice picker is filtered by the model chosen in step 1, so
+        the user only sees voices the model can actually render.
+        """
+        errors: dict[str, str] = {}
+        subentry = self._reconfigure_subentry
+        existing_data = subentry.data
+
+        if user_input is not None:
+            try:
+                key_mapping = {
+                    "chime": CONF_CHIME_ENABLE,
+                    "chime_sound": CONF_CHIME_SOUND,
+                    "normalize_audio": CONF_NORMALIZE_AUDIO,
+                    "instructions": CONF_INSTRUCTIONS,
+                    "extra_payload": CONF_EXTRA_PAYLOAD,
+                }
+                mapped_input: dict[str, Any] = {CONF_MODEL: self._step1_model}
+                for key, value in user_input.items():
+                    mapped_key = key_mapping.get(key, key)
+                    if key in ("instructions", "extra_payload") and value == "":
+                        mapped_input[mapped_key] = None
+                    else:
+                        mapped_input[mapped_key] = value
+                # Empty optional text fields aren't submitted by HA, so
+                # explicitly clear them to drop any stale value on the
+                # subentry.
+                for field, const in [
+                    ("instructions", CONF_INSTRUCTIONS),
+                    ("extra_payload", CONF_EXTRA_PAYLOAD),
+                ]:
                     if field not in user_input:
                         mapped_input[const] = None
 
-                # Keep the original profile name and unique ID
-                updated_data = {**subentry.data, **mapped_input}
-                
-                # Log the update
-                entry_id = getattr(subentry, 'entry_id', getattr(subentry, 'subentry_id', 'unknown'))
+                updated_data = {**existing_data, **mapped_input}
+                entry_id = getattr(subentry, "entry_id", getattr(subentry, "subentry_id", "unknown"))
                 _LOGGER.info("Updating subentry %s with data: %s", entry_id, updated_data)
-                
-                # Update the subentry
                 return self.async_update_and_abort(
                     self._get_entry(),
                     subentry,
@@ -581,31 +694,34 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"
-        
-        # Get existing data for defaults
-        existing_data = subentry.data
-        
-        # Get chime options
+
         chime_opts = await async_get_chime_options(self.hass)
-        
-        # Schema for profile reconfiguration (without profile name)
-        reconfigure_schema = vol.Schema({
-            vol.Required(CONF_MODEL, default=existing_data.get(CONF_MODEL, "tts-1")): selector({
+        parent_entry = self._get_entry()
+        endpoint_url = parent_entry.data.get(CONF_URL) if parent_entry else None
+        is_openai = is_openai_endpoint(endpoint_url)
+        allowed_voices = voices_for_model(self._step1_model)
+        existing_voice = existing_data.get(CONF_VOICE, "shimmer")
+        # If the previously-saved voice isn't in the new model's
+        # allowed list, fall back to the model's first compatible
+        # voice so the form opens on a valid pick.
+        default_voice = existing_voice if existing_voice in allowed_voices else allowed_voices[0]
+
+        if is_openai:
+            # See note in async_step_voice_audio: lock the picker so
+            # users can't save an incompatible voice.
+            voice_field: Any = selector({
                 "select": {
-                    "options": MODELS,
+                    "options": voice_options(allowed_voices),
                     "mode": "dropdown",
-                    "sort": True,
-                    "custom_value": True,
+                    "sort": False,
+                    "custom_value": False,
                 }
-            }),
-            vol.Required(CONF_VOICE, default=existing_data.get(CONF_VOICE, "shimmer")): selector({
-                "select": {
-                    "options": VOICES,
-                    "mode": "dropdown",
-                    "sort": True,
-                    "custom_value": True,
-                }
-            }),
+            })
+        else:
+            voice_field = selector({"text": {}})
+
+        step2_schema = vol.Schema({
+            vol.Required(CONF_VOICE, default=default_voice): voice_field,
             vol.Optional(
                 "instructions",
                 description={
@@ -629,9 +745,10 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         })
 
         return self.async_show_form(
-            step_id="reconfigure",
-            data_schema=reconfigure_schema,
+            step_id="reconfigure_voice",
+            data_schema=step2_schema,
             errors=errors,
+            description_placeholders={"model": self._step1_model},
         )
 
 
@@ -709,9 +826,12 @@ class OpenAITTSOptionsFlow(OptionsFlow):
         
         # If this is a profile or legacy entry, include voice, model, and speed options
         if is_profile or is_legacy:
+            current_model = self._config_entry.options.get(
+                CONF_MODEL, self._config_entry.data.get(CONF_MODEL, "tts-1")
+            )
             schema_dict[vol.Optional(
                 "model",
-                default=self._config_entry.options.get(CONF_MODEL, self._config_entry.data.get(CONF_MODEL, "tts-1")),
+                default=current_model,
             )] = selector({
                 "select": {
                     "options": MODELS,
@@ -720,19 +840,31 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                     "custom_value": True,
                 }
             })
-            
+
+            # Voice picker filtered by the current model and locked to
+            # that set so legacy entries can't save marin/cedar/etc on
+            # a tts-1 profile and hit a runtime API failure.
+            allowed_legacy_voices = voices_for_model(current_model)
+            current_voice = self._config_entry.options.get(
+                CONF_VOICE, self._config_entry.data.get(CONF_VOICE, "shimmer")
+            )
+            voice_default = (
+                current_voice
+                if current_voice in allowed_legacy_voices
+                else allowed_legacy_voices[0]
+            )
             schema_dict[vol.Optional(
                 "voice",
-                default=self._config_entry.options.get(CONF_VOICE, self._config_entry.data.get(CONF_VOICE, "shimmer")),
+                default=voice_default,
             )] = selector({
                 "select": {
-                    "options": VOICES,
+                    "options": voice_options(allowed_legacy_voices),
                     "mode": "dropdown",
-                    "sort": True,
-                    "custom_value": True,
+                    "sort": False,
+                    "custom_value": False,
                 }
             })
-            
+
             # Instructions field - multiline text
             schema_dict[vol.Optional(
                 "instructions",  # Multiline text field
