@@ -57,7 +57,7 @@
         },
         "voice_audio": {
           "title": "Προσθήκη TTS agent (Βήμα 2 από 2)",
-          "description": "Φωνή και επιλογές ήχου για το model {model}.",
+          "description": "Φωνή και επιλογές ήχου για το model {model}. Σημείωση: η ενεργοποίηση chime ή normalize_audio απενεργοποιεί το streaming (απαιτείται post-processing).",
           "data": {
             "voice": "Φωνή",
             "speed": "Ταχύτητα (0,25 έως 4,0)",
@@ -66,7 +66,7 @@
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
-            "audio_format": "Audio format (μόνο για custom backends που δεν δέχονται mp3)"
+            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)"
           }
         },
         "reconfigure": {
@@ -78,7 +78,7 @@
         },
         "reconfigure_voice": {
           "title": "Ενημέρωση TTS agent (Βήμα 2 από 2)",
-          "description": "Φωνή και επιλογές ήχου για το model {model}.",
+          "description": "Φωνή και επιλογές ήχου για το model {model}. Σημείωση: η ενεργοποίηση chime ή normalize_audio απενεργοποιεί το streaming (απαιτείται post-processing).",
           "data": {
             "voice": "Φωνή",
             "speed": "Ταχύτητα (0,25 έως 4,0)",
@@ -87,7 +87,7 @@
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
-            "audio_format": "Audio format (μόνο για custom backends που δεν δέχονται mp3)"
+            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)"
           }
         }
       },

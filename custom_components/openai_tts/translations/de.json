@@ -57,7 +57,7 @@
         },
         "voice_audio": {
           "title": "TTS agent hinzufügen (Schritt 2 von 2)",
-          "description": "Stimme und Audiooptionen für model {model}.",
+          "description": "Stimme und Audiooptionen für model {model}. Hinweis: das Aktivieren von chime oder normalize_audio deaktiviert das Streaming (Post-Processing erforderlich).",
           "data": {
             "voice": "Stimme",
             "speed": "Geschwindigkeit (0,25 bis 4,0)",
@@ -66,7 +66,7 @@
             "normalize_audio": "Audiolautstärke normalisieren",
             "instructions": "Benutzerdefinierte Anweisungen (nur gpt-4o-mini-tts)",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
-            "audio_format": "Audio format (nur für custom backends, die mp3 ablehnen)"
+            "audio_format": "Audio format (mp3 ist das sichere default, nur ändern wenn Ihr backend ein anderes benötigt)"
           }
         },
         "reconfigure": {
@@ -78,7 +78,7 @@
         },
         "reconfigure_voice": {
           "title": "TTS agent aktualisieren (Schritt 2 von 2)",
-          "description": "Stimme und Audiooptionen für model {model}.",
+          "description": "Stimme und Audiooptionen für model {model}. Hinweis: das Aktivieren von chime oder normalize_audio deaktiviert das Streaming (Post-Processing erforderlich).",
           "data": {
             "voice": "Stimme",
             "speed": "Geschwindigkeit (0,25 bis 4,0)",
@@ -87,7 +87,7 @@
             "normalize_audio": "Audiolautstärke normalisieren",
             "instructions": "Benutzerdefinierte Anweisungen (nur gpt-4o-mini-tts)",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
-            "audio_format": "Audio format (nur für custom backends, die mp3 ablehnen)"
+            "audio_format": "Audio format (mp3 ist das sichere default, nur ändern wenn Ihr backend ein anderes benötigt)"
           }
         }
       },

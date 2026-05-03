@@ -163,8 +163,31 @@ CONF_INSTRUCTIONS = "instructions"
 CONF_EXTRA_PAYLOAD = "extra_payload"  # JSON string for custom TTS backend parameters
 CONF_AUDIO_FORMAT = "audio_format"   # mp3 (default) / wav / opus, for custom backends
 
-AUDIO_FORMATS = ["mp3", "wav", "opus"]
+AUDIO_FORMATS = ["mp3", "opus", "aac", "flac", "wav", "pcm"]
+AUDIO_FORMAT_LABELS: list[dict[str, str]] = [
+    {"value": "mp3", "label": "MP3 (default, broad compatibility)"},
+    {"value": "opus", "label": "Opus (low-latency streaming)"},
+    {"value": "aac", "label": "AAC (mobile / iOS / Android)"},
+    {"value": "flac", "label": "FLAC (lossless)"},
+    {"value": "wav", "label": "WAV (uncompressed, low decode overhead)"},
+    {"value": "pcm", "label": "PCM (raw 24kHz 16-bit, no header)"},
+]
 DEFAULT_AUDIO_FORMAT = "mp3"
+
+# Maps each user-selectable audio format to the ffmpeg codec / muxer flags
+# used when we emit that format. ``container_args`` is appended after the
+# filter graph; ``codec_args`` carries the encoder-specific switches.
+# PCM is special-cased: it has no container, so we force the s16le muxer
+# at 24kHz mono to match OpenAI's documented raw output layout.
+AUDIO_FORMAT_ENCODER: dict[str, dict[str, list[str]]] = {
+    "mp3":  {"codec_args": ["-c:a", "libmp3lame", "-b:a", "128k"], "container_args": []},
+    "opus": {"codec_args": ["-c:a", "libopus", "-b:a", "96k"],     "container_args": []},
+    "aac":  {"codec_args": ["-c:a", "aac", "-b:a", "128k"],        "container_args": []},
+    "flac": {"codec_args": ["-c:a", "flac"],                       "container_args": []},
+    "wav":  {"codec_args": ["-c:a", "pcm_s16le"],                  "container_args": []},
+    "pcm":  {"codec_args": ["-c:a", "pcm_s16le"],
+             "container_args": ["-f", "s16le", "-ar", "24000", "-ac", "1"]},
+}
 
 # Toggle to snapshot & restore volumes
 CONF_VOLUME_RESTORE = "volume_restore"

@@ -306,6 +306,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @property
     def supported_options(self) -> list[str]:
+        # ``preferred_format`` MUST be declared here even though we never
+        # read it from service options ourselves: HA core only honours it
+        # for URL extension and ffmpeg conversion when the entity claims
+        # support for it (otherwise it is popped from options and the URL
+        # defaults to .mp3, breaking opus/wav/etc. delivery to Cast).
         return [
             CONF_VOICE,
             CONF_MODEL,
@@ -315,6 +320,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_NORMALIZE_AUDIO,
             CONF_INSTRUCTIONS,
             CONF_EXTRA_PAYLOAD,
+            CONF_AUDIO_FORMAT,
+            "preferred_format",
         ]
 
     @property
@@ -326,7 +333,15 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         otherwise editing the profile (e.g. swapping
         ``instructions`` or ``extra_payload``) leaves stale cached
         audio playable for the same text.
+
+        ``preferred_format`` is HA's own key (``ATTR_PREFERRED_FORMAT``):
+        it controls both the proxy URL extension (``<token>.<ext>``) and
+        the optional ffmpeg conversion before the audio reaches the
+        media player. Without it the URL falls back to ``.mp3`` while
+        we may be streaming opus / wav / etc., and Cast targets reject
+        the content-type / extension mismatch.
         """
+        audio_format = self._get_config_value(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT)
         return {
             CONF_VOICE: self._get_config_value(CONF_VOICE) or self._engine._voice,
             CONF_MODEL: self._get_config_value(CONF_MODEL) or self._engine._model,
@@ -336,7 +351,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, False),
             CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
             CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
-            CONF_AUDIO_FORMAT: self._get_config_value(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT),
+            CONF_AUDIO_FORMAT: audio_format,
+            "preferred_format": audio_format,
         }
 
     @property
@@ -499,13 +515,21 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     async def _maybe_post_process(
         self, audio_data: bytes, resolved: dict[str, Any]
     ) -> bytes:
-        """Apply chime / normalization / WAV->MP3 conversion when needed."""
-        is_wav = detect_audio_format(audio_data) == "wav"
+        """Apply chime + normalization when requested.
+
+        When chime/normalize are off, returns the engine bytes unchanged
+        regardless of format - the streaming path or HA's own
+        ``preferred_format`` ffmpeg layer handles delivery to the
+        media_player. Only chime/normalize need the heavy local
+        transcode (and that path always outputs mp3).
+        """
         chime_enable = resolved["chime_enable"]
         normalize_audio = resolved["normalize_audio"]
 
-        if not (chime_enable or normalize_audio or is_wav):
+        if not (chime_enable or normalize_audio):
             return audio_data
+
+        requested_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
 
         chime_path = None
         if chime_enable and resolved["chime_sound"]:
@@ -522,6 +546,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             chime_enabled=chime_enable,
             chime_path=chime_path,
             normalize_audio=normalize_audio,
+            input_format=requested_format,
         )
         if not processed_audio:
             _LOGGER.warning("Audio processing failed, using original audio")
@@ -768,7 +793,6 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # Atomic path: chime / normalize need the complete audio first.
         try:
             audio_data = await self._engine_get_blocking(full_text, resolved)
-            audio_data = await self._maybe_post_process(audio_data, resolved)
         except asyncio.TimeoutError as err:
             _LOGGER.error("TTS atomic generation timed out")
             self._record_failure(full_text, err, resolved)
@@ -785,6 +809,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 
+        # Validate the raw engine response BEFORE post-processing: the
+        # validator checks magic bytes against the requested format, but
+        # post-processing always emits mp3 regardless of input.
         if not is_valid_audio(audio_data, expected_format=audio_format):
             _LOGGER.error(
                 "Atomic TTS response failed audio validation (size=%d). "
@@ -797,13 +824,31 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 
+        try:
+            audio_data = await self._maybe_post_process(audio_data, resolved)
+        except Exception as err:
+            _LOGGER.error("Atomic TTS post-processing failed: %s", err, exc_info=True)
+            self._record_failure(full_text, err, resolved)
+            return self._empty_response(audio_format)
+
+        # Post-processing now stays in the requested format end to end:
+        # ``ensure_chime_in_format`` transcodes the chime to match, and
+        # ``build_ffmpeg_command`` picks the right encoder for the
+        # output. The bytes that come out of ``_maybe_post_process``
+        # therefore match the requested ``audio_format`` regardless of
+        # whether chime/normalize ran. HA still has its
+        # ``preferred_format`` ffmpeg layer as a safety net if the
+        # downstream player needs a different container.
+        delivered_format = audio_format
+
         duration_ms = await self._record_duration(full_text, audio_data, resolved)
         _LOGGER.info(
-            "Atomic audio ready: %d bytes, %d ms", len(audio_data), duration_ms
+            "Atomic audio ready: %d bytes, %d ms (delivered as %s)",
+            len(audio_data), duration_ms, delivered_format,
         )
 
         return TTSAudioResponse(
-            extension=audio_format,
+            extension=delivered_format,
             data_gen=self._yield_in_chunks(audio_data),
         )
 
@@ -899,10 +944,23 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @staticmethod
     def _empty_response(audio_format: str) -> TTSAudioResponse:
-        """Return a zero-byte response so HA fails fast without caching anything."""
+        """Return a generator that raises so HA refuses to cache the failure.
 
-        async def _empty() -> AsyncGenerator[bytes, None]:
-            if False:  # pragma: no cover - intentionally empty generator
-                yield b""
+        HA persists the bytes from ``data_gen`` to disk under
+        ``<cache_key>.<extension>``. A previous version of this helper
+        returned an empty generator, which made HA happily store a
+        0-byte file - then on the next request with the same cache_key
+        HA served those 0 bytes and ffmpeg blew up with "Invalid data
+        found when processing input" (issue #64 cache poisoning, opus
+        edition). Raising inside the generator triggers HA's
+        ``_load_data_into_cache`` exception path, which discards the
+        mem-cache entry and skips the disk write.
+        """
 
-        return TTSAudioResponse(extension=audio_format, data_gen=_empty())
+        async def _fail() -> AsyncGenerator[bytes, None]:
+            raise OpenAIInvalidResponseError(
+                "TTS engine returned no audio for this request"
+            )
+            yield b""  # pragma: no cover - keeps this an async generator
+
+        return TTSAudioResponse(extension=audio_format, data_gen=_fail())

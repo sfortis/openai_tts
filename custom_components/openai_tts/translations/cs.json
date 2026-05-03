@@ -57,7 +57,7 @@
         },
         "voice_audio": {
           "title": "Přidat TTS agent (krok 2 z 2)",
-          "description": "Hlas a možnosti zvuku pro model {model}.",
+          "description": "Hlas a možnosti zvuku pro model {model}. Poznámka: povolení chime nebo normalize_audio vypne streaming (vyžaduje post-processing).",
           "data": {
             "voice": "Hlas",
             "speed": "Rychlost (0,25 až 4,0)",
@@ -66,7 +66,7 @@
             "normalize_audio": "Normalizovat hlasitost audia",
             "instructions": "Vlastní pokyny (pouze gpt-4o-mini-tts)",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
-            "audio_format": "Audio format (jen pro custom backends, které odmítají mp3)"
+            "audio_format": "Audio format (mp3 je bezpečný default, změňte pouze pokud váš backend potřebuje jiný)"
           }
         },
         "reconfigure": {
@@ -78,7 +78,7 @@
         },
         "reconfigure_voice": {
           "title": "Aktualizovat TTS agent (krok 2 z 2)",
-          "description": "Hlas a možnosti zvuku pro model {model}.",
+          "description": "Hlas a možnosti zvuku pro model {model}. Poznámka: povolení chime nebo normalize_audio vypne streaming (vyžaduje post-processing).",
           "data": {
             "voice": "Hlas",
             "speed": "Rychlost (0,25 až 4,0)",
@@ -87,7 +87,7 @@
             "normalize_audio": "Normalizovat hlasitost audia",
             "instructions": "Vlastní pokyny (pouze gpt-4o-mini-tts)",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
-            "audio_format": "Audio format (jen pro custom backends, které odmítají mp3)"
+            "audio_format": "Audio format (mp3 je bezpečný default, změňte pouze pokud váš backend potřebuje jiný)"
           }
         }
       },

@@ -43,7 +43,7 @@ from .const import (
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
     CONF_AUDIO_FORMAT,
-    AUDIO_FORMATS,
+    AUDIO_FORMAT_LABELS,
     DEFAULT_AUDIO_FORMAT,
     CONF_VOLUME_RESTORE,
     CONF_PAUSE_PLAYBACK,
@@ -587,16 +587,19 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
             vol.Optional("extra_payload", description={"suggested_value": ""}): TemplateSelector(),
         }
-        # ``audio_format`` is only surfaced for non-OpenAI backends. Some
-        # custom servers (issue #61: pocket-tts) reject mp3 and need wav
-        # or opus, but for OpenAI itself mp3 is the right default and the
-        # extra picker would just confuse users.
-        if not is_openai:
-            step2_fields[
-                vol.Optional("audio_format", default=DEFAULT_AUDIO_FORMAT)
-            ] = selector({
-                "select": {"options": AUDIO_FORMATS, "mode": "dropdown"}
-            })
+        # ``audio_format`` is always surfaced. OpenAI handles all values
+        # natively, so users can switch to wav/opus without breaking the
+        # request. For custom backends (issue #61: pocket-tts) it's the
+        # only way to negotiate around servers that reject mp3.
+        step2_fields[
+            vol.Optional("audio_format", default=DEFAULT_AUDIO_FORMAT)
+        ] = selector({
+            "select": {
+                "options": AUDIO_FORMAT_LABELS,
+                "mode": "dropdown",
+                "sort": False,
+            }
+        })
         step2_schema = vol.Schema(step2_fields)
 
         return self.async_show_form(
@@ -759,16 +762,19 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 },
             ): TemplateSelector(),
         }
-        # See create-flow note: audio_format only matters for custom backends.
-        if not is_openai:
-            step2_fields[
-                vol.Optional(
-                    "audio_format",
-                    default=existing_data.get(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT),
-                )
-            ] = selector({
-                "select": {"options": AUDIO_FORMATS, "mode": "dropdown"}
-            })
+        # Always surface audio_format in reconfigure too (see create-flow note).
+        step2_fields[
+            vol.Optional(
+                "audio_format",
+                default=existing_data.get(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT),
+            )
+        ] = selector({
+            "select": {
+                "options": AUDIO_FORMAT_LABELS,
+                "mode": "dropdown",
+                "sort": False,
+            }
+        })
         step2_schema = vol.Schema(step2_fields)
 
         return self.async_show_form(

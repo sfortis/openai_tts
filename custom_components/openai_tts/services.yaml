@@ -110,20 +110,26 @@ say:
     # omitted, which is what we want.
     chime:
       name: Play Chime
-      description: Play a chime sound before speaking. Falls back to the profile setting when omitted.
+      description: >-
+        * Disables streaming (post-processing required).
+        Play a chime sound before speaking. Falls back to the profile setting when omitted.
       required: false
       selector:
         boolean:
     chime_sound:
       name: Chime Sound
-      description: Filename of the chime sound to play.
+      description: >-
+        * Disables streaming (post-processing required).
+        Filename of the chime sound to play.
       required: false
       example: "threetone.mp3"
       selector:
         text:
     normalize_audio:
       name: Normalize Audio
-      description: Apply loudness normalization. Falls back to the profile setting when omitted.
+      description: >-
+        * Disables streaming (post-processing required).
+        Apply loudness normalization. Falls back to the profile setting when omitted.
       required: false
       selector:
         boolean:
