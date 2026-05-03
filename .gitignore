@@ -1,9 +1,10 @@
 # Ignore all markdown files
 *.md
 
-# But keep README.md and CONTRIBUTING.md
+# But keep README.md / CONTRIBUTING.md / WHATSNEW.md
 !README.md
 !CONTRIBUTING.md
+!WHATSNEW.md
 
 # Python bytecode
 __pycache__/

@@ -40,7 +40,15 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          flags=(--generate-notes --title "v${{ steps.version.outputs.version }}")
+          flags=(--title "v${{ steps.version.outputs.version }}")
+          # Prefer WHATSNEW.md when present so the description reads as
+          # human-curated release notes; fall back to GitHub's auto
+          # commit-based notes otherwise.
+          if [ -f WHATSNEW.md ]; then
+            flags+=(--notes-file WHATSNEW.md)
+          else
+            flags+=(--generate-notes)
+          fi
           if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
             flags+=(--prerelease)
           fi
