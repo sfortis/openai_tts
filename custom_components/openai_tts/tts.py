@@ -113,7 +113,7 @@ async def async_setup_entry(
         voice = config_entry.options.get(CONF_VOICE, config_entry.data.get(CONF_VOICE))
         speed = config_entry.options.get(CONF_SPEED, config_entry.data.get(CONF_SPEED, 1.0))
 
-        engine = OpenAITTSEngine(api_key, voice, model, speed, url)
+        engine = OpenAITTSEngine(api_key, voice, model, speed, url, hass=hass)
         async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
 
     if not has_subentries:
@@ -150,7 +150,7 @@ async def async_setup_entry(
                     len(existing), unique_id,
                 )
 
-        engine = OpenAITTSEngine(api_key, voice, model, speed, url)
+        engine = OpenAITTSEngine(api_key, voice, model, speed, url, hass=hass)
         entity = OpenAITTSEntity(hass, subentry, engine, config_entry)
         async_add_entities([entity], config_subentry_id=subentry_id)
 
@@ -191,14 +191,10 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
         self._configure_entity_id_and_name()
 
-        self._engine_active = False
+        # Last computed audio duration in ms. No longer used for restore
+        # timing (volume_restore drives off speaker state events) but
+        # kept as an extra_state_attribute for UI/debug visibility.
         self._last_duration_ms: int | None = None
-        # ``playback_mode`` lets ``volume_restore`` know whether the cast
-        # device has been playing while the engine is still active
-        # (``streaming``) or has been idle waiting for full audio
-        # (``atomic``). Exposed via extra_state_attributes so volume_restore
-        # doesn't have to guess from timing heuristics.
-        self._playback_mode: str | None = None
         self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{self.entity_id}")
         self._stored_data: dict = {}
         # Key the duration cache on ``unique_id`` (stable across user-initiated
@@ -280,15 +276,22 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @property
     def extra_state_attributes(self) -> dict[str, Any]:
+        # NOTE: every ``current_*`` field below is part of the duration
+        # cache key. volume_restore reads them when an option is omitted
+        # from the service call so its lookup hash matches what tts.py
+        # used at store time. Removing one breaks cache lookups and
+        # forces fallback timing.
         return {
             "media_duration": self._last_duration_ms,
-            "engine_active": self._engine_active,
-            "playback_mode": self._playback_mode,
-            "message_cache_size": self._duration_cache.size,
+            "failure_cache_size": self._duration_cache.size,
             "available_voices": VOICES,
             "current_voice": self._get_config_value(CONF_VOICE) or self._engine._voice,
             "current_model": self._get_config_value(CONF_MODEL) or self._engine._model,
             "current_speed": self._get_config_value(CONF_SPEED) or self._engine._speed,
+            "current_instructions": self._get_config_value(CONF_INSTRUCTIONS),
+            "current_chime_enable": self._get_config_value(CONF_CHIME_ENABLE) or False,
+            "current_chime_sound": self._get_config_value(CONF_CHIME_SOUND),
+            "current_extra_payload": self._get_config_value(CONF_EXTRA_PAYLOAD),
         }
 
     @property
@@ -314,7 +317,14 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @property
     def default_options(self) -> dict[str, Any]:
-        """Default option values that participate in the HA TTS cache key."""
+        """Default option values that participate in the HA TTS cache key.
+
+        Every key in here ends up in HA's TTS-cache hash, so anything
+        that materially changes the produced audio MUST be listed -
+        otherwise editing the profile (e.g. swapping
+        ``instructions`` or ``extra_payload``) leaves stale cached
+        audio playable for the same text.
+        """
         return {
             CONF_VOICE: self._get_config_value(CONF_VOICE) or self._engine._voice,
             CONF_MODEL: self._get_config_value(CONF_MODEL) or self._engine._model,
@@ -322,6 +332,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_CHIME_ENABLE: self._get_config_value(CONF_CHIME_ENABLE, False),
             CONF_CHIME_SOUND: self._get_config_value(CONF_CHIME_SOUND, "threetone.mp3"),
             CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, False),
+            CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
+            CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
         }
 
     @property
@@ -365,10 +377,6 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 return options_value
         data_value = self._config.data.get(key)
         return data_value if data_value is not None else default
-
-    def get_duration_for_message(self, message: str) -> int | None:
-        """Public lookup used by ``volume_restore``."""
-        return self._duration_cache.get(message)
 
     # --- TTS generation ----------------------------------------------------
 
@@ -452,9 +460,14 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         }
 
     async def _engine_get_blocking(
-        self, text: str, resolved: dict[str, Any], stream: bool
+        self, text: str, resolved: dict[str, Any]
     ) -> bytes:
-        """Run the blocking engine in an executor and return the raw audio."""
+        """Run the blocking engine in an executor and return the raw audio.
+
+        The whole HTTP body is read INSIDE the executor (the engine no
+        longer offers a lazy variant), so the event loop never blocks
+        on socket I/O.
+        """
         loop = asyncio.get_running_loop()
         audio_task = loop.run_in_executor(
             None,
@@ -466,22 +479,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 model=resolved["model"],
                 instructions=resolved["instructions"],
                 extra_payload=resolved["extra_payload"],
-                stream=stream,
             ),
         )
         audio_response = await asyncio.wait_for(audio_task, timeout=30.0)
 
-        if not audio_response:
-            raise OpenAIInvalidResponseError("No audio response received")
-
-        if hasattr(audio_response, "read_all"):
-            audio_data = audio_response.read_all()
-        else:
-            audio_data = audio_response.content
-
-        if not audio_data:
+        if not audio_response or not audio_response.content:
             raise OpenAIInvalidResponseError("Empty audio response")
-        return audio_data
+        return audio_response.content
 
     async def _maybe_post_process(
         self, audio_data: bytes, resolved: dict[str, Any]
@@ -523,20 +527,55 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     ) -> int:
         duration_ms = await self._get_audio_duration(audio_data)
         self._last_duration_ms = duration_ms
-        self._duration_cache.store(
+        # Persist measured duration so volume_restore can look it up
+        # even on subsequent HA-cache hits where the engine doesn't run.
+        r = resolved or {}
+        self._duration_cache.store_duration(
             message, duration_ms,
-            voice=(resolved or {}).get("voice"),
-            model=(resolved or {}).get("model"),
-            speed=(resolved or {}).get("speed"),
+            voice=r.get("voice"), model=r.get("model"), speed=r.get("speed"),
+            instructions=r.get("instructions"),
+            chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
+            extra_payload=r.get("extra_payload"),
         )
         self.async_write_ha_state()
         await self._save_persisted_state()
-        # A successful TTS call is also the most reliable signal that the
-        # API is healthy; the health tracker uses this to clear any prior
-        # quota/auth/rate-limit state.
         if self._health_tracker is not None:
             self._health_tracker.record_success()
         return duration_ms
+
+    def _mark_failed_with_resolved(
+        self,
+        message: str,
+        resolved: dict[str, Any] | None,
+    ) -> None:
+        """Stamp a failure sentinel on the cache key derived from ``resolved``."""
+        r = resolved or {}
+        self._duration_cache.mark_failed(
+            message,
+            voice=r.get("voice"), model=r.get("model"), speed=r.get("speed"),
+            instructions=r.get("instructions"),
+            chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
+            extra_payload=r.get("extra_payload"),
+        )
+
+    def _clear_failure_sentinel(
+        self,
+        message: str,
+        resolved: dict[str, Any] | None,
+    ) -> None:
+        """Drop any stale failure sentinel for the given resolved key.
+
+        Called at the START of every engine invocation so a retry
+        doesn't inherit the previous attempt's failure flag.
+        """
+        r = resolved or {}
+        self._duration_cache.clear_failure(
+            message,
+            voice=r.get("voice"), model=r.get("model"), speed=r.get("speed"),
+            instructions=r.get("instructions"),
+            chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
+            extra_payload=r.get("extra_payload"),
+        )
 
     def _record_failure(
         self,
@@ -546,17 +585,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     ) -> None:
         """Centralised bookkeeping for any TTS failure path.
 
-        Marks the duration cache as failed (so volume_restore short-circuits
-        its polling) AND surfaces the error to the health tracker (so the
-        sensor reflects reality even for non-OpenAITTSError failures like
-        TimeoutError, ValueError, generic Exception).
+        Marks the message as failed so volume_restore skips the playback
+        wait (no audio is coming) AND surfaces the error to the health
+        tracker so the API-status sensor reflects reality.
         """
-        self._duration_cache.mark_failed(
-            message,
-            voice=(resolved or {}).get("voice"),
-            model=(resolved or {}).get("model"),
-            speed=(resolved or {}).get("speed"),
-        )
+        self._mark_failed_with_resolved(message, resolved)
         if self._health_tracker is not None:
             self._health_tracker.record_error(error)
 
@@ -601,12 +634,6 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self.entity_id, message[:50], language,
         )
 
-        # Reset mode FIRST so volume_restore can distinguish "engine running
-        # right now" from "engine never ran" (= HA cache hit).
-        self._playback_mode = None
-        self._engine_active = True
-        self.async_write_ha_state()
-
         # Default {} so the except blocks below can pass it to _record_failure
         # even if _resolve_options() were to raise (it currently can't, but
         # this future-proofs against that path).
@@ -614,19 +641,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
         try:
             resolved = self._resolve_options(options)
-            can_stream = (
-                not resolved["chime_enable"] and not resolved["normalize_audio"]
-            )
-            # The legacy contract path is always atomic from the
-            # media_player's perspective: HA buffers the whole tuple
-            # before play_media.
-            self._playback_mode = "atomic"
-            self.async_write_ha_state()
+            # Drop stale failure sentinel from a previous run on the
+            # same key so volume_restore doesn't trigger an immediate
+            # restore against a now-recovering call.
+            self._clear_failure_sentinel(message, resolved)
 
             try:
-                audio_data = await self._engine_get_blocking(
-                    message, resolved, stream=can_stream
-                )
+                audio_data = await self._engine_get_blocking(message, resolved)
             except asyncio.TimeoutError as err:
                 _LOGGER.error("TTS generation timed out after 30 seconds")
                 self._record_failure(message, err, resolved)
@@ -667,23 +688,17 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             _LOGGER.debug("TTS generation was cancelled")
             raise
         except OpenAITTSError as err:
-            # _handle_engine_error already records into the health tracker;
-            # _record_failure here just adds the duration sentinel without
-            # double-counting on the tracker.
+            # Mark the cache BEFORE _handle_engine_error: that helper
+            # raises ConfigEntryAuthFailed on auth errors and would
+            # otherwise skip the post-call mark_failed, leaving
+            # volume_restore without its immediate-restore signal.
+            self._mark_failed_with_resolved(message, resolved)
             await self._handle_engine_error(err)
-            self._duration_cache.mark_failed(
-                message,
-                voice=resolved.get("voice"), model=resolved.get("model"),
-                speed=resolved.get("speed"),
-            )
             return (None, None)
         except Exception as err:
             _LOGGER.error("Error generating TTS: %s", err, exc_info=True)
             self._record_failure(message, err, resolved)
             return (None, None)
-        finally:
-            self._engine_active = False
-            self.async_write_ha_state()
 
     async def async_stream_tts_audio(
         self, request: TTSAudioRequest
@@ -709,27 +724,20 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         """
         _LOGGER.info("async_stream_tts_audio called for entity %s", self.entity_id)
 
-        # Reset mode FIRST so volume_restore can distinguish "engine running
-        # right now" from "engine never ran" (= HA cache hit).
-        self._playback_mode = None
-        self._engine_active = True
-        self.async_write_ha_state()
-
         full_text = ""
         async for text_chunk in request.message_gen:
             full_text += text_chunk
 
         options = request.options or {}
         resolved = self._resolve_options(options)
+        # Drop any failure sentinel from a previous attempt with the
+        # same key BEFORE volume_restore can read it. Otherwise a
+        # retry sees the stale 0 immediately after tts.speak returns
+        # and triggers an immediate-restore + raise even though the
+        # current stream is still in flight and may succeed.
+        self._clear_failure_sentinel(full_text, resolved)
         audio_format = "mp3"
         can_stream = self._can_use_streaming(full_text, options)
-
-        # Tell volume_restore deterministically which path we're taking, so
-        # it doesn't have to infer from speak-call latency. Must be set
-        # BEFORE the response is returned to HA, since volume_restore reads
-        # it the moment tts.speak completes.
-        self._playback_mode = "streaming" if can_stream else "atomic"
-        self.async_write_ha_state()
 
         _LOGGER.info(
             "Streaming TTS - voice: %s, model: %s, speed: %s, format: %s, "
@@ -748,31 +756,22 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
         # Atomic path: chime / normalize need the complete audio first.
         try:
-            audio_data = await self._engine_get_blocking(
-                full_text, resolved, stream=False
-            )
+            audio_data = await self._engine_get_blocking(full_text, resolved)
             audio_data = await self._maybe_post_process(audio_data, resolved)
         except asyncio.TimeoutError as err:
             _LOGGER.error("TTS atomic generation timed out")
             self._record_failure(full_text, err, resolved)
-            self._engine_active = False
-            self.async_write_ha_state()
             return self._empty_response(audio_format)
         except OpenAITTSError as err:
+            # See note in _stream_with_validation: mark_failed must
+            # run before _handle_engine_error or auth failures bypass
+            # the sentinel write.
+            self._mark_failed_with_resolved(full_text, resolved)
             await self._handle_engine_error(err)
-            self._duration_cache.mark_failed(
-                full_text,
-                voice=resolved.get("voice"), model=resolved.get("model"),
-                speed=resolved.get("speed"),
-            )
-            self._engine_active = False
-            self.async_write_ha_state()
             return self._empty_response(audio_format)
         except Exception as err:
             _LOGGER.error("Atomic TTS unexpected error: %s", err, exc_info=True)
             self._record_failure(full_text, err, resolved)
-            self._engine_active = False
-            self.async_write_ha_state()
             return self._empty_response(audio_format)
 
         if not is_valid_audio(audio_data, expected_format=audio_format):
@@ -785,17 +784,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 f"Invalid atomic audio (size={len(audio_data)})"
             )
             self._record_failure(full_text, err, resolved)
-            self._engine_active = False
-            self.async_write_ha_state()
             return self._empty_response(audio_format)
 
         duration_ms = await self._record_duration(full_text, audio_data, resolved)
         _LOGGER.info(
             "Atomic audio ready: %d bytes, %d ms", len(audio_data), duration_ms
         )
-
-        self._engine_active = False
-        self.async_write_ha_state()
 
         return TTSAudioResponse(
             extension=audio_format,
@@ -818,73 +812,72 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         first_yielded = False
 
         try:
-            try:
-                async for chunk in self._engine.async_get_tts_stream(
-                    text=text,
-                    response_format=audio_format,
-                    voice=resolved["voice"],
-                    model=resolved["model"],
-                    speed=resolved["speed"],
-                    instructions=resolved["instructions"],
-                    extra_payload=resolved["extra_payload"],
-                ):
-                    all_chunks.append(chunk)
+            async for chunk in self._engine.async_get_tts_stream(
+                text=text,
+                response_format=audio_format,
+                voice=resolved["voice"],
+                model=resolved["model"],
+                speed=resolved["speed"],
+                instructions=resolved["instructions"],
+                extra_payload=resolved["extra_payload"],
+            ):
+                all_chunks.append(chunk)
 
-                    if not first_yielded:
-                        if not is_valid_audio(chunk, expected_format=audio_format):
-                            _LOGGER.error(
-                                "First streamed chunk failed audio validation "
-                                "(size=%d). Aborting to prevent cache poisoning "
-                                "(issue #64).",
-                                len(chunk),
-                            )
-                            raise OpenAIInvalidResponseError(
-                                "First chunk is not valid audio"
-                            )
-                        first_yielded = True
-                        _LOGGER.debug(
-                            "First chunk passed validation (%d bytes), streaming",
+                if not first_yielded:
+                    if not is_valid_audio(chunk, expected_format=audio_format):
+                        _LOGGER.error(
+                            "First streamed chunk failed audio validation "
+                            "(size=%d). Aborting to prevent cache poisoning "
+                            "(issue #64).",
                             len(chunk),
                         )
+                        raise OpenAIInvalidResponseError(
+                            "First chunk is not valid audio"
+                        )
+                    first_yielded = True
+                    _LOGGER.debug(
+                        "First chunk passed validation (%d bytes), streaming",
+                        len(chunk),
+                    )
 
-                    yield chunk
+                yield chunk
 
-            except OpenAITTSError as err:
-                await self._handle_engine_error(err)
-                self._duration_cache.mark_failed(
-                    text,
-                    voice=resolved.get("voice"), model=resolved.get("model"),
-                    speed=resolved.get("speed"),
-                )
-                raise
-            except Exception as err:
-                self._record_failure(text, err, resolved)
-                raise
+        except OpenAITTSError as err:
+            # Mark the cache BEFORE delegating to _handle_engine_error
+            # because that helper raises ConfigEntryAuthFailed on auth
+            # errors, which would skip the post-call mark_failed and
+            # leave volume_restore polling for 60s without the
+            # immediate-restore signal.
+            self._mark_failed_with_resolved(text, resolved)
+            await self._handle_engine_error(err)
+            raise
+        except Exception as err:
+            self._record_failure(text, err, resolved)
+            raise
 
-            # Stream completed cleanly: record duration so volume_restore
-            # can find it in the shared cache by message hash, and tell the
-            # health tracker that the API is responsive.
-            if all_chunks:
-                complete_audio = b"".join(all_chunks)
-                duration_ms = await self._get_audio_duration(complete_audio)
-                self._last_duration_ms = duration_ms
-                self._duration_cache.store(
-                    text, duration_ms,
-                    voice=resolved.get("voice"), model=resolved.get("model"),
-                    speed=resolved.get("speed"),
-                )
-                self.async_write_ha_state()
-                await self._save_persisted_state()
-                if self._health_tracker is not None:
-                    self._health_tracker.record_success()
-                _LOGGER.info(
-                    "Streaming complete: %d bytes, %d ms",
-                    len(complete_audio), duration_ms,
-                )
-
-        finally:
-            self._engine_active = False
+        # Stream completed cleanly: store the measured duration so
+        # volume_restore can use it on this AND on subsequent HA-cache
+        # hits, and tell the health tracker the API is responsive.
+        if all_chunks:
+            complete_audio = b"".join(all_chunks)
+            duration_ms = await self._get_audio_duration(complete_audio)
+            self._last_duration_ms = duration_ms
+            r = resolved or {}
+            self._duration_cache.store_duration(
+                text, duration_ms,
+                voice=r.get("voice"), model=r.get("model"), speed=r.get("speed"),
+                instructions=r.get("instructions"),
+                chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
+                extra_payload=r.get("extra_payload"),
+            )
             self.async_write_ha_state()
+            await self._save_persisted_state()
+            if self._health_tracker is not None:
+                self._health_tracker.record_success()
+            _LOGGER.info(
+                "Streaming complete: %d bytes, %d ms",
+                len(complete_audio), duration_ms,
+            )
 
     @staticmethod
     async def _yield_in_chunks(

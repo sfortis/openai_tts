@@ -1,14 +1,26 @@
-"""Per-message duration cache used by the TTS entity.
+"""Per-message audio duration + failure sentinel cache.
 
-Home Assistant's TTS layer caches the audio bytes but does not surface the
-playback duration back to us on a cache hit. ``volume_restore`` needs the
-duration to know how long to wait before restoring the speaker volume, so
-we maintain our own message-hash-to-duration map (in memory + persisted via
-the entity's ``Store``).
+``volume_restore`` needs to hold the speaker volume for the length of
+the TTS playback before restoring it. The cleanest deterministic
+source for that length is what the engine itself measured from the
+generated audio bytes (ffprobe). That measurement is stable across
+runs - identical ``(message, voice, model, speed, instructions, chime,
+chime_sound, extra_payload)`` produces identical audio bytes, hence
+identical duration. We cache that measurement so volume_restore can
+look it up regardless of whether the engine ran for THIS specific
+call (e.g. an HA cache hit where the engine is bypassed entirely).
 
-A second copy lives in ``hass.data[DOMAIN][MESSAGE_DURATIONS_KEY]`` so the
-``volume_restore`` module can look up durations without holding a reference
-to the entity.
+Two storage layers:
+
+1. ``self._local`` - per-entity, persisted via ``Store`` so durations
+   and failure sentinels survive an HA restart.
+2. ``hass.data[DOMAIN][MESSAGE_DURATIONS_KEY]`` - shared, read by
+   ``volume_restore`` which doesn't have direct entity access.
+
+A failure sentinel (``DURATION_FAILED_SENTINEL = 0``) signals that the
+last engine attempt for this message failed, so volume_restore should
+short-circuit the playback wait instead of holding volume for audio
+that will never play.
 """
 from __future__ import annotations
 
@@ -26,34 +38,37 @@ _LOGGER = logging.getLogger(__name__)
 DEFAULT_MAX_LOCAL_ENTRIES = 100
 DEFAULT_MAX_SHARED_ENTRIES = 50
 
-# Sentinel value written to the shared cache to signal that TTS generation
-# for this message FAILED. Lets ``volume_restore`` short-circuit its polling
-# loop instead of waiting 3 seconds + falling back to a 10s default duration.
+# Sentinel value indicating the last TTS attempt for this message
+# failed. Keeps the value space simple: the only thing the cache ever
+# stores is the literal 0; any present entry means "skip the playback
+# wait, the audio isn't coming."
 DURATION_FAILED_SENTINEL = 0
 
 
 def hash_message(
     message: str,
     *,
+    entity_id: str | None = None,
     voice: str | None = None,
     model: str | None = None,
     speed: float | None = None,
-    entity_id: str | None = None,
+    instructions: str | None = None,
+    chime: bool | None = None,
+    chime_sound: str | None = None,
+    extra_payload: str | None = None,
 ) -> str:
-    """Return a stable short hash that uniquely identifies a TTS request.
+    """Return a short stable hash that uniquely identifies a TTS request.
 
-    The hash is keyed on **everything that affects audio duration**, not
-    just the message text:
+    Folds in every dimension that materially changes the produced
+    audio bytes - and therefore the playback duration:
 
-    * different voices/models/speeds produce different durations even for
-      the same text, so a message-only key would return stale durations
-      (volume_restore would then mis-time the restoration);
-    * the same profile name might exist on two parent entries, so include
-      the entity_id to keep their caches isolated.
+    * ``voice``/``model``/``speed`` - render-engine settings
+    * ``instructions`` - GPT-4o-mini-tts pacing/emotion changes
+    * ``chime`` (+ ``chime_sound`` when chime is on) - prepends extra audio
+    * ``extra_payload`` - opaque custom-backend params
 
-    All extra parameters are optional for backwards compatibility - older
-    callers that only have ``message`` will keep working but will not get
-    cross-profile isolation.
+    ``normalize_audio`` is intentionally NOT in the key because it
+    only affects loudness, not length.
     """
     parts = [message]
     if entity_id:
@@ -64,20 +79,19 @@ def hash_message(
         parts.append(f"|m={model}")
     if speed is not None:
         parts.append(f"|s={speed}")
-    payload = "".join(parts).encode()
-    return hashlib.md5(payload).hexdigest()[:16]
+    if instructions:
+        parts.append(f"|i={instructions}")
+    if chime:
+        parts.append("|c=1")
+        if chime_sound:
+            parts.append(f"|cs={chime_sound}")
+    if extra_payload:
+        parts.append(f"|x={extra_payload}")
+    return hashlib.md5("".join(parts).encode()).hexdigest()[:16]
 
 
 class MessageDurationCache:
-    """In-memory + shared duration cache for a single TTS entity.
-
-    Two storage layers:
-
-    1. ``self._local`` – owned by the entity, persisted to ``Store`` so it
-       survives HA restarts.
-    2. ``hass.data[DOMAIN][MESSAGE_DURATIONS_KEY]`` – shared, read by
-       ``volume_restore`` which doesn't have direct entity access.
-    """
+    """Tracks per-message audio duration AND failure sentinel."""
 
     def __init__(
         self,
@@ -98,27 +112,28 @@ class MessageDurationCache:
 
     @property
     def snapshot(self) -> dict[str, int]:
-        """Return a shallow copy suitable for persistence."""
         return dict(self._local)
 
     def restore(self, stored: dict[str, int]) -> None:
-        """Restore from persisted state and re-populate the shared cache."""
+        """Restore durations + failure sentinels from persisted state."""
         if not isinstance(stored, dict):
             return
-        self._local = dict(stored)
+        self._local = {k: int(v) for k, v in stored.items()
+                       if isinstance(v, (int, float))}
         shared = self._ensure_shared_dict()
-        for msg_hash, duration_ms in self._local.items():
+        for msg_hash, dur in self._local.items():
             shared[msg_hash] = {
-                "duration_ms": duration_ms,
+                "duration_ms": dur,
                 "timestamp": 0,
                 "entity_id": self._entity_id,
             }
-        _LOGGER.info(
-            "Restored %d message durations into local + shared cache",
-            len(self._local),
-        )
+        if self._local:
+            _LOGGER.info(
+                "Restored %d cached entries (durations + sentinels)",
+                len(self._local),
+            )
 
-    def store(
+    def store_duration(
         self,
         message: str,
         duration_ms: int,
@@ -126,73 +141,91 @@ class MessageDurationCache:
         voice: str | None = None,
         model: str | None = None,
         speed: float | None = None,
+        instructions: str | None = None,
+        chime: bool | None = None,
+        chime_sound: str | None = None,
+        extra_payload: str | None = None,
     ) -> None:
-        """Record duration for ``message`` in both local and shared caches.
+        """Persist the measured audio duration after a successful generation.
 
-        ``voice``/``model``/``speed`` are folded into the cache key so the
-        same text under different profiles/voices doesn't collide.
+        Subsequent calls with identical render parameters (including
+        HA-cache hits where our engine is bypassed) will look up this
+        value via ``get_duration``.
         """
-        msg_hash = hash_message(
-            message, voice=voice, model=model, speed=speed,
-            entity_id=self._entity_id,
+        msg_hash = self._hash(
+            message, voice, model, speed, instructions,
+            chime, chime_sound, extra_payload,
         )
         self._local[msg_hash] = duration_ms
+        self._evict_local()
+        self._publish_shared(msg_hash, duration_ms)
 
+    def get_duration(
+        self,
+        message: str,
+        *,
+        voice: str | None = None,
+        model: str | None = None,
+        speed: float | None = None,
+        instructions: str | None = None,
+        chime: bool | None = None,
+        chime_sound: str | None = None,
+        extra_payload: str | None = None,
+    ) -> int | None:
+        """Return cached duration for the request, or None if absent.
+
+        Returns ``DURATION_FAILED_SENTINEL`` (0) when the last attempt
+        failed; callers should treat that as "skip the playback wait".
+        """
+        msg_hash = self._hash(
+            message, voice, model, speed, instructions,
+            chime, chime_sound, extra_payload,
+        )
+        return self._local.get(msg_hash)
+
+    def clear_failure(self, message: str, **render_args) -> None:
+        """Drop a failure sentinel after a successful run.
+
+        Note: when the success path also calls ``store_duration``, this
+        is redundant (store overwrites). Kept for paths that succeed
+        without measuring duration (e.g. cache-hit success signals).
+        """
+        msg_hash = self._hash_kwargs(message, render_args)
+        if self._local.get(msg_hash) == DURATION_FAILED_SENTINEL:
+            self._local.pop(msg_hash, None)
+            shared = self._ensure_shared_dict()
+            shared.pop(msg_hash, None)
+
+    def mark_failed(self, message: str, **render_args) -> None:
+        """Record that the last TTS attempt for ``message`` failed."""
+        msg_hash = self._hash_kwargs(message, render_args)
+        self._local[msg_hash] = DURATION_FAILED_SENTINEL
+        self._evict_local()
+        self._publish_shared(msg_hash, DURATION_FAILED_SENTINEL)
+        _LOGGER.debug("Marked TTS as failed for hash %s", msg_hash)
+
+    def _hash(self, message, voice, model, speed, instructions,
+              chime, chime_sound, extra_payload) -> str:
+        return hash_message(
+            message, entity_id=self._entity_id,
+            voice=voice, model=model, speed=speed,
+            instructions=instructions, chime=chime,
+            chime_sound=chime_sound, extra_payload=extra_payload,
+        )
+
+    def _hash_kwargs(self, message: str, kw: dict) -> str:
+        return self._hash(
+            message, kw.get("voice"), kw.get("model"), kw.get("speed"),
+            kw.get("instructions"), kw.get("chime"),
+            kw.get("chime_sound"), kw.get("extra_payload"),
+        )
+
+    def _evict_local(self) -> None:
         if len(self._local) > self._max_local:
             keep = list(self._local.items())[-self._max_local:]
             self._local = dict(keep)
 
-        self._store_shared(msg_hash, duration_ms)
-        _LOGGER.debug(
-            "Stored duration %d ms for message hash %s", duration_ms, msg_hash
-        )
-
-    def get(
-        self,
-        message: str,
-        *,
-        voice: str | None = None,
-        model: str | None = None,
-        speed: float | None = None,
-    ) -> Optional[int]:
-        """Return cached duration for ``message`` or None."""
-        return self._local.get(
-            hash_message(
-                message, voice=voice, model=model, speed=speed,
-                entity_id=self._entity_id,
-            )
-        )
-
-    def mark_failed(
-        self,
-        message: str,
-        *,
-        voice: str | None = None,
-        model: str | None = None,
-        speed: float | None = None,
-    ) -> None:
-        """Publish a 'TTS failed' sentinel to the shared cache.
-
-        Does NOT touch ``self._local`` (we don't want failed messages
-        persisted across restarts). The sentinel is consumed by
-        ``volume_restore`` to abort its polling loop early.
-        """
-        msg_hash = hash_message(
-            message, voice=voice, model=model, speed=speed,
-            entity_id=self._entity_id,
-        )
-        shared = self._ensure_shared_dict()
-        shared[msg_hash] = {
-            "duration_ms": DURATION_FAILED_SENTINEL,
-            "timestamp": asyncio.get_running_loop().time(),
-            "entity_id": self._entity_id,
-        }
-        _LOGGER.debug(
-            "Marked TTS as failed for hash %s (volume_restore will skip wait)",
-            msg_hash,
-        )
-
-    def _store_shared(self, msg_hash: str, duration_ms: int) -> None:
+    def _publish_shared(self, msg_hash: str, duration_ms: int) -> None:
         shared = self._ensure_shared_dict()
         shared[msg_hash] = {
             "duration_ms": duration_ms,
@@ -209,3 +242,36 @@ class MessageDurationCache:
     def _ensure_shared_dict(self) -> dict:
         domain_data = self._hass.data.setdefault(DOMAIN, {})
         return domain_data.setdefault(MESSAGE_DURATIONS_KEY, {})
+
+
+def lookup_duration(
+    hass: HomeAssistant,
+    message: str,
+    *,
+    entity_id: Optional[str] = None,
+    voice: str | None = None,
+    model: str | None = None,
+    speed: float | None = None,
+    instructions: str | None = None,
+    chime: bool | None = None,
+    chime_sound: str | None = None,
+    extra_payload: str | None = None,
+) -> Optional[int]:
+    """Return cached audio duration for the request, or None.
+
+    * Positive int: real audio duration in ms
+    * 0 (``DURATION_FAILED_SENTINEL``): the last attempt failed -
+      caller should skip the playback wait entirely
+    * None: nothing cached for this message+settings yet
+    """
+    shared = hass.data.get(DOMAIN, {}).get(MESSAGE_DURATIONS_KEY, {})
+    msg_hash = hash_message(
+        message, entity_id=entity_id,
+        voice=voice, model=model, speed=speed,
+        instructions=instructions, chime=chime,
+        chime_sound=chime_sound, extra_payload=extra_payload,
+    )
+    entry = shared.get(msg_hash)
+    if entry is None:
+        return None
+    return entry.get("duration_ms")

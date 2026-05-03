@@ -29,9 +29,12 @@ from .const import (
     CONF_API_KEY,
     UNIQUE_ID,
     CONF_URL,
+    is_openai_endpoint,
+    voices_for_model,
 )
 from .volume_restore import announce
 from .utils import normalize_entity_ids, ensure_wav_chimes
+from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -50,9 +53,14 @@ SAY_SCHEMA = vol.Schema(
         vol.Optional("speed"): vol.All(vol.Coerce(float), vol.Range(min=0.25, max=4.0)),
         vol.Optional("instructions"): cv.string,
         vol.Optional(CONF_EXTRA_PAYLOAD): cv.string,  # JSON string for custom backend parameters
-        vol.Optional("chime", default=False): cv.boolean,
+        # No default= for chime/normalize_audio: voluptuous would inject the
+        # default into the validated dict and the handler's "key in data"
+        # probe (used to fall back to the TTS profile's defaults) would
+        # always see the key as "explicitly provided", silently shadowing
+        # profile-level chime / normalize settings.
+        vol.Optional("chime"): cv.boolean,
         vol.Optional("chime_sound"): cv.string,
-        vol.Optional("normalize_audio", default=False): cv.boolean,
+        vol.Optional("normalize_audio"): cv.boolean,
         vol.Optional("volume"): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
         vol.Optional("pause_playback"): cv.boolean,  # Added pause_playback
         vol.Optional("entity_id"): cv.entity_ids,  # For direct entity targeting
@@ -60,6 +68,65 @@ SAY_SCHEMA = vol.Schema(
         vol.Optional("area_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string]))     # For area targeting
     }, extra=vol.ALLOW_EXTRA
 )
+
+def _validate_voice_compatibility(
+    hass: HomeAssistant, tts_entity: str, voice_override: str | None
+) -> None:
+    """Reject the call early if the voice can't render on the entity's model.
+
+    No silent overrides: when the user picks a voice the configured
+    model doesn't support (e.g. ``marin`` on ``tts-1``) we surface a
+    HomeAssistantError naming the problem and listing valid voices.
+    The user keeps full control over which model their profile uses -
+    auto-promoting under the hood would change the API call without
+    their knowledge and complicate cost / model-version reasoning.
+
+    Skipped for non-OpenAI endpoints (custom backends decide their own
+    voice catalogues; we have no way to know what works there) and
+    for unknown / custom model strings (likewise opaque).
+    """
+    entity_reg = er.async_get(hass)
+    entity_entry = entity_reg.async_get(tts_entity)
+    if entity_entry is None or entity_entry.config_entry_id is None:
+        return
+    parent = hass.config_entries.async_get_entry(entity_entry.config_entry_id)
+    if parent is None or not is_openai_endpoint(parent.data.get(CONF_URL)):
+        return
+
+    model: str | None = None
+    if entity_entry.config_subentry_id and getattr(parent, "subentries", None):
+        sub = parent.subentries.get(entity_entry.config_subentry_id)
+        if sub is not None:
+            model = sub.data.get(CONF_MODEL)
+    if model is None:
+        model = parent.data.get(CONF_MODEL) or parent.options.get(CONF_MODEL)
+    if model is None:
+        return
+
+    from .const import VOICES_BY_MODEL
+    if model not in VOICES_BY_MODEL:
+        return  # custom / unknown model - can't validate
+
+    voice = voice_override
+    if voice is None:
+        if entity_entry.config_subentry_id and getattr(parent, "subentries", None):
+            sub = parent.subentries.get(entity_entry.config_subentry_id)
+            if sub is not None:
+                voice = sub.data.get(CONF_VOICE)
+        if voice is None:
+            voice = parent.data.get(CONF_VOICE) or parent.options.get(CONF_VOICE)
+    if not voice:
+        return
+
+    allowed = voices_for_model(model)
+    if voice in allowed:
+        return
+    raise HomeAssistantError(
+        f"Voice '{voice}' is not supported by model '{model}'. "
+        f"Compatible voices: {', '.join(sorted(allowed))}. "
+        f"Switch the profile to 'gpt-4o-mini-tts' to use this voice."
+    )
+
 
 def _get_entities_from_target(
     hass: HomeAssistant, 
@@ -81,15 +148,25 @@ def _get_entities_from_target(
     _LOGGER.debug("Target: %s", target)
     entities = []
     
-    # Handle direct entity_ids - normalize to always work with lists
+    # Handle direct entity_ids - normalize to always work with lists.
+    # Only accept media_player entities here; passing e.g. a light or
+    # input_boolean as a direct target would otherwise sail through to
+    # tts.speak and blow up deep inside HA's TTS layer.
     if entity_ids := target.get("entity_id"):
-        entities.extend(normalize_entity_ids(entity_ids))
+        for entity_id in normalize_entity_ids(entity_ids):
+            if entity_id.startswith(f"{MP_DOMAIN}."):
+                entities.append(entity_id)
+            else:
+                _LOGGER.warning(
+                    "Ignoring non-media_player target %s (only media_player entities are valid)",
+                    entity_id,
+                )
         _LOGGER.debug("Added entity_ids from target: %s", entities)
-    
+
     # Get entity registry only once if needed
     entity_reg = None
     device_reg = None
-    
+
     if any(key in target for key in ["area_id", "device_id"]):
         entity_reg = er.async_get(hass)
         device_reg = dr.async_get(hass)
@@ -513,6 +590,12 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
 
             # Remove None values
             options = {k: v for k, v in options.items() if v is not None}
+
+            # Reject incompatible (model, voice) combos early so the
+            # user sees an actionable error rather than an opaque
+            # OpenAI 400. No silent model promotion - profile config
+            # is the source of truth.
+            _validate_voice_compatibility(hass, tts_entity, options.get("voice"))
             
             tts_volume = data.get("volume")
             pause_playback = data.get("pause_playback")  # Get pause_playback from service call

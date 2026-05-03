@@ -10,7 +10,6 @@ from __future__ import annotations
 import logging
 import os
 import tempfile
-from typing import Optional
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -62,45 +61,6 @@ def embed_duration_in_audio(audio_data: bytes, duration_ms: int) -> bytes:
     except Exception as e:
         _LOGGER.warning("Failed to embed metadata: %s", e)
         return audio_data
-    finally:
-        try:
-            os.unlink(tmp_path)
-        except OSError:
-            pass
-
-
-def read_duration_from_audio(audio_data: bytes) -> Optional[int]:
-    """Return the embedded duration (ms) or None if not present."""
-    try:
-        from mutagen.id3 import TXXX
-        from mutagen.mp3 import MP3
-    except ImportError:
-        return None
-
-    with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as f:
-        f.write(audio_data)
-        tmp_path = f.name
-
-    try:
-        audio = MP3(tmp_path)
-        if audio.tags is None:
-            return None
-
-        for tag in audio.tags.values():
-            if isinstance(tag, TXXX) and tag.desc == DURATION_METADATA_KEY:
-                try:
-                    duration_ms = int(tag.text[0])
-                    _LOGGER.debug(
-                        "Read duration %d ms from audio metadata", duration_ms
-                    )
-                    return duration_ms
-                except (ValueError, IndexError):
-                    pass
-        return None
-
-    except Exception as e:
-        _LOGGER.debug("Failed to read metadata: %s", e)
-        return None
     finally:
         try:
             os.unlink(tmp_path)
