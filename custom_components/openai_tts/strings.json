@@ -89,7 +89,8 @@
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
             "instructions": "Custom instructions (gpt-4o-mini-tts only)",
-            "extra_payload": "Extra JSON payload (for custom TTS backends)"
+            "extra_payload": "Extra JSON payload (for custom TTS backends)",
+            "audio_format": "Audio format (only for custom backends that reject mp3)"
           }
         },
         "reconfigure": {
@@ -109,7 +110,8 @@
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
             "instructions": "Custom instructions (gpt-4o-mini-tts only)",
-            "extra_payload": "Extra JSON payload (for custom TTS backends)"
+            "extra_payload": "Extra JSON payload (for custom TTS backends)",
+            "audio_format": "Audio format (only for custom backends that reject mp3)"
           }
         }
       },

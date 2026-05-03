@@ -161,6 +161,10 @@ CONF_CHIME_SOUND = "chime_sound"
 CONF_NORMALIZE_AUDIO = "normalize_audio"
 CONF_INSTRUCTIONS = "instructions"
 CONF_EXTRA_PAYLOAD = "extra_payload"  # JSON string for custom TTS backend parameters
+CONF_AUDIO_FORMAT = "audio_format"   # mp3 (default) / wav / opus, for custom backends
+
+AUDIO_FORMATS = ["mp3", "wav", "opus"]
+DEFAULT_AUDIO_FORMAT = "mp3"
 
 # Toggle to snapshot & restore volumes
 CONF_VOLUME_RESTORE = "volume_restore"

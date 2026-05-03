@@ -192,6 +192,7 @@ class OpenAITTSEngine:
         model: str | None = None,
         instructions: str | None = None,
         extra_payload: str | None = None,
+        response_format: str = "mp3",
     ) -> AudioResponse:
         """Blocking TTS request. Must be invoked via an executor.
 
@@ -210,7 +211,7 @@ class OpenAITTSEngine:
         """
         headers, payload = self._builder.build(
             text=text,
-            response_format="mp3",
+            response_format=response_format,
             speed=speed,
             voice=voice,
             model=model,

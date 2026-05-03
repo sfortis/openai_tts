@@ -34,6 +34,7 @@ from .audio_metadata import embed_duration_in_audio
 from .cache import MessageDurationCache
 from .const import (
     CONF_API_KEY,
+    CONF_AUDIO_FORMAT,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_EXTRA_PAYLOAD,
@@ -44,6 +45,7 @@ from .const import (
     CONF_SPEED,
     CONF_URL,
     CONF_VOICE,
+    DEFAULT_AUDIO_FORMAT,
     DOMAIN,
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
@@ -334,6 +336,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, False),
             CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
             CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
+            CONF_AUDIO_FORMAT: self._get_config_value(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT),
         }
 
     @property
@@ -457,6 +460,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 or self._get_config_value(CONF_CHIME_SOUND)
             ),
             "normalize_audio": normalize_audio,
+            "audio_format": (
+                opts.get(CONF_AUDIO_FORMAT)
+                or self._get_config_value(CONF_AUDIO_FORMAT)
+                or DEFAULT_AUDIO_FORMAT
+            ),
         }
 
     async def _engine_get_blocking(
@@ -479,6 +487,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 model=resolved["model"],
                 instructions=resolved["instructions"],
                 extra_payload=resolved["extra_payload"],
+                response_format=resolved.get("audio_format", DEFAULT_AUDIO_FORMAT),
             ),
         )
         audio_response = await asyncio.wait_for(audio_task, timeout=30.0)
@@ -653,7 +662,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 self._record_failure(message, err, resolved)
                 return (None, None)
 
-            if not is_valid_audio(audio_data, expected_format="mp3"):
+            requested_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
+            if not is_valid_audio(audio_data, expected_format=requested_format):
                 _LOGGER.error(
                     "TTS response failed audio validation (size=%d). "
                     "Refusing cache to prevent corruption (issue #64).",
@@ -678,7 +688,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             audio_with_metadata = await self.hass.async_add_executor_job(
                 embed_duration_in_audio, audio_data, self._last_duration_ms or 0
             )
-            return ("mp3", audio_with_metadata)
+            actual_format = detect_audio_format(audio_data)
+            return (actual_format, audio_with_metadata)
 
         except MaxLengthExceeded as err:
             _LOGGER.error("Maximum message length exceeded: %s", err)
@@ -736,7 +747,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # and triggers an immediate-restore + raise even though the
         # current stream is still in flight and may succeed.
         self._clear_failure_sentinel(full_text, resolved)
-        audio_format = "mp3"
+        audio_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
         can_stream = self._can_use_streaming(full_text, options)
 
         _LOGGER.info(

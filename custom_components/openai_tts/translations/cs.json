@@ -65,7 +65,8 @@
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
             "instructions": "Vlastní pokyny (pouze gpt-4o-mini-tts)",
-            "extra_payload": "Extra JSON payload (pro custom TTS backends)"
+            "extra_payload": "Extra JSON payload (pro custom TTS backends)",
+            "audio_format": "Audio format (jen pro custom backends, které odmítají mp3)"
           }
         },
         "reconfigure": {
@@ -85,7 +86,8 @@
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
             "instructions": "Vlastní pokyny (pouze gpt-4o-mini-tts)",
-            "extra_payload": "Extra JSON payload (pro custom TTS backends)"
+            "extra_payload": "Extra JSON payload (pro custom TTS backends)",
+            "audio_format": "Audio format (jen pro custom backends, které odmítají mp3)"
           }
         }
       },

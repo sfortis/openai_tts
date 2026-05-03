@@ -65,7 +65,8 @@
             "chime_sound": "Ήχος σήματος",
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
-            "extra_payload": "Extra JSON payload (για custom TTS backends)"
+            "extra_payload": "Extra JSON payload (για custom TTS backends)",
+            "audio_format": "Audio format (μόνο για custom backends που δεν δέχονται mp3)"
           }
         },
         "reconfigure": {
@@ -85,7 +86,8 @@
             "chime_sound": "Ήχος σήματος",
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
-            "extra_payload": "Extra JSON payload (για custom TTS backends)"
+            "extra_payload": "Extra JSON payload (για custom TTS backends)",
+            "audio_format": "Audio format (μόνο για custom backends που δεν δέχονται mp3)"
           }
         }
       },

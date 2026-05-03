@@ -42,6 +42,9 @@ from .const import (
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
+    CONF_AUDIO_FORMAT,
+    AUDIO_FORMATS,
+    DEFAULT_AUDIO_FORMAT,
     CONF_VOLUME_RESTORE,
     CONF_PAUSE_PLAYBACK,
     CONF_PROFILE_NAME,
@@ -524,6 +527,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "normalize_audio": CONF_NORMALIZE_AUDIO,
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
+                    "audio_format": CONF_AUDIO_FORMAT,
                 }
                 mapped_input: dict[str, Any] = {
                     CONF_PROFILE_NAME: self._step1_profile_name,
@@ -570,7 +574,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             # backend understands.
             voice_field = selector({"text": {}})
 
-        step2_schema = vol.Schema({
+        step2_fields: dict[Any, Any] = {
             vol.Required(CONF_VOICE, default=default_voice): voice_field,
             vol.Optional(CONF_SPEED, default=1.0): selector({
                 "number": {"min": 0.25, "max": 4.0, "step": 0.05, "mode": "slider"}
@@ -582,7 +586,18 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             }),
             vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
             vol.Optional("extra_payload", description={"suggested_value": ""}): TemplateSelector(),
-        })
+        }
+        # ``audio_format`` is only surfaced for non-OpenAI backends. Some
+        # custom servers (issue #61: pocket-tts) reject mp3 and need wav
+        # or opus, but for OpenAI itself mp3 is the right default and the
+        # extra picker would just confuse users.
+        if not is_openai:
+            step2_fields[
+                vol.Optional("audio_format", default=DEFAULT_AUDIO_FORMAT)
+            ] = selector({
+                "select": {"options": AUDIO_FORMATS, "mode": "dropdown"}
+            })
+        step2_schema = vol.Schema(step2_fields)
 
         return self.async_show_form(
             step_id="voice_audio",
@@ -665,6 +680,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "normalize_audio": CONF_NORMALIZE_AUDIO,
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
+                    "audio_format": CONF_AUDIO_FORMAT,
                 }
                 mapped_input: dict[str, Any] = {CONF_MODEL: self._step1_model}
                 for key, value in user_input.items():
@@ -720,7 +736,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         else:
             voice_field = selector({"text": {}})
 
-        step2_schema = vol.Schema({
+        step2_fields: dict[Any, Any] = {
             vol.Required(CONF_VOICE, default=default_voice): voice_field,
             vol.Optional(
                 "instructions",
@@ -742,7 +758,18 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "suggested_value": existing_data.get(CONF_EXTRA_PAYLOAD) or ""
                 },
             ): TemplateSelector(),
-        })
+        }
+        # See create-flow note: audio_format only matters for custom backends.
+        if not is_openai:
+            step2_fields[
+                vol.Optional(
+                    "audio_format",
+                    default=existing_data.get(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT),
+                )
+            ] = selector({
+                "select": {"options": AUDIO_FORMATS, "mode": "dropdown"}
+            })
+        step2_schema = vol.Schema(step2_fields)
 
         return self.async_show_form(
             step_id="reconfigure_voice",
