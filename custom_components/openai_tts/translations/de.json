@@ -3,25 +3,27 @@
     "step": {
       "user": {
         "title": "OpenAI TTS-Dienst hinzufügen",
-        "description": "Richten Sie die OpenAI TTS-Integration ein, um TTS-Agenten zu erstellen. API Key ist für OpenAI erforderlich, für custom endpoints optional.",
+        "description": "Richten Sie das OpenAI TTS integration ein, um TTS agents zu erstellen. API key ist für OpenAI erforderlich, für custom endpoints optional.",
         "data": {
-          "api_key": "API Key (für OpenAI erforderlich, für custom endpoints optional)",
-          "url": "API Endpoint (optional)"
+          "name": "Kontoname (optional, z.B. Privat / Arbeit)",
+          "api_key": "API key (für OpenAI erforderlich, für custom endpoints optional)",
+          "url": "API endpoint (optional)"
         }
       },
       "reconfigure": {
         "title": "OpenAI TTS neu konfigurieren",
-        "description": "API-Anmeldedaten für diese Integration aktualisieren.",
+        "description": "API-Anmeldedaten für dieses integration aktualisieren.",
         "data": {
-          "api_key": "API-Schlüssel",
-          "url": "API-Endpunkt"
+          "name": "Kontoname (optional, z.B. Privat / Arbeit)",
+          "api_key": "API key",
+          "url": "API endpoint"
         }
       },
       "reauth_confirm": {
         "title": "OpenAI TTS erneut authentifizieren",
-        "description": "Der API-Schlüssel für {title} ist nicht mehr gültig. Bitte geben Sie einen neuen API-Schlüssel ein.",
+        "description": "Der API key für {title} ist nicht mehr gültig. Bitte geben Sie einen neuen API key ein.",
         "data": {
-          "api_key": "API-Schlüssel"
+          "api_key": "API key"
         }
       }
     },
@@ -31,47 +33,59 @@
       "reauth_successful": "Erneute Authentifizierung erfolgreich"
     },
     "error": {
-      "wrong_api_key": "Ungültiger API-Schlüssel. Bitte geben Sie einen gültigen API-Schlüssel ein.",
-      "invalid_api_key": "Ungültiger API-Schlüssel. Bitte überprüfen Sie Ihren API-Schlüssel und versuchen Sie es erneut.",
-      "cannot_connect": "Verbindung zur OpenAI-API nicht möglich. Bitte überprüfen Sie Ihr Netzwerk und den API-Endpunkt.",
-      "duplicate_api_key": "Ein Eintrag mit diesem API-Schlüssel existiert bereits. Jeder Integrationseintrag muss einen eindeutigen API-Schlüssel haben."
+      "wrong_api_key": "Ungültiger API key. Bitte geben Sie einen gültigen API key ein.",
+      "invalid_api_key": "Ungültiger API key. Bitte überprüfen Sie Ihren API key und versuchen Sie es erneut.",
+      "cannot_connect": "Verbindung zur OpenAI-API nicht möglich. Bitte überprüfen Sie Ihr Netzwerk und das API endpoint.",
+      "duplicate_api_key": "Ein Eintrag mit diesem API key existiert bereits. Jedes integration muss einen eindeutigen API key haben."
     }
   },
   "config_subentries": {
     "profile": {
-      "entry_type": "TTS-Agent",
+      "entry_type": "TTS agent",
       "initiate_flow": {
-        "user": "TTS-Agent hinzufügen",
-        "reconfigure": "TTS-Agent neu konfigurieren"
+        "user": "TTS agent hinzufügen",
+        "reconfigure": "TTS agent neu konfigurieren"
       },
       "step": {
         "user": {
-          "title": "TTS-Agent hinzufügen",
-          "description": "Erstellen Sie einen neuen TTS-Agenten mit benutzerdefinierten Stimmeinstellungen",
+          "title": "TTS agent hinzufügen (Schritt 1 von 2)",
+          "description": "Wählen Sie einen Namen und das OpenAI model. Stimme und Audiooptionen folgen.",
           "data": {
             "profile_name": "Profilname",
-            "model": "Modell",
+            "model": "Model"
+          }
+        },
+        "voice_audio": {
+          "title": "TTS agent hinzufügen (Schritt 2 von 2)",
+          "description": "Stimme und Audiooptionen für model {model}.",
+          "data": {
             "voice": "Stimme",
             "speed": "Geschwindigkeit (0,25 bis 4,0)",
             "chime": "Signalton aktivieren",
             "chime_sound": "Signalton-Sound",
             "normalize_audio": "Audiolautstärke normalisieren",
-            "instructions": "Benutzerdefinierte Anweisungen (optional, nur für unterstützte Modelle)",
-            "extra_payload": "Extra JSON-Payload (optional, für benutzerdefinierte TTS-Backends)"
+            "instructions": "Benutzerdefinierte Anweisungen (nur gpt-4o-mini-tts)",
+            "extra_payload": "Extra JSON payload (für custom TTS backends)"
           }
         },
         "reconfigure": {
-          "title": "TTS-Agent aktualisieren",
-          "description": "Einstellungen für diesen TTS-Agenten ändern",
+          "title": "TTS agent aktualisieren (Schritt 1 von 2)",
+          "description": "Wählen Sie das model. Stimme und Audiooptionen folgen.",
           "data": {
-            "model": "Modell",
+            "model": "Model"
+          }
+        },
+        "reconfigure_voice": {
+          "title": "TTS agent aktualisieren (Schritt 2 von 2)",
+          "description": "Stimme und Audiooptionen für model {model}.",
+          "data": {
             "voice": "Stimme",
             "speed": "Geschwindigkeit (0,25 bis 4,0)",
             "chime": "Signalton aktivieren",
             "chime_sound": "Signalton-Sound",
             "normalize_audio": "Audiolautstärke normalisieren",
-            "instructions": "Benutzerdefinierte Anweisungen (optional, nur für unterstützte Modelle)",
-            "extra_payload": "Extra JSON-Payload (optional, für benutzerdefinierte TTS-Backends)"
+            "instructions": "Benutzerdefinierte Anweisungen (nur gpt-4o-mini-tts)",
+            "extra_payload": "Extra JSON payload (für custom TTS backends)"
           }
         }
       },
@@ -80,14 +94,14 @@
       },
       "abort": {
         "already_configured": "Profil bereits konfiguriert",
-        "reconfigure_successful": "TTS-Agent erfolgreich neu konfiguriert",
-        "subentry_not_found": "TTS-Agent nicht gefunden"
+        "reconfigure_successful": "TTS agent erfolgreich neu konfiguriert",
+        "subentry_not_found": "TTS agent nicht gefunden"
       }
     }
   },
   "options": {
     "abort": {
-      "no_options_available": "Dieser Integrationseintrag hat keine konfigurierbaren Optionen. Verwenden Sie die Untereinträge, um einzelne TTS-Agenten zu konfigurieren.",
+      "no_options_available": "Dieses integration hat keine konfigurierbaren Optionen. Verwenden Sie die Untereinträge, um einzelne TTS agents zu konfigurieren.",
       "not_supported": "Der Optionsfluss wird für diesen Eintrag nicht unterstützt"
     },
     "step": {
@@ -98,7 +112,7 @@
           "chime": "Signalton vor der Sprache aktivieren (nützlich für Ansagen)",
           "chime_sound": "Signalton-Sound",
           "speed": "Geschwindigkeit (0,25 bis 4,0)",
-          "model": "Modell",
+          "model": "Model",
           "voice": "Stimme",
           "enable_instructions": "Benutzerdefinierte Anweisungen aktivieren",
           "instructions": "Anweisungen (leer lassen zum Deaktivieren)",
@@ -117,7 +131,7 @@
           "ok": "OK",
           "auth_failed": "Authentifizierung fehlgeschlagen",
           "quota_exceeded": "Kontingent überschritten",
-          "rate_limited": "Ratenbegrenzt",
+          "rate_limited": "Rate limited",
           "server_error": "Serverfehler",
           "network_error": "Netzwerkfehler",
           "unknown_error": "Unbekannter Fehler"

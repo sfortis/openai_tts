@@ -3,25 +3,27 @@
     "step": {
       "user": {
         "title": "Προσθήκη υπηρεσίας OpenAI TTS",
-        "description": "Ρυθμίστε την ενσωμάτωση OpenAI TTS για να δημιουργήσετε πράκτορες TTS. Το API key απαιτείται για OpenAI, προαιρετικό για custom endpoints.",
+        "description": "Ρυθμίστε το OpenAI TTS integration για να δημιουργήσετε TTS agents. Το API key απαιτείται για OpenAI, προαιρετικό για custom endpoints.",
         "data": {
-          "api_key": "API Key (απαιτείται για OpenAI, προαιρετικό για custom endpoints)",
-          "url": "API Endpoint (προαιρετικό)"
+          "name": "Όνομα λογαριασμού (προαιρετικό, π.χ. Προσωπικό / Εργασία)",
+          "api_key": "API key (απαιτείται για OpenAI, προαιρετικό για custom endpoints)",
+          "url": "API endpoint (προαιρετικό)"
         }
       },
       "reconfigure": {
         "title": "Επαναρύθμιση OpenAI TTS",
-        "description": "Ενημερώστε τα διαπιστευτήρια API για αυτήν την ενσωμάτωση.",
+        "description": "Ενημερώστε τα διαπιστευτήρια API για αυτό το integration.",
         "data": {
-          "api_key": "Κλειδί API",
-          "url": "Διεύθυνση API"
+          "name": "Όνομα λογαριασμού (προαιρετικό, π.χ. Προσωπικό / Εργασία)",
+          "api_key": "API key",
+          "url": "API endpoint"
         }
       },
       "reauth_confirm": {
         "title": "Επαναπιστοποίηση OpenAI TTS",
-        "description": "Το κλειδί API για {title} δεν είναι πλέον έγκυρο. Παρακαλώ εισάγετε ένα νέο κλειδί API.",
+        "description": "Το API key για {title} δεν είναι πλέον έγκυρο. Παρακαλώ εισάγετε ένα νέο API key.",
         "data": {
-          "api_key": "Κλειδί API"
+          "api_key": "API key"
         }
       }
     },
@@ -31,47 +33,59 @@
       "reauth_successful": "Η επαναπιστοποίηση ολοκληρώθηκε επιτυχώς"
     },
     "error": {
-      "wrong_api_key": "Μη έγκυρο κλειδί API. Παρακαλώ εισάγετε ένα έγκυρο κλειδί API.",
-      "invalid_api_key": "Μη έγκυρο κλειδί API. Παρακαλώ ελέγξτε το κλειδί API σας και δοκιμάστε ξανά.",
-      "cannot_connect": "Δεν είναι δυνατή η σύνδεση στο OpenAI API. Παρακαλώ ελέγξτε το δίκτυό σας και τη διεύθυνση API.",
-      "duplicate_api_key": "Υπάρχει ήδη καταχώρηση με αυτό το κλειδί API. Κάθε καταχώρηση ενσωμάτωσης πρέπει να έχει μοναδικό κλειδί API."
+      "wrong_api_key": "Μη έγκυρο API key. Παρακαλώ εισάγετε ένα έγκυρο API key.",
+      "invalid_api_key": "Μη έγκυρο API key. Παρακαλώ ελέγξτε το API key σας και δοκιμάστε ξανά.",
+      "cannot_connect": "Δεν είναι δυνατή η σύνδεση στο OpenAI API. Παρακαλώ ελέγξτε το δίκτυό σας και το API endpoint.",
+      "duplicate_api_key": "Υπάρχει ήδη καταχώρηση με αυτό το API key. Κάθε integration πρέπει να έχει μοναδικό API key."
     }
   },
   "config_subentries": {
     "profile": {
-      "entry_type": "Πράκτορας TTS",
+      "entry_type": "TTS agent",
       "initiate_flow": {
-        "user": "Προσθήκη πράκτορα TTS",
-        "reconfigure": "Επαναρύθμιση πράκτορα TTS"
+        "user": "Προσθήκη TTS agent",
+        "reconfigure": "Επαναρύθμιση TTS agent"
       },
       "step": {
         "user": {
-          "title": "Προσθήκη Πράκτορα TTS",
-          "description": "Δημιουργήστε έναν νέο πράκτορα TTS με προσαρμοσμένες ρυθμίσεις φωνής",
+          "title": "Προσθήκη TTS agent (Βήμα 1 από 2)",
+          "description": "Επιλέξτε όνομα και OpenAI model. Φωνή και επιλογές ήχου ακολουθούν.",
           "data": {
             "profile_name": "Όνομα προφίλ",
-            "model": "Μοντέλο",
+            "model": "Model"
+          }
+        },
+        "voice_audio": {
+          "title": "Προσθήκη TTS agent (Βήμα 2 από 2)",
+          "description": "Φωνή και επιλογές ήχου για το model {model}.",
+          "data": {
             "voice": "Φωνή",
             "speed": "Ταχύτητα (0,25 έως 4,0)",
             "chime": "Ενεργοποίηση ηχητικού σήματος",
             "chime_sound": "Ήχος σήματος",
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
-            "instructions": "Προσαρμοσμένες οδηγίες (προαιρετικό, μόνο για υποστηριζόμενα μοντέλα)",
-            "extra_payload": "Extra JSON payload (προαιρετικό, για custom TTS backends)"
+            "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
+            "extra_payload": "Extra JSON payload (για custom TTS backends)"
           }
         },
         "reconfigure": {
-          "title": "Ενημέρωση Πράκτορα TTS",
-          "description": "Τροποποιήστε τις ρυθμίσεις αυτού του πράκτορα TTS",
+          "title": "Ενημέρωση TTS agent (Βήμα 1 από 2)",
+          "description": "Επιλέξτε model. Φωνή και επιλογές ήχου ακολουθούν.",
           "data": {
-            "model": "Μοντέλο",
+            "model": "Model"
+          }
+        },
+        "reconfigure_voice": {
+          "title": "Ενημέρωση TTS agent (Βήμα 2 από 2)",
+          "description": "Φωνή και επιλογές ήχου για το model {model}.",
+          "data": {
             "voice": "Φωνή",
             "speed": "Ταχύτητα (0,25 έως 4,0)",
             "chime": "Ενεργοποίηση ηχητικού σήματος",
             "chime_sound": "Ήχος σήματος",
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
-            "instructions": "Προσαρμοσμένες οδηγίες (προαιρετικό, μόνο για υποστηριζόμενα μοντέλα)",
-            "extra_payload": "Extra JSON payload (προαιρετικό, για custom TTS backends)"
+            "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
+            "extra_payload": "Extra JSON payload (για custom TTS backends)"
           }
         }
       },
@@ -80,15 +94,15 @@
       },
       "abort": {
         "already_configured": "Το προφίλ είναι ήδη ρυθμισμένο",
-        "reconfigure_successful": "Ο πράκτορας TTS επαναρυθμίστηκε επιτυχώς",
-        "subentry_not_found": "Ο πράκτορας TTS δεν βρέθηκε"
+        "reconfigure_successful": "Ο TTS agent επαναρυθμίστηκε επιτυχώς",
+        "subentry_not_found": "Ο TTS agent δεν βρέθηκε"
       }
     }
   },
   "options": {
     "abort": {
-      "no_options_available": "Αυτή η καταχώρηση ενσωμάτωσης δεν έχει ρυθμιζόμενες επιλογές. Χρησιμοποιήστε τις υποκαταχωρήσεις για να ρυθμίσετε μεμονωμένους πράκτορες TTS.",
-      "not_supported": "Η ροή επιλογών δεν υποστηρίζεται για αυτήν την καταχώρηση"
+      "no_options_available": "Αυτό το integration δεν έχει ρυθμιζόμενες επιλογές. Χρησιμοποιήστε τις υποκαταχωρήσεις για να ρυθμίσετε μεμονωμένους TTS agents.",
+      "not_supported": "Η ροή επιλογών δεν υποστηρίζεται για αυτή την καταχώρηση"
     },
     "step": {
       "init": {
@@ -98,7 +112,7 @@
           "chime": "Ενεργοποίηση ηχητικού σήματος πριν την ομιλία (χρήσιμο για ανακοινώσεις)",
           "chime_sound": "Ήχος σήματος",
           "speed": "Ταχύτητα (0,25 έως 4,0)",
-          "model": "Μοντέλο",
+          "model": "Model",
           "voice": "Φωνή",
           "enable_instructions": "Ενεργοποίηση προσαρμοσμένων οδηγιών",
           "instructions": "Οδηγίες (αφήστε κενό για απενεργοποίηση)",
@@ -114,10 +128,10 @@
       "api_status": {
         "name": "Κατάσταση",
         "state": {
-          "ok": "Εντάξει",
+          "ok": "OK",
           "auth_failed": "Αποτυχία ταυτοποίησης",
           "quota_exceeded": "Εξάντληση πιστώσεων",
-          "rate_limited": "Περιορισμός ρυθμού",
+          "rate_limited": "Rate limited",
           "server_error": "Σφάλμα διακομιστή",
           "network_error": "Σφάλμα δικτύου",
           "unknown_error": "Άγνωστο σφάλμα"

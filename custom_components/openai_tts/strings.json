@@ -5,6 +5,7 @@
         "title": "Add OpenAI TTS Service",
         "description": "Set up OpenAI TTS integration to create TTS agents. API key is required for OpenAI, optional for custom endpoints.",
         "data": {
+          "name": "Account name (optional, e.g. Personal / Work)",
           "api_key": "API Key (required for OpenAI, optional for custom endpoints)",
           "url": "API Endpoint (optional)"
         }
@@ -13,6 +14,7 @@
         "title": "Reconfigure OpenAI TTS",
         "description": "Update API credentials for this integration.",
         "data": {
+          "name": "Account name (optional, e.g. Personal / Work)",
           "api_key": "API Key",
           "url": "API Endpoint"
         }
@@ -45,6 +47,7 @@
     "step": {
       "init": {
         "title": "Configure TTS options",
+        "description": "Configure settings for this TTS profile",
         "data": {
           "chime": "Enable chime sound prior speech (useful for announcements)",
           "chime_sound": "Chime sound",
@@ -69,32 +72,44 @@
       },
       "step": {
         "user": {
-          "title": "Add TTS Agent",
-          "description": "Create a new TTS agent with custom voice settings",
+          "title": "Add TTS Agent (Step 1 of 2)",
+          "description": "Pick a name and the OpenAI model. Voice and audio options come next.",
           "data": {
             "profile_name": "Profile name",
-            "model": "Model",
+            "model": "Model"
+          }
+        },
+        "voice_audio": {
+          "title": "Add TTS Agent (Step 2 of 2)",
+          "description": "Voice and audio options for model {model}.",
+          "data": {
             "voice": "Voice",
             "speed": "Speed (0.25 to 4.0)",
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
-            "instructions": "Custom instructions (optional, for supported models only)",
-            "extra_payload": "Extra JSON payload (optional, for custom TTS backends)"
+            "instructions": "Custom instructions (gpt-4o-mini-tts only)",
+            "extra_payload": "Extra JSON payload (for custom TTS backends)"
           }
         },
         "reconfigure": {
-          "title": "Update TTS Agent",
-          "description": "Modify settings for this TTS agent",
+          "title": "Update TTS Agent (Step 1 of 2)",
+          "description": "Pick the model. Voice and audio options come next.",
           "data": {
-            "model": "Model",
+            "model": "Model"
+          }
+        },
+        "reconfigure_voice": {
+          "title": "Update TTS Agent (Step 2 of 2)",
+          "description": "Voice and audio options for model {model}.",
+          "data": {
             "voice": "Voice",
             "speed": "Speed (0.25 to 4.0)",
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
-            "instructions": "Custom instructions (optional, for supported models only)",
-            "extra_payload": "Extra JSON payload (optional, for custom TTS backends)"
+            "instructions": "Custom instructions (gpt-4o-mini-tts only)",
+            "extra_payload": "Extra JSON payload (for custom TTS backends)"
           }
         }
       },
