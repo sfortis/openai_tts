@@ -591,12 +591,16 @@ async def _call_tts_speak(
     options: Dict[str, Any],
     media_players: List[str],
 ) -> None:
-    """Invoke HA's ``tts.speak`` with retries for transient failures.
+    """Invoke HA's ``tts.speak`` exactly once.
 
-    Retries are limited to the speak-call envelope; once HA has
-    accepted the call and our entity is generating audio, the engine's
-    own retry logic takes over inside ``async_get_tts_audio`` /
-    ``async_stream_tts_audio``.
+    Engine-level retries already happen inside ``async_get_tts_audio`` /
+    ``async_stream_tts_audio``, where they're safe (audio hasn't been
+    delivered to a speaker yet). Retrying at the speak level instead can
+    replay audio that already started playing on one of the targets - a
+    blocking ``tts.speak`` waits for playback completion, so by the time
+    we'd see an exception (e.g. an internal ``quote_from_bytes`` bug in
+    HA's URL helper) the message is often already audible. Surfacing the
+    failure once is preferable to playing it twice.
     """
     service_data = {
         "message": message,
@@ -604,26 +608,10 @@ async def _call_tts_speak(
         "options": options,
         "media_player_entity_id": media_players,
     }
-    last_err: Exception | None = None
-    delay = 0.5
-    for attempt in range(3):
-        try:
-            await hass.services.async_call(
-                TTS_DOMAIN, "speak", service_data,
-                target={"entity_id": tts_entity}, blocking=True,
-            )
-            return
-        except Exception as exc:
-            last_err = exc
-            if attempt < 2:
-                _LOGGER.warning(
-                    "tts.speak attempt %d failed (%s); retrying in %.1fs",
-                    attempt + 1, exc, delay,
-                )
-                await asyncio.sleep(delay)
-                delay *= 2
-    assert last_err is not None
-    raise last_err
+    await hass.services.async_call(
+        TTS_DOMAIN, "speak", service_data,
+        target={"entity_id": tts_entity}, blocking=True,
+    )
 
 
 _DEFAULT_FALLBACK_DURATION_MS = 10_000
