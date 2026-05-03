@@ -22,11 +22,15 @@ say:
       example: "Hello, this is a test message."
       selector:
         text:
-    
+
     # Voice Settings
     voice:
       name: Voice
-      description: Voice to use for speech generation (overrides entity default). For custom TTS backends, you can type any voice name.
+      description: >-
+        Voice to use for speech generation (overrides entity default).
+        Voices marked with · gpt-4o-mini-tts only are exclusive to the gpt-4o-mini-tts model
+        and will be rejected by tts-1 / tts-1-hd. For custom TTS backends,
+        you can type any voice name.
       required: false
       selector:
         select:
@@ -36,22 +40,28 @@ say:
               value: alloy
             - label: Ash (Calm)
               value: ash
-            - label: Ballad (Warm)
+            - label: Ballad (Warm) · gpt-4o-mini-tts only
               value: ballad
+            - label: Cedar (Recommended) · gpt-4o-mini-tts only
+              value: cedar
             - label: Coral (Friendly)
               value: coral
             - label: Echo (Smooth)
               value: echo
             - label: Fable (Expressive)
               value: fable
-            - label: Onyx (Authoritative)
-              value: onyx
+            - label: Marin (Recommended) · gpt-4o-mini-tts only
+              value: marin
             - label: Nova (Energetic)
               value: nova
+            - label: Onyx (Authoritative)
+              value: onyx
             - label: Sage (Thoughtful)
               value: sage
             - label: Shimmer (Gentle)
               value: shimmer
+            - label: Verse (Versatile) · gpt-4o-mini-tts only
+              value: verse
     speed:
       name: Speed
       description: Speed of the speech (0.25-4.0). 1.0 is normal speed.
@@ -89,13 +99,19 @@ say:
       example: "en"
       selector:
         text:
-    
+
     # Audio Processing
+    # NOTE: chime / normalize_audio / pause_playback intentionally do
+    # NOT set ``default:`` here. The HA UI would otherwise inject
+    # those defaults into the service call payload, and our handler
+    # treats any present key as an explicit override of the profile
+    # config - which silently shadowed profile-level chime/normalize
+    # settings. Leaving these unset means an omitted field stays
+    # omitted, which is what we want.
     chime:
       name: Play Chime
-      description: Play a chime sound before speaking.
+      description: Play a chime sound before speaking. Falls back to the profile setting when omitted.
       required: false
-      default: false
       selector:
         boolean:
     chime_sound:
@@ -107,12 +123,11 @@ say:
         text:
     normalize_audio:
       name: Normalize Audio
-      description: Apply loudness normalization to the generated audio.
+      description: Apply loudness normalization. Falls back to the profile setting when omitted.
       required: false
-      default: false
       selector:
         boolean:
-    
+
     # Playback Control
     volume:
       name: Volume
@@ -126,8 +141,7 @@ say:
           mode: slider
     pause_playback:
       name: Pause Playback
-      description: Pause any currently playing media during announcement (only works with Sonos speakers).
+      description: Pause any currently playing media during announcement. Falls back to the profile setting when omitted.
       required: false
-      default: false
       selector:
         boolean:
