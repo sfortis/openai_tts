@@ -45,7 +45,7 @@ from .api_health import (
     API_STATUS_QUOTA_EXCEEDED,
     OpenAITTSHealthTracker,
 )
-from .cache import DURATION_FAILED_SENTINEL, lookup_duration
+from .cache import DURATION_FAILED_SENTINEL, clear_stale_failure, lookup_duration
 from .const import CONF_PAUSE_PLAYBACK, CONF_VOLUME_RESTORE, DOMAIN
 from .utils import (
     call_media_player_service,
@@ -490,30 +490,34 @@ async def announce(
         ) from err
 
     if restorer is None:
-        # No volume restore and no pause - we're done. A short
-        # zero-wait probe still catches an already-cached failure
-        # sentinel so we can raise; we don't pay the streaming wait
-        # because the caller has nothing to clean up.
-        if (
-            _lookup_audio_duration(hass, tts_entity, message, options)
-            == DURATION_FAILED_SENTINEL
-        ):
-            raise HomeAssistantError(
-                f"TTS engine reported failure for this request on {tts_entity}; "
-                f"see sensor.openai_tts_api_status for the underlying error."
-            )
+        # No volume restore and no pause - speak already returned, we're
+        # done. We don't probe the failure sentinel here: ``_call_tts_speak``
+        # already propagated any engine failure as an exception, so reaching
+        # this point means HA either streamed fresh audio or served from its
+        # own TTS cache. A stale sentinel from a prior $0-balance attempt
+        # would cause a false-positive error after audio actually played
+        # (issue #64), so we trust speak's outcome.
         return
 
     cached = await _wait_for_cached_duration(
         hass, tts_entity, message, options, timeout_s=60.0
     )
     if cached == DURATION_FAILED_SENTINEL:
-        _LOGGER.info("TTS marked the message as failed; restoring volumes immediately")
-        await restorer.restore_immediate(restore_volumes=restore_enabled)
-        raise HomeAssistantError(
-            f"TTS engine reported failure for this request on {tts_entity}; "
-            f"see sensor.openai_tts_api_status for the underlying error."
+        # Same rationale as above: tts.speak returned successfully, so
+        # something played (likely from HA's TTS cache). The sentinel
+        # is from a previous attempt and no longer reflects reality.
+        # Drop it so the next call doesn't false-trip again, and fall
+        # through to media_player / fallback duration for restore timing.
+        _LOGGER.debug(
+            "Stale failure sentinel for %s after successful speak; clearing",
+            tts_entity,
         )
+        clear_stale_failure(
+            hass, message,
+            entity_id=_resolve_unique_id(hass, tts_entity),
+            **_resolved_render_args(hass, tts_entity, options),
+        )
+        cached = None
 
     duration_ms = cached
     if duration_ms is None or duration_ms <= 0:

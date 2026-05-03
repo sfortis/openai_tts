@@ -275,3 +275,36 @@ def lookup_duration(
     if entry is None:
         return None
     return entry.get("duration_ms")
+
+
+def clear_stale_failure(
+    hass: HomeAssistant,
+    message: str,
+    *,
+    entity_id: Optional[str] = None,
+    voice: str | None = None,
+    model: str | None = None,
+    speed: float | None = None,
+    instructions: str | None = None,
+    chime: bool | None = None,
+    chime_sound: str | None = None,
+    extra_payload: str | None = None,
+) -> bool:
+    """Drop a failure sentinel from the shared cache.
+
+    Used by volume_restore when ``tts.speak`` succeeded (likely from HA's
+    own TTS cache) yet our duration cache still holds a sentinel from a
+    prior failed attempt. Returns True when an entry was actually popped.
+    """
+    shared = hass.data.get(DOMAIN, {}).get(MESSAGE_DURATIONS_KEY, {})
+    msg_hash = hash_message(
+        message, entity_id=entity_id,
+        voice=voice, model=model, speed=speed,
+        instructions=instructions, chime=chime,
+        chime_sound=chime_sound, extra_payload=extra_payload,
+    )
+    entry = shared.get(msg_hash)
+    if entry is None or entry.get("duration_ms") != DURATION_FAILED_SENTINEL:
+        return False
+    shared.pop(msg_hash, None)
+    return True
