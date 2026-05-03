@@ -8,3 +8,23 @@
 # Python bytecode
 __pycache__/
 *.pyc
+
+# NFS / WSL leftovers (from open-file-handle delete races)
+.nfs*
+**/.nfs*
+
+.claude/
+.codex/
+.cursor/
+.aider*
+.continue/
+.copilot/
+.github-copilot/
+.zed/
+.cody/
+.tabnine/
+.gemini/
+.windsurf/
+CLAUDE.md
+GEMINI.md
+AGENTS.md
