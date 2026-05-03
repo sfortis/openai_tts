@@ -1,89 +1,124 @@
-# OpenAI TTS Custom Component for Home Assistant
+<div align="center">
 
-<a href="https://www.buymeacoffee.com/sfortis" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="50" width="200"></a>
+# OpenAI TTS for Home Assistant
 
-The OpenAI TTS component for Home Assistant makes it possible to use the OpenAI API to generate spoken audio from text. This can be used in automations, assistants, scripts, or any other component that supports TTS within Home Assistant. 
+**Text-to-Speech component that connects Home Assistant to OpenAI's TTS API and any OpenAI-compatible backend.**
 
-## Features  
+[![Release](https://img.shields.io/github/v/release/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/releases/latest)
+[![Downloads](https://img.shields.io/github/downloads/sfortis/openai_tts/total?logo=github)](https://github.com/sfortis/openai_tts/releases)
+[![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
+[![Validate](https://img.shields.io/github/actions/workflow/status/sfortis/openai_tts/validate.yml?branch=main&label=validate&logo=github-actions)](https://github.com/sfortis/openai_tts/actions/workflows/validate.yml)
+![Home Assistant](https://img.shields.io/badge/HA-2025.7%2B-41BDF5?logo=home-assistant&logoColor=white)
+[![License](https://img.shields.io/github/license/sfortis/openai_tts?logo=open-source-initiative&logoColor=white)](LICENSE)
+[![Issues](https://img.shields.io/github/issues/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/issues)
 
-- **Text-to-Speech** conversion using OpenAI's API  
-- **Support for multiple languages and voices** – No special configuration needed; the AI model auto-recognizes the language.  
-- **Customizable speech model** – [Check supported voices and models](https://platform.openai.com/docs/guides/text-to-speech).  
-- **Integration with Home Assistant** – Works seamlessly with assistants, automations, and scripts.  
-- **Custom endpoint option** – Allows you to use your own OpenAI compatible API endpoint.
-- **Chime option** – Useful for announcements on speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
-- **User-configurable chime sounds** – Drop your own chime sound into  `config/custom_components/openai_tts/chime` folder (MP3).
-- **Audio normalization option** – Uses more CPU but improves audio clarity on mobile phones and small speakers. *(See Devices → OpenAI TTS → CONFIGURE button)*
-- **Support for new gpt-4o-mini-tts model** – A fast and powerful language model.
-- **Text-to-Speech Instructions option** – Instruct the text-to-speech model to speak in a specific way (only works with newest gpt-4o-mini-tts model). [OpenAI new generation audio models](https://openai.com/
-index/introducing-our-next-generation-audio-models/)
-- **Volume Restoration** – Automatically restores speaker volumes to their original levels after TTS announcements.
-- **Media Pause/Resume** – Pauses currently playing media during announcements and resumes afterward (works with Sonos speakers).
-- **Sonos Integration** – Automatically groups and ungroups Sonos speakers for synchronized announcements.
-- **New `openai_tts.say` Service** – New service parameters including voice, instructions, etc.
-- **Precise Audio Duration Detection** – Improved timing for TTS playback with better synchronization.
-- **Performance Optimizations** – Improved audio processing for faster TTS responses.
+<a href="https://www.buymeacoffee.com/sfortis" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42" width="170"></a>
 
-### ⭐ New Features in 3.7
-- **WAV audio support** - Custom TTS backends that return WAV audio are now supported (auto-converted to MP3).
-- **Custom voice names** - Use any voice name for custom TTS backends (not limited to OpenAI voices).
-- **Extra payload support** - Pass custom JSON parameters to TTS backends via the `extra_payload` field in service calls or in the TTS agent config.
+</div>
 
-### ⭐ New Features in 3.6
-- **Optional API key for custom endpoints** – API key is only required for OpenAI. Local/custom TTS servers can work without authentication.
-- **Multi-language support** – 54 languages now available in HA Assist pipeline settings.
+---
 
-### ⭐ New Features in 3.5
-- **TTS Streaming** – Reduced latency with streaming support (HA 2025.7+). *Note: Streaming is disabled when chime or audio normalization is enabled.*
-- **Reconfigure** – Allows changing the API key and URL endpoint without recreating the entity.
-- **Sub-entries support** – Support for sub-entries, HA 2025.7 required.
-- **Volume restoration** – Improved timing and logic for volume restoration.
-- **Diagnostics** – Added diagnostics support for troubleshooting.
+OpenAI TTS turns text into speech inside Home Assistant. It works with the official OpenAI Audio Speech API and any compatible self-hosted backend (Chatterbox, pocket-tts, LocalAI, TTS Web UI, and others). Configure one or more TTS agents per OpenAI account, target announcements at any media player, optionally prepend a chime, normalise loudness for small speakers, and have the original volume and music restored after the announcement.
 
-### *Caution! For OpenAI, you need an API key and some balance available in your OpenAI account!* ###
-visit: (https://platform.openai.com/docs/pricing)
+## Contents
 
-*Note: API key is optional when using custom endpoints (local TTS servers).*
+- [What's New](#whats-new-)
+- [Core Features](#core-features)
+- [Installation](#installation)
+- [Configuration](#configuration)
+- [openai_tts.say service](#openai_ttssay-service)
+- [Custom backends](#custom-backends)
+- [Notes](#notes)
 
-## ⭐New TTS say action
+## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
+
+- **2-step config flow**: profile setup is split into model first, then voice and audio. Voice picker filters by the chosen model so incompatible voices (e.g. `marin` on `tts-1`) cannot be saved.
+- **Audio format selector**: pick `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm` per profile. Requested from OpenAI (or any compatible backend) and delivered end-to-end without a forced mp3 round-trip.
+- **New voice catalog**: `marin`, `cedar`, `ballad`, `verse` (gpt-4o-mini-tts only) with model-compatibility validation.
+- **Format-aware audio pipeline**: chimes are transcoded on demand to match the TTS codec; chime-only requests skip the TTS decode/encode round-trip via `-c copy`.
+- **Volume-restore overhold fix**: blocking TTS targets (Music Assistant, Sonos) no longer hold extra time after the audio finishes.
+- **Cached audio reliability (issue #64)**: stale failure sentinels no longer block cached audio playback after a recovered API error.
+- **Tag-triggered auto-release**: pushing a `v*` tag creates the GitHub release.
+
+## Core Features
+
+- **Text-to-Speech** via OpenAI's Audio Speech API or any compatible backend.
+- **Multiple TTS agents** under one or more OpenAI accounts. Each agent has its own voice, model, speed, audio format and audio-processing settings.
+- **Models**: `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` (with custom speaking-style instructions).
+- **Voices**: full OpenAI catalog including `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, plus the `gpt-4o-mini-tts`-only voices `ballad`, `cedar`, `marin`, `verse`.
+- **Audio formats**: `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm` per profile.
+- **Streaming playback** with HA 2025.7+ for low first-audio latency. Falls back automatically when post-processing is needed.
+- **Chime prefix** with a user-configurable library (drop your own mp3 in `config/custom_components/openai_tts/chime`).
+- **Loudness normalisation** for small speakers and mobile playback.
+- **Volume restoration** to the original speaker level after the announcement.
+- **Media pause and resume** during the announcement on supported platforms.
+- **Sonos** announcement feature with native group handling.
+- **Multi-target playback** with cast warm-up sync to keep multiple speakers aligned.
+- **API health sensor** that surfaces auth, quota, rate-limit and connectivity errors.
+- **Custom-endpoint support** with optional API key, custom voice text input, and `extra_payload` for backend-specific JSON parameters.
+- **54 languages** available through the HA Assist pipeline.
+
+## Installation
+
+### HACS (recommended)
+
+1. Open HACS in the sidebar.
+2. Search for **OpenAI TTS** in *Integrations*.
+3. Download the integration and restart Home Assistant.
+4. Add the integration via *Settings → Devices & Services → Add Integration → OpenAI TTS*. Enter the API key (or leave empty for a custom endpoint without auth).
+5. Add one or more TTS agents (sub-entries) for the voice and audio configurations you want.
+
+### Manual
+
+1. Copy the contents of `custom_components/openai_tts/` into `<config>/custom_components/openai_tts/`.
+2. Restart Home Assistant.
+3. Add the integration via *Settings → Devices & Services* as above.
+
+## Configuration
+
+Each integration entry stores the API credentials and endpoint. Each sub-entry (TTS agent) stores the per-profile settings:
+
+- **Model** and **voice** (filtered by model compatibility).
+- **Speed** (0.25 - 4.0).
+- **Audio format** (mp3 default, others on demand).
+- **Custom instructions** (gpt-4o-mini-tts only) for speaking style.
+- **Extra JSON payload** for custom backends.
+- **Chime**, **chime sound** and **normalise audio** as defaults that the service call can override.
+
+> Enabling chime or normalise audio disables streaming for that profile, since the audio has to be assembled in full before playback.
+
+## `openai_tts.say` service
+
+Targets media players directly, with per-call overrides for voice, speed, instructions, chime, normalise, volume and pause behaviour.
 
 ```yaml
-service: openai_tts.say
+action: openai_tts.say
 target:
   entity_id: media_player.living_room_speaker
-  # OR target by area
   # area_id: living_room
-  # OR target by device
   # device_id: 12345abcde
 data:
-  tts_entity: tts.openai_tts_tts_1
-  message: "This is an announcement with volume control and pause/resume!"
-  volume: 0.6  # Temporarily set volume for announcement (0.0-1.0)
-  pause_playback: true  # Pause any music playing during the announcement
-  chime: true  # Add a chime sound before the announcement
-  normalize_audio: true  # Normalize audio (for small speakers)
-  voice: my_custom_voice  # Use any voice name (for custom TTS backends)
-  extra_payload: '{"temperature": 0.8}'  # Custom JSON for TTS backend
+  tts_entity: tts.openai_tts_living_room
+  message: "Dinner is ready"
+  volume: 0.6              # snapshot and restore the speaker volume
+  pause_playback: true     # pause music during the announcement
+  chime: true              # prepend the configured chime
+  normalize_audio: true    # loudness-normalise for small speakers
+  voice: nova
+  speed: 1.0
+  instructions: "Say it warmly"
+  extra_payload: '{"temperature": 0.8}'
 ```
 
-## HACS installation ( *preferred!* )
+## Custom backends
 
-1. Go to the sidebar HACS menu
+The integration works with any OpenAI-compatible TTS endpoint. When the URL is not `api.openai.com`:
 
-2. Search for "OpenAI TTS" in the integrations
+- The API key field becomes optional.
+- The voice field accepts any backend-specific name.
+- Use the **audio format** selector to negotiate around backends that reject mp3 (for example `pocket-tts` returning PCM).
+- The **extra payload** field forwards backend-specific JSON parameters with the request.
 
-3. Click on the integration and download it. Restart Home Assistant to apply the component.
+## Notes
 
-4. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
-
-## Manual installation
-
-1. Ensure you have a `custom_components` folder within your Home Assistant configuration directory.
-
-2. Inside the `custom_components` folder, create a new folder named `openai_tts`.
-
-3. Place the repo files inside `openai_tts` folder.
-
-4. Restart Home Assistant
-
-5. Add the integration via UI, provide API key and select required model and voice. Multiple instances may be configured.
+> *For OpenAI, an API key with available balance is required.* Pricing: <https://platform.openai.com/docs/pricing>
