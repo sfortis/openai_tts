@@ -5,12 +5,11 @@
 **Text-to-Speech component that connects Home Assistant to OpenAI's TTS API and any OpenAI-compatible backend.**
 
 [![Release](https://img.shields.io/github/v/release/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/releases/latest)
-[![Downloads](https://img.shields.io/github/downloads/sfortis/openai_tts/total?logo=github)](https://github.com/sfortis/openai_tts/releases)
+[![Stars](https://img.shields.io/github/stars/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/stargazers)
 [![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
 [![Validate](https://img.shields.io/github/actions/workflow/status/sfortis/openai_tts/validate.yml?branch=main&label=validate&logo=github-actions)](https://github.com/sfortis/openai_tts/actions/workflows/validate.yml)
 ![Home Assistant](https://img.shields.io/badge/HA-2025.7%2B-41BDF5?logo=home-assistant&logoColor=white)
 [![License](https://img.shields.io/github/license/sfortis/openai_tts?logo=open-source-initiative&logoColor=white)](LICENSE)
-[![Issues](https://img.shields.io/github/issues/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/issues)
 
 <a href="https://www.buymeacoffee.com/sfortis" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42" width="170"></a>
 
