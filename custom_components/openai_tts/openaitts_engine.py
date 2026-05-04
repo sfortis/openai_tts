@@ -125,24 +125,38 @@ class _RequestBuilder:
             payload["instructions"] = instructions
 
         if extra_payload:
+            # Be lenient with whitespace and the common ```json fenced
+            # code-block wrapping, then try to parse. If the payload is
+            # still invalid we log a single actionable warning and drop
+            # the payload rather than fail the whole request - blocking
+            # otherwise-working TTS over a malformed optional field is a
+            # worse user experience than skipping it (issue #65).
+            cleaned = extra_payload.strip()
+            if cleaned.startswith("```"):
+                cleaned = cleaned.lstrip("`")
+                if cleaned.lower().startswith("json"):
+                    cleaned = cleaned[4:]
+                cleaned = cleaned.rstrip("`").strip()
             try:
-                extra = json.loads(extra_payload)
+                extra = json.loads(cleaned)
             except json.JSONDecodeError as e:
-                # Surface configuration errors as typed exceptions so the
-                # caller sees a real failure (HomeAssistantError + sensor
-                # update) instead of a quiet warning that the user might
-                # never notice. Silent fallback hid bugs in custom-backend
-                # configs where the user thought their params were sent.
-                raise OpenAITTSError(
-                    f"Invalid extra_payload JSON: {e}"
-                ) from e
-            if not isinstance(extra, dict):
-                raise OpenAITTSError(
-                    "extra_payload must be a JSON object, "
-                    f"got {type(extra).__name__}"
+                _LOGGER.warning(
+                    "Ignoring invalid extra_payload JSON (%s). "
+                    "Expected a JSON object like {\"temperature\": 0.7}. "
+                    "Received: %r",
+                    e, extra_payload[:120],
                 )
-            payload.update(extra)
-            _LOGGER.debug("Merged extra payload keys: %s", list(extra.keys()))
+                extra = None
+            if extra is not None and not isinstance(extra, dict):
+                _LOGGER.warning(
+                    "Ignoring extra_payload: must be a JSON object, "
+                    "got %s. Received: %r",
+                    type(extra).__name__, extra_payload[:120],
+                )
+                extra = None
+            if extra:
+                payload.update(extra)
+                _LOGGER.debug("Merged extra payload keys: %s", list(extra.keys()))
 
         return headers, payload
 
