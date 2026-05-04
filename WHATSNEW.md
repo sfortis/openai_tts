@@ -1,8 +1,10 @@
 ## v3.8.1b1
 
-### Fix
+### Fixes
 
 - **`extra_payload` JSON parsing is lenient again (issue #65)**. v3.8 made invalid `extra_payload` raise a hard error, which broke working setups (Qwen3 / Alibaba DashScope etc.) where the parameter was silently dropped on v3.7. The parser now trims whitespace, strips ` ```json ` code fences, and on still-malformed input logs a single warning with the offending text and continues the TTS request without those extra parameters.
+- **Mistral Voxtral support (issue #63)**. The engine now detects JSON-wrapped audio responses (Content-Type `application/json`) and base64-decodes the audio payload (`audio_data` / `audio` / `data` field) before handing the bytes back to Home Assistant. Combined with omitting the `speed` field when it equals the default 1.0, this lets `voxtral-mini-tts-latest` work end-to-end through the existing custom-endpoint flow.
+- **Upstream error bodies are surfaced**. HTTP 4xx errors from the TTS provider now include the response body (first 200 chars) in the exception message, so issues like "Invalid model", "Voice not found" or schema-rejection details show up directly in the logs instead of just `HTTP 4xx`.
 
 ## v3.8
 
