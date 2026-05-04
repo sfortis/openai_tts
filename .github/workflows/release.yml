@@ -36,6 +36,18 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
+      - name: Build release zip
+        # HACS counts downloads only when the integration is delivered as
+        # a release asset (matching ``filename`` in ``hacs.json``).
+        # The zip mirrors the layout HACS expects: integration files at
+        # the root, so HACS can extract straight into
+        # ``<config>/custom_components/openai_tts/``.
+        run: |
+          cd custom_components/openai_tts
+          zip -r "${{ github.workspace }}/openai_tts.zip" . \
+            -x '*.pyc' '__pycache__/*' '.DS_Store'
+          ls -la "${{ github.workspace }}/openai_tts.zip"
+
       - name: Create release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -52,4 +64,6 @@ jobs:
           if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
             flags+=(--prerelease)
           fi
-          gh release create "${{ steps.version.outputs.tag }}" "${flags[@]}"
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "${{ github.workspace }}/openai_tts.zip" \
+            "${flags[@]}"
