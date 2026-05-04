@@ -720,10 +720,18 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         is_openai = is_openai_endpoint(endpoint_url)
         allowed_voices = voices_for_model(self._step1_model)
         existing_voice = existing_data.get(CONF_VOICE, "shimmer")
-        # If the previously-saved voice isn't in the new model's
-        # allowed list, fall back to the model's first compatible
-        # voice so the form opens on a valid pick.
-        default_voice = existing_voice if existing_voice in allowed_voices else allowed_voices[0]
+        # For OpenAI endpoints, fall back to a compatible voice when
+        # the saved one isn't in the model's allowed list. For custom
+        # endpoints the field is a free-text input and the saved voice
+        # is whatever the backend understands (Mistral slugs, custom
+        # cloned voice ids, etc.); don't second-guess it.
+        if is_openai:
+            default_voice = (
+                existing_voice if existing_voice in allowed_voices
+                else allowed_voices[0]
+            )
+        else:
+            default_voice = existing_voice
 
         if is_openai:
             # See note in async_step_voice_audio: lock the picker so
