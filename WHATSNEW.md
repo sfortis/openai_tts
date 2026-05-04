@@ -1,3 +1,9 @@
+## v3.8.1b1
+
+### Fix
+
+- **`extra_payload` JSON parsing is lenient again (issue #65)**. v3.8 made invalid `extra_payload` raise a hard error, which broke working setups (Qwen3 / Alibaba DashScope etc.) where the parameter was silently dropped on v3.7. The parser now trims whitespace, strips ` ```json ` code fences, and on still-malformed input logs a single warning with the offending text and continues the TTS request without those extra parameters.
+
 ## v3.8
 
 ### Highlights
