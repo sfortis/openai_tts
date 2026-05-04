@@ -1,4 +1,6 @@
 {
     "name": "OpenAI TTS Speech Service",
-    "homeassistant": "2025.7.0"
+    "homeassistant": "2025.7.0",
+    "zip_release": true,
+    "filename": "openai_tts.zip"
 }
