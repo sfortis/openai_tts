@@ -158,13 +158,6 @@ SUPPORTED_LANGUAGES = [
 
 CONF_CHIME_ENABLE = "chime"
 CONF_CHIME_SOUND = "chime_sound"
-# Play the chime as a separate ``media_player.play_media`` call instead of
-# concatenating it onto the TTS audio with ffmpeg. Lets the TTS half use
-# the streaming path even when a chime is desired - saves 5-20s on slow
-# models (gpt-4o-mini-tts) but only works on media players that support
-# ``MediaPlayerEntityFeature.MEDIA_ENQUEUE``; otherwise the integration
-# falls back to the bundled post-process pipeline automatically.
-CONF_STREAMED_CHIME = "streamed_chime"
 CONF_NORMALIZE_AUDIO = "normalize_audio"
 CONF_INSTRUCTIONS = "instructions"
 CONF_EXTRA_PAYLOAD = "extra_payload"  # JSON string for custom TTS backend parameters
