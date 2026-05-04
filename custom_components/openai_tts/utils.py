@@ -433,32 +433,21 @@ async def process_audio(
             final_output_path = await hass.async_add_executor_job(create_temp_output)
 
         # Decide which ffmpeg pipeline to run:
-        #   chime-only  → concat demuxer + ``-c copy`` (no TTS transcode)
-        #   chime+norm  → filter_complex (loudnorm forces decode/encode)
-        #   norm-only   → single-input loudnorm (decode/encode)
-        #   neither     → caller already returned native bytes; we
-        #                 shouldn't be here, but bail safely.
-        if chime_enabled and actual_chime_path and not normalize_audio:
-            def write_concat_list():
-                with tempfile.NamedTemporaryFile(mode="w", suffix=".txt", delete=False) as list_file:
-                    list_file.write(f"file '{actual_chime_path}'\n")
-                    list_file.write(f"file '{tts_path}'\n")
-                    return list_file.name
-            list_path = await hass.async_add_executor_job(write_concat_list)
+        #   chime (any)  → filter_complex re-encode of both streams. The
+        #                  concat-demuxer + ``-c copy`` shortcut produced
+        #                  byte-valid mp3s that miniaudio (HomePod /
+        #                  Apple TV via pyatv) refused to decode because
+        #                  the Xing/Info header from the chime no longer
+        #                  matched the combined frame layout. A single
+        #                  fresh encode keeps the bitstream consistent.
+        #   norm-only    → single-input loudnorm (decode/encode)
+        #   neither      → caller already returned native bytes; we
+        #                  shouldn't be here, but bail safely.
+        if chime_enabled and actual_chime_path:
             cmd = build_ffmpeg_command(
                 final_output_path,
                 [actual_chime_path, tts_path],
-                normalize_audio=False,
-                is_concat=True,
-                concat_list_path=list_path,
-                tts_input_format=audio_format,
-                output_format=audio_format,
-            )
-        elif chime_enabled and actual_chime_path and normalize_audio:
-            cmd = build_ffmpeg_command(
-                final_output_path,
-                [actual_chime_path, tts_path],
-                normalize_audio=True,
+                normalize_audio=normalize_audio,
                 tts_input_format=audio_format,
                 output_format=audio_format,
             )
@@ -511,8 +500,6 @@ async def process_audio(
                 os.remove(tts_path)
                 if not caller_owns_output:
                     os.remove(final_output_path)
-                if 'list_path' in locals():
-                    os.remove(list_path)
             except Exception as e:
                 _LOGGER.debug("Error cleaning up temporary files: %s", e)
 
@@ -528,8 +515,6 @@ async def process_audio(
                 os.remove(tts_path)
                 if 'final_output_path' in locals() and not caller_owns_output:
                     os.remove(final_output_path)
-                if 'list_path' in locals():
-                    os.remove(list_path)
             except OSError:
                 pass
 
