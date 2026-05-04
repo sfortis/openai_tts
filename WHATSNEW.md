@@ -8,6 +8,7 @@
 - **Custom voice text persists across reconfigure**. When the endpoint is not OpenAI, the voice field is a free-text input (Mistral slugs, custom cloned voice ids, etc.). Reconfigure was silently dropping the saved value back to the OpenAI default; it now keeps whatever the user typed.
 - **Chipmunk effect with chime enabled is fixed**. The bundled chimes are at 44.1 kHz while OpenAI TTS is at 24 kHz; the concat-copy fast path was leaving the TTS half playing at the chime's sample rate. The chime is now pre-resampled to 24 kHz mono in the requested codec the first time it is used.
 - **Friendlier error messages**. Provider rejections are no longer labelled "OpenAI API error" when you're using Mistral or another backend. Auth, quota, rate-limit and server errors now carry a one-line hint pointing at the likely fix.
+- **HomePod / Apple TV playback with chime is fixed**. The chime + TTS concat used ffmpeg's `-c copy` shortcut, which produced a byte-valid mp3 that miniaudio (used by pyatv and therefore HomePod / Apple TV) refused to decode because the Xing/Info header from the chime no longer matched the combined frame layout. The chime path now always re-encodes both streams through a single `filter_complex` pass for a consistent bitstream. Bundled chimes are also pre-resampled to 24 kHz mono mp3 so first use no longer pays a transcode penalty; user-supplied chimes are still transcoded lazily on first request and cached.
 
 ## v3.8
 

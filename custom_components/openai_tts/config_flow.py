@@ -140,8 +140,15 @@ def get_chime_options() -> list[dict[str, str]]:
         files = []
     opts: list[dict[str,str]] = []
     for file in files:
-        if file.lower().endswith(".mp3"):
-            opts.append({"value": file, "label": os.path.splitext(file)[0].title()})
+        # Skip the pre-baked 24kHz mono variants (``<name>.24k.mp3``)
+        # and the lazy-cached transcodes for non-mp3 formats - they are
+        # implementation details, not user-facing chime choices.
+        lower = file.lower()
+        if not lower.endswith(".mp3"):
+            continue
+        if lower.endswith(".24k.mp3") or ".24k." in lower:
+            continue
+        opts.append({"value": file, "label": os.path.splitext(file)[0].title()})
     opts.sort(key=lambda x: x["label"])
     return opts
 
