@@ -17,6 +17,7 @@ so error handling stays consistent across them.
 from __future__ import annotations
 
 import asyncio
+import base64
 import json
 import logging
 import time
@@ -46,12 +47,19 @@ INITIAL_BUFFER_BYTES = 1024
 
 
 def _classify_http_error(status: int, body_snippet: str = "") -> OpenAITTSError:
-    """Map an HTTP status (and optional body) to a typed exception."""
+    """Map an HTTP status (and optional body) to a typed exception.
+
+    The body snippet is appended to the message for 4xx responses so the
+    user (or issue tracker) can see what the upstream server actually
+    complained about. We trim to 200 chars to keep logs readable; the
+    full body remains visible at DEBUG via the existing read-2048 path.
+    """
+    detail = f" body: {body_snippet[:200]}" if body_snippet and 400 <= status < 500 else ""
     if status in (401, 403):
-        return OpenAIAuthError(f"Authentication failed (HTTP {status})")
+        return OpenAIAuthError(f"Authentication failed (HTTP {status}){detail}")
     if status == 402:
         return OpenAIQuotaExceededError(
-            f"OpenAI account balance/quota exhausted (HTTP {status})"
+            f"OpenAI account balance/quota exhausted (HTTP {status}){detail}"
         )
     if status == 429:
         # OpenAI returns 429 for BOTH true rate limits and out-of-credits.
@@ -60,10 +68,10 @@ def _classify_http_error(status: int, body_snippet: str = "") -> OpenAITTSError:
             return OpenAIQuotaExceededError(
                 "OpenAI account quota exhausted (HTTP 429 insufficient_quota)"
             )
-        return OpenAIRateLimitError(f"Rate limit hit (HTTP {status})")
+        return OpenAIRateLimitError(f"Rate limit hit (HTTP {status}){detail}")
     if status >= 500:
         return OpenAIServerError(f"OpenAI server error (HTTP {status})")
-    return OpenAITTSError(f"OpenAI API error (HTTP {status})")
+    return OpenAITTSError(f"OpenAI API error (HTTP {status}){detail}")
 
 
 def _is_retryable(exc: BaseException) -> bool:
@@ -75,6 +83,46 @@ def _is_retryable(exc: BaseException) -> bool:
     if isinstance(exc, (URLError, aiohttp.ClientError)):
         return True
     return False
+
+
+def _decode_json_audio_blob(body: bytes) -> bytes:
+    """Pull base64 audio out of a JSON-wrapped speech response.
+
+    Mistral Voxtral and similar OpenAI-compatible providers return a
+    JSON envelope with the audio under ``audio_data`` (or ``audio`` /
+    ``data``) instead of raw bytes. We unwrap and base64-decode in one
+    place so both the sync ``get_tts`` and the async streaming path can
+    reuse it. Raises ``OpenAITTSError`` when the body is JSON but the
+    audio field is missing or unreadable.
+    """
+    try:
+        envelope = json.loads(body)
+    except json.JSONDecodeError as exc:
+        preview = body[:120].decode("utf-8", errors="replace")
+        raise OpenAITTSError(
+            f"Could not parse JSON audio response: {exc}. Body starts with: {preview!r}"
+        ) from exc
+
+    if not isinstance(envelope, dict):
+        raise OpenAITTSError(
+            f"JSON audio response was not an object: {type(envelope).__name__}"
+        )
+
+    for key in ("audio_data", "audio", "data"):
+        value = envelope.get(key)
+        if isinstance(value, str) and value:
+            try:
+                return base64.b64decode(value)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise OpenAITTSError(
+                    f"Could not base64-decode {key!r} in audio response: {exc}"
+                ) from exc
+
+    snippet = json.dumps(envelope)[:200]
+    raise OpenAITTSError(
+        "JSON audio response did not include a recognised audio field "
+        f"(audio_data / audio / data). Body: {snippet}"
+    )
 
 
 class _RequestBuilder:
@@ -119,8 +167,15 @@ class _RequestBuilder:
             "input": text,
             "voice": voice or self._default_voice,
             "response_format": response_format,
-            "speed": speed if speed is not None else self._default_speed,
         }
+        # Only send ``speed`` when the user has actually changed it from
+        # the API default of 1.0. Some compatible backends (Mistral
+        # Voxtral) reject any unrecognised body field with HTTP 422
+        # ``extra_forbidden``, which would otherwise block requests
+        # that are still using the default 1.0.
+        effective_speed = speed if speed is not None else self._default_speed
+        if effective_speed is not None and abs(float(effective_speed) - 1.0) > 1e-9:
+            payload["speed"] = effective_speed
         if instructions is not None:
             payload["instructions"] = instructions
 
@@ -234,7 +289,7 @@ class OpenAITTSEngine:
         )
         _LOGGER.debug(
             "TTS API request: model=%s, voice=%s, speed=%s",
-            payload["model"], payload["voice"], payload["speed"],
+            payload["model"], payload["voice"], payload.get("speed", 1.0),
         )
 
         max_retries = 1
@@ -248,7 +303,11 @@ class OpenAITTSEngine:
                     method="POST",
                 )
                 with urlopen(req, timeout=DEFAULT_TIMEOUT_SECONDS) as resp:
-                    return AudioResponse(resp.read())
+                    body = resp.read()
+                    content_type = resp.headers.get("Content-Type", "")
+                    if "application/json" in content_type.lower():
+                        body = _decode_json_audio_blob(body)
+                    return AudioResponse(body)
 
             except CancelledError:
                 _LOGGER.debug("TTS request cancelled")
@@ -332,7 +391,8 @@ class OpenAITTSEngine:
         )
         _LOGGER.debug(
             "Streaming TTS API request: model=%s, voice=%s, speed=%s, format=%s",
-            payload["model"], payload["voice"], payload["speed"], response_format,
+            payload["model"], payload["voice"], payload.get("speed", 1.0),
+            response_format,
         )
 
         # Reuse HA's shared aiohttp session so we get connection
@@ -356,10 +416,20 @@ class OpenAITTSEngine:
                 session, payload, headers, max_retries
             )
             try:
-                _LOGGER.debug(
-                    "Response content type: %s",
-                    response.headers.get("Content-Type", ""),
-                )
+                content_type = response.headers.get("Content-Type", "")
+                _LOGGER.debug("Response content type: %s", content_type)
+
+                # OpenAI returns raw audio bytes; some compatible providers
+                # (Mistral Voxtral, etc.) wrap a base64 audio blob in a JSON
+                # envelope. Detect by Content-Type and yield decoded bytes
+                # in one go - the audio is small enough that this does not
+                # need a streaming decoder, and HA's pipeline buffers a
+                # 1KB header window upstream anyway.
+                if "application/json" in content_type.lower():
+                    audio_bytes = await self._decode_json_audio_response(response)
+                    if audio_bytes:
+                        yield audio_bytes
+                    return
 
                 chunks_received = 0
                 total_bytes = 0
@@ -412,6 +482,14 @@ class OpenAITTSEngine:
         finally:
             if owns_session:
                 await session.close()
+
+    @staticmethod
+    async def _decode_json_audio_response(
+        response: aiohttp.ClientResponse,
+    ) -> bytes:
+        """Async wrapper that reads the body and delegates the unwrap."""
+        body = await response.read()
+        return _decode_json_audio_blob(body)
 
     async def _open_stream_with_retries(
         self,
