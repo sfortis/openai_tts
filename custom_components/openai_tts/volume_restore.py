@@ -24,9 +24,15 @@ import logging
 from typing import Any, Dict, List, Optional, Set
 
 from homeassistant.components.media_player import (
+    ATTR_MEDIA_CONTENT_ID,
+    ATTR_MEDIA_CONTENT_TYPE,
     ATTR_MEDIA_VOLUME_LEVEL,
+    DOMAIN as MP_DOMAIN,
+    MediaPlayerEntityFeature,
+    MediaType,
     SERVICE_MEDIA_PAUSE,
     SERVICE_MEDIA_PLAY,
+    SERVICE_PLAY_MEDIA,
     STATE_PLAYING,
 )
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
@@ -46,9 +52,17 @@ from .api_health import (
     OpenAITTSHealthTracker,
 )
 from .cache import DURATION_FAILED_SENTINEL, clear_stale_failure, lookup_duration
-from .const import CONF_PAUSE_PLAYBACK, CONF_VOLUME_RESTORE, DOMAIN
+from .const import (
+    CONF_CHIME_ENABLE,
+    CONF_CHIME_SOUND,
+    CONF_PAUSE_PLAYBACK,
+    CONF_STREAMED_CHIME,
+    CONF_VOLUME_RESTORE,
+    DOMAIN,
+)
 from .utils import (
     call_media_player_service,
+    get_media_duration,
     get_media_player_state,
     set_media_player_volume,
 )
@@ -330,6 +344,92 @@ class _VolumeRestorer:
                 await asyncio.sleep(0.4)
         await self._resume_paused_media()
 
+    async def restore_on_playback_end(
+        self,
+        media_players: List[str],
+        *,
+        max_wait_s: float = 90.0,
+        poll_interval_s: float = 0.4,
+        settle_after_s: float = 0.3,
+        restore_volumes: bool = True,
+    ) -> None:
+        """Restore once every target has finished playing.
+
+        Used by paths that can't (or shouldn't) compute a fixed audio
+        duration up front -- streamed-chime in particular, where the
+        chime + TTS play back-to-back on the device and the only
+        reliable end-of-audio signal is the speaker's own state machine.
+
+        We watch each ``media_player`` for two phases:
+
+        1. *Activation* -- the entity must have entered ``playing`` /
+           ``buffering`` at some point. Without this we'd return
+           instantly on slow Cast cold-starts (where the entity is
+           still ``idle`` for a couple of seconds after ``play_media``).
+        2. *Drain* -- once activated, we wait for it to leave the
+           active set.
+
+        ``max_wait_s`` caps the wait so a wedged speaker (or one we
+        never see become active, e.g. the announcement was rejected)
+        doesn't pin the announcement forever. ``settle_after_s`` is a
+        small grace window so the volume restore doesn't clip the
+        last frame.
+        """
+        active_states = {"playing", "buffering"}
+        deadline = asyncio.get_running_loop().time() + max_wait_s
+        seen_active = {eid: False for eid in media_players}
+
+        while True:
+            all_done = True
+            any_active_seen = False
+            for eid in media_players:
+                state_obj = self.hass.states.get(eid)
+                if state_obj is None:
+                    # Entity vanished mid-flight; treat as done.
+                    continue
+                state = state_obj.state
+                if state in active_states:
+                    seen_active[eid] = True
+                    all_done = False
+                elif not seen_active[eid]:
+                    # Hasn't started yet; keep watching unless we hit
+                    # the deadline.
+                    all_done = False
+                if seen_active[eid]:
+                    any_active_seen = True
+
+            if all_done and any_active_seen:
+                break
+            if asyncio.get_running_loop().time() >= deadline:
+                _LOGGER.warning(
+                    "restore_on_playback_end timed out after %.1fs (seen_active=%s); "
+                    "restoring anyway",
+                    max_wait_s, seen_active,
+                )
+                break
+            await asyncio.sleep(poll_interval_s)
+
+        if settle_after_s > 0:
+            await asyncio.sleep(settle_after_s)
+
+        _LOGGER.info(
+            "Playback ended on %s; %s",
+            media_players,
+            "restoring volume + resuming" if restore_volumes else "resuming media",
+        )
+
+        if restore_volumes:
+            await asyncio.gather(
+                *(
+                    self._restore_one(eid, vol)
+                    for eid, vol in self._original_volumes.items()
+                ),
+                return_exceptions=True,
+            )
+            if self._paused_media:
+                await asyncio.sleep(0.4)
+        await self._resume_paused_media()
+
     async def restore_after_playback(
         self,
         duration_ms: int,
@@ -470,6 +570,52 @@ async def announce(
             pause_playback=pause_enabled,
         )
 
+    # ``streamed_chime`` is profile metadata, not an option HA's TTS
+    # layer accepts. Strip it from anything we hand to ``tts.speak`` so
+    # validation doesn't reject the request as "Invalid options found".
+    speak_options = {k: v for k, v in options.items() if k != CONF_STREAMED_CHIME}
+    streamed_chime_active = False
+
+    # Streamed-chime mode: instead of letting the engine concatenate the
+    # chime into the TTS audio (which forces the slow atomic+postprocess
+    # path), play the chime as a separate ``media_player.play_media``
+    # call here, wait for it to finish, then issue ``tts.speak`` so the
+    # TTS half can use the streaming path. This shaves ~5-20s off the
+    # first-audio latency on slow models like ``gpt-4o-mini-tts``.
+    if (
+        options.get(CONF_STREAMED_CHIME)
+        and options.get(CONF_CHIME_ENABLE)
+        and options.get(CONF_CHIME_SOUND)
+        and _all_targets_play_media(hass, available_players)
+    ):
+        chime_url = _build_chime_url(hass, options[CONF_CHIME_SOUND])
+        chime_local_path = _local_chime_path(options[CONF_CHIME_SOUND])
+        if chime_url and chime_local_path:
+            _LOGGER.debug(
+                "Streamed-chime: prepending %s on %s", chime_url, available_players,
+            )
+            try:
+                await _prepend_chime(
+                    hass, available_players, chime_url, chime_local_path,
+                )
+            except Exception as exc:  # noqa: BLE001
+                _LOGGER.warning(
+                    "Streamed-chime playback failed (%s); falling back to "
+                    "post-process pipeline", exc,
+                )
+            else:
+                # Force chime=False on the engine call. Just removing
+                # the key isn't enough: ``_resolve_options`` falls back
+                # to the profile's saved value, which is True (that's
+                # how the user enabled the streamed mode in the first
+                # place). An explicit ``False`` override beats the
+                # profile default and keeps the engine on the streaming
+                # path.
+                speak_options = dict(speak_options)
+                speak_options[CONF_CHIME_ENABLE] = False
+                speak_options.pop(CONF_CHIME_SOUND, None)
+                streamed_chime_active = True
+
     # Time the entire speak window. Some platforms (cast multi-target)
     # return from ``tts.speak`` almost immediately while the audio is
     # still streaming, while others (Music Assistant native, blocking
@@ -480,8 +626,16 @@ async def announce(
     # duration for blocking targets, so we don't double-hold.
     speak_started_at = asyncio.get_running_loop().time()
     try:
-        await _call_tts_speak(hass, tts_entity, message, language, options,
-                              available_players)
+        # In streamed-chime mode, force a non-blocking ``tts.speak``: a
+        # separate ``play_media`` call already started the chime, and on
+        # Cast targets ``play_media`` with ``blocking=True`` waits up to
+        # 60s for a media-end event the device doesn't reliably emit.
+        # The post-speak hold (driven by cached duration via
+        # ``restore_after_playback``) handles the volume restore window.
+        await _call_tts_speak(
+            hass, tts_entity, message, language, speak_options,
+            available_players, blocking=not streamed_chime_active,
+        )
     except Exception as err:
         if restorer is not None:
             await restorer.restore_immediate(restore_volumes=restore_enabled)
@@ -497,6 +651,19 @@ async def announce(
         # own TTS cache. A stale sentinel from a prior $0-balance attempt
         # would cause a false-positive error after audio actually played
         # (issue #64), so we trust speak's outcome.
+        return
+
+    # Streamed-chime mode: tts.speak was non-blocking, so we have no
+    # reliable elapsed/duration math to hold against. Watch the speaker
+    # state machine instead -- restore the moment the player drains back
+    # to idle. This covers both fresh streaming and HA TTS cache hits
+    # (where our internal duration cache stays empty), without the 8s
+    # poll + duration-fallback dance.
+    if streamed_chime_active:
+        await restorer.restore_on_playback_end(
+            available_players,
+            restore_volumes=restore_enabled,
+        )
         return
 
     cached = await _wait_for_cached_duration(
@@ -583,6 +750,129 @@ def _filter_available(hass: HomeAssistant, media_players: List[str]) -> List[str
     return out
 
 
+def _local_chime_path(chime_sound: str) -> Optional[str]:
+    """Resolve a chime filename to its on-disk path inside the integration.
+
+    Returns ``None`` when the file is missing so the caller falls back
+    to the bundled post-process pipeline rather than handing a broken
+    URL to a media player.
+    """
+    import os
+    base = os.path.join(os.path.dirname(__file__), "chime")
+    candidate = os.path.join(base, chime_sound)
+    return candidate if os.path.exists(candidate) else None
+
+
+def _build_chime_url(
+    hass: HomeAssistant, chime_sound: str
+) -> Optional[str]:
+    """Return the absolute URL the static-path mount serves for ``chime_sound``.
+
+    Prefers the configured ``internal_url`` (which is what we ask users
+    to set anyway, since LAN-side media players don't want WAN round
+    trips). Falls back to ``external_url`` for setups that only have
+    that. If neither is available the streamed-chime mode is unsafe and
+    the caller should fall back to the bundled post-process pipeline.
+    """
+    if not _local_chime_path(chime_sound):
+        return None
+    try:
+        from homeassistant.helpers.network import get_url
+        base = get_url(hass, prefer_external=False, allow_internal=True)
+    except Exception:  # noqa: BLE001
+        return None
+    if not base:
+        return None
+    return f"{base.rstrip('/')}/openai_tts/chime/{chime_sound}"
+
+
+def _all_targets_play_media(
+    hass: HomeAssistant, entity_ids: List[str]
+) -> bool:
+    """Return True only when every target supports ``media_player.play_media``.
+
+    ``MEDIA_ENQUEUE`` would be ideal but isn't honoured by every player
+    that still works fine with sequential ``play_media`` calls (the
+    chime finishes by the time we issue the TTS, so we don't actually
+    need real queue support). What we do need is the play_media
+    feature itself; without it the target can't accept the chime URL
+    at all.
+    """
+    for entity_id in entity_ids:
+        state = hass.states.get(entity_id)
+        if state is None:
+            return False
+        features = state.attributes.get("supported_features") or 0
+        if not (features & MediaPlayerEntityFeature.PLAY_MEDIA):
+            return False
+    return True
+
+
+async def _resolve_chime_duration(
+    hass: HomeAssistant, chime_path: str
+) -> float:
+    """Probe the chime duration and cache it in ``hass.data``.
+
+    The duration is needed so we know how long to wait between firing
+    the chime and ``tts.speak`` so the second call doesn't cancel the
+    first on platforms whose ``play_media`` simply replaces the active
+    media (Cast, RAOP, etc.).
+    """
+    cache = hass.data.setdefault(DOMAIN, {}).setdefault("chime_duration_s", {})
+    if chime_path in cache:
+        return cache[chime_path]
+    try:
+        duration = await hass.async_add_executor_job(get_media_duration, chime_path)
+    except Exception as exc:  # noqa: BLE001
+        _LOGGER.debug("ffprobe failed on %s (%s); assuming 1.0s", chime_path, exc)
+        duration = 1.0
+    if not duration or duration <= 0:
+        duration = 1.0
+    cache[chime_path] = duration
+    return duration
+
+
+async def _prepend_chime(
+    hass: HomeAssistant,
+    media_players: List[str],
+    chime_url: str,
+    chime_path: str,
+) -> None:
+    """Play the chime on every target, then sleep until it has finished.
+
+    Uses ``media_player.play_media`` directly (not ``tts.speak``) so the
+    URL is treated as ordinary audio media. After firing, we wait the
+    chime's measured duration plus a small settle window so the
+    upcoming ``tts.speak`` doesn't preempt the chime mid-playback.
+    """
+    duration = await _resolve_chime_duration(hass, chime_path)
+    # ``blocking=True`` so we know the player has accepted the load
+    # command before we start the chime-finish timer. With blocking off
+    # the dispatch is fire-and-forget; on cold Cast devices the request
+    # was sometimes still in flight when the next ``tts.speak`` arrived
+    # and preempted the chime mid-buffer (so the user heard nothing).
+    await asyncio.gather(
+        *(
+            hass.services.async_call(
+                MP_DOMAIN, SERVICE_PLAY_MEDIA,
+                {
+                    "entity_id": eid,
+                    ATTR_MEDIA_CONTENT_ID: chime_url,
+                    ATTR_MEDIA_CONTENT_TYPE: MediaType.MUSIC,
+                },
+                blocking=True,
+            )
+            for eid in media_players
+        ),
+        return_exceptions=True,
+    )
+    # Settle window: the longest chime in the bundle is ~1.3s. Add a
+    # generous buffer for cold-start latency (Cast first frame can lag
+    # ~0.5-1s after the load command is acked) so the next ``tts.speak``
+    # doesn't race with chime startup and silently kill it.
+    await asyncio.sleep(duration + 1.0)
+
+
 async def _call_tts_speak(
     hass: HomeAssistant,
     tts_entity: str,
@@ -590,6 +880,7 @@ async def _call_tts_speak(
     language: str,
     options: Dict[str, Any],
     media_players: List[str],
+    blocking: bool = True,
 ) -> None:
     """Invoke HA's ``tts.speak`` exactly once.
 
@@ -601,6 +892,14 @@ async def _call_tts_speak(
     we'd see an exception (e.g. an internal ``quote_from_bytes`` bug in
     HA's URL helper) the message is often already audible. Surfacing the
     failure once is preferable to playing it twice.
+
+    ``blocking`` is forced off in streamed-chime mode: a separate
+    ``play_media`` call already started the chime, and Cast / Sonos
+    blocking semantics keep the speak service open for tens of seconds
+    after the audio actually ended (waiting on a media-end event the
+    device never reliably emits). With blocking off the service call
+    returns as soon as the URL is dispatched, and ``restore_after_playback``
+    derives the hold window from the cached duration instead.
     """
     service_data = {
         "message": message,
@@ -610,7 +909,7 @@ async def _call_tts_speak(
     }
     await hass.services.async_call(
         TTS_DOMAIN, "speak", service_data,
-        target={"entity_id": tts_entity}, blocking=True,
+        target={"entity_id": tts_entity}, blocking=blocking,
     )
 
 

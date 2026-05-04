@@ -39,6 +39,7 @@ from .const import (
     UNIQUE_ID,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
+    CONF_STREAMED_CHIME,
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
@@ -524,6 +525,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 key_mapping = {
                     "chime": CONF_CHIME_ENABLE,
                     "chime_sound": CONF_CHIME_SOUND,
+                    "streamed_chime": CONF_STREAMED_CHIME,
                     "normalize_audio": CONF_NORMALIZE_AUDIO,
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
@@ -584,6 +586,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             vol.Optional("chime_sound", default="threetone.mp3"): selector({
                 "select": {"options": chime_opts}
             }),
+            vol.Optional("streamed_chime", default=False): selector({"boolean": {}}),
             vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
             vol.Optional("extra_payload", description={"suggested_value": ""}): TemplateSelector(),
         }
@@ -680,6 +683,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 key_mapping = {
                     "chime": CONF_CHIME_ENABLE,
                     "chime_sound": CONF_CHIME_SOUND,
+                    "streamed_chime": CONF_STREAMED_CHIME,
                     "normalize_audio": CONF_NORMALIZE_AUDIO,
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
@@ -762,6 +766,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             vol.Optional("chime_sound", default=existing_data.get(CONF_CHIME_SOUND, "threetone.mp3")): selector({
                 "select": {"options": chime_opts}
             }),
+            vol.Optional("streamed_chime", default=existing_data.get(CONF_STREAMED_CHIME, False)): selector({"boolean": {}}),
             vol.Optional("normalize_audio", default=existing_data.get(CONF_NORMALIZE_AUDIO, False)): selector({"boolean": {}}),
             vol.Optional(
                 "extra_payload",

@@ -20,6 +20,7 @@ from .const import (
     CONF_SPEED,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
+    CONF_STREAMED_CHIME,
     CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
@@ -377,6 +378,30 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # Store entry for reference
     hass.data.setdefault(DOMAIN, {})
 
+    # Mount the bundled chime folder under a stable HTTP path so that
+    # ``streamed_chime`` profiles can hand the chime URL to a media player
+    # via ``media_player.play_media``. Registered exactly once per HA
+    # process; subsequent entry setups are no-ops.
+    if not hass.data[DOMAIN].get("static_chime_registered"):
+        try:
+            from pathlib import Path as _Path
+            from homeassistant.components.http import StaticPathConfig
+            chime_dir = _Path(__file__).parent / "chime"
+            await hass.http.async_register_static_paths([
+                StaticPathConfig(
+                    "/openai_tts/chime",
+                    str(chime_dir),
+                    cache_headers=True,
+                )
+            ])
+            hass.data[DOMAIN]["static_chime_registered"] = True
+            _LOGGER.debug("Registered static path /openai_tts/chime -> %s", chime_dir)
+        except Exception as exc:  # noqa: BLE001
+            _LOGGER.warning(
+                "Failed to register static chime path; streamed-chime mode "
+                "will fall back to ffmpeg post-process: %s", exc,
+            )
+
     # Migration is now handled during async_migrate_entry, no need for pending migration
     
     # Determine entry type clearly
@@ -546,6 +571,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                                 entity_defaults = {
                                     "chime": subentry.data.get(CONF_CHIME_ENABLE, False),
                                     "chime_sound": subentry.data.get(CONF_CHIME_SOUND, "threetone.mp3"),
+                                    "streamed_chime": subentry.data.get(CONF_STREAMED_CHIME, False),
                                     "normalize_audio": subentry.data.get(CONF_NORMALIZE_AUDIO, False),
                                 }
                                 _LOGGER.debug("Found entity defaults from subentry: %s", entity_defaults)
@@ -557,6 +583,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                     entity_defaults = {
                         "chime": config_entry.options.get(CONF_CHIME_ENABLE, config_entry.data.get(CONF_CHIME_ENABLE, False)),
                         "chime_sound": config_entry.options.get(CONF_CHIME_SOUND, config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3")),
+                        "streamed_chime": config_entry.options.get(CONF_STREAMED_CHIME, config_entry.data.get(CONF_STREAMED_CHIME, False)),
                         "normalize_audio": config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, False)),
                     }
                     _LOGGER.debug("Found entity defaults from config entry: %s", entity_defaults)
@@ -570,6 +597,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             chime_value = data.get("chime") if "chime" in data else entity_defaults.get("chime", False)
             normalize_value = data.get("normalize_audio") if "normalize_audio" in data else entity_defaults.get("normalize_audio", False)
             chime_sound_value = data.get("chime_sound") if "chime_sound" in data else entity_defaults.get("chime_sound")
+            streamed_chime_value = entity_defaults.get("streamed_chime", False)
 
             options = {
                 "voice": data.get("voice"),
@@ -578,6 +606,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 CONF_EXTRA_PAYLOAD: data.get(CONF_EXTRA_PAYLOAD),
                 "chime": chime_value,
                 "chime_sound": chime_sound_value,
+                CONF_STREAMED_CHIME: streamed_chime_value,
                 "normalize_audio": normalize_value,
             }
 
