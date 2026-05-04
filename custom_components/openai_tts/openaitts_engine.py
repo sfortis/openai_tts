@@ -54,24 +54,34 @@ def _classify_http_error(status: int, body_snippet: str = "") -> OpenAITTSError:
     complained about. We trim to 200 chars to keep logs readable; the
     full body remains visible at DEBUG via the existing read-2048 path.
     """
-    detail = f" body: {body_snippet[:200]}" if body_snippet and 400 <= status < 500 else ""
+    detail = f" - {body_snippet[:200]}" if body_snippet and 400 <= status < 500 else ""
     if status in (401, 403):
-        return OpenAIAuthError(f"Authentication failed (HTTP {status}){detail}")
+        return OpenAIAuthError(
+            f"TTS authentication failed (HTTP {status}). Check your API key.{detail}"
+        )
     if status == 402:
         return OpenAIQuotaExceededError(
-            f"OpenAI account balance/quota exhausted (HTTP {status}){detail}"
+            f"TTS account balance/quota exhausted (HTTP {status}).{detail}"
         )
     if status == 429:
         # OpenAI returns 429 for BOTH true rate limits and out-of-credits.
         # The body's `insufficient_quota` marker disambiguates them.
         if "insufficient_quota" in body_snippet:
             return OpenAIQuotaExceededError(
-                "OpenAI account quota exhausted (HTTP 429 insufficient_quota)"
+                "TTS account quota exhausted (HTTP 429 insufficient_quota). "
+                "Top up your account."
             )
-        return OpenAIRateLimitError(f"Rate limit hit (HTTP {status}){detail}")
+        return OpenAIRateLimitError(
+            f"TTS rate limit hit (HTTP {status}). Slow down requests.{detail}"
+        )
     if status >= 500:
-        return OpenAIServerError(f"OpenAI server error (HTTP {status})")
-    return OpenAITTSError(f"OpenAI API error (HTTP {status}){detail}")
+        return OpenAIServerError(
+            f"TTS provider server error (HTTP {status}). Usually temporary; "
+            "the integration retries once before giving up."
+        )
+    return OpenAITTSError(
+        f"TTS provider rejected the request (HTTP {status}).{detail}"
+    )
 
 
 def _is_retryable(exc: BaseException) -> bool:
