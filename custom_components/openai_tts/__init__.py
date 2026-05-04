@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 
 import voluptuous as vol
@@ -33,7 +32,7 @@ from .const import (
     voices_for_model,
 )
 from .volume_restore import announce
-from .utils import normalize_entity_ids, ensure_wav_chimes
+from .utils import normalize_entity_ids
 from homeassistant.exceptions import HomeAssistantError
 
 _LOGGER = logging.getLogger(__name__)
@@ -377,12 +376,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                  entry.entry_id, entry.version, entry.minor_version)
     # Store entry for reference
     hass.data.setdefault(DOMAIN, {})
-
-    # Ensure WAV versions of chimes exist (only once per HA instance)
-    if "chimes_converted" not in hass.data[DOMAIN]:
-        chime_dir = os.path.join(os.path.dirname(__file__), "chime")
-        await hass.async_add_executor_job(ensure_wav_chimes, chime_dir)
-        hass.data[DOMAIN]["chimes_converted"] = True
 
     # Migration is now handled during async_migrate_entry, no need for pending migration
     

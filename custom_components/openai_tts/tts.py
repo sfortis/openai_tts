@@ -831,13 +831,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 
-        # Post-processing now stays in the requested format end to end:
-        # ``ensure_chime_in_format`` transcodes the chime to match, and
-        # ``build_ffmpeg_command`` picks the right encoder for the
-        # output. The bytes that come out of ``_maybe_post_process``
-        # therefore match the requested ``audio_format`` regardless of
-        # whether chime/normalize ran. HA still has its
-        # ``preferred_format`` ffmpeg layer as a safety net if the
+        # Post-processing stays in the requested format end to end. The
+        # ``filter_complex`` graph in ``build_ffmpeg_command`` re-samples
+        # both the chime and the TTS input to a common PCM layout before
+        # concat and picks the right encoder for the output. HA still has
+        # its ``preferred_format`` ffmpeg layer as a safety net if the
         # downstream player needs a different container.
         delivered_format = audio_format
 

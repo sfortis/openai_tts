@@ -114,86 +114,6 @@ def is_valid_audio(
     return True
 
 
-def ensure_wav_chimes(chime_dir: str) -> None:
-    """
-    Ensure WAV versions of all MP3 chimes exist.
-    Converts MP3 chimes to WAV if the WAV version doesn't exist.
-
-    Args:
-        chime_dir: Path to the chime directory
-    """
-    if not os.path.isdir(chime_dir):
-        _LOGGER.warning("Chime directory not found: %s", chime_dir)
-        return
-
-    for filename in os.listdir(chime_dir):
-        if filename.endswith(".mp3"):
-            mp3_path = os.path.join(chime_dir, filename)
-            wav_path = os.path.join(chime_dir, filename[:-4] + ".wav")
-
-            if not os.path.exists(wav_path):
-                _LOGGER.info("Converting chime to WAV: %s", filename)
-                try:
-                    cmd = [
-                        "ffmpeg", "-y",
-                        "-i", mp3_path,
-                        "-ac", "1",
-                        "-ar", "24000",
-                        wav_path
-                    ]
-                    subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-                    _LOGGER.debug("Created WAV chime: %s", wav_path)
-                except Exception as e:
-                    _LOGGER.error("Failed to convert chime %s to WAV: %s", filename, e)
-
-
-def ensure_chime_in_format(mp3_chime_path: str, target_format: str) -> str:
-    """Return a chime path matching ``target_format`` AND TTS sample rate.
-
-    The bundled chimes are at 44.1 kHz (some at 22.05 kHz). OpenAI TTS
-    output is at 24 kHz. When the chime-only fast path uses the concat
-    demuxer with ``-c copy``, the TTS half ends up replayed at the
-    chime's sample rate which produces a chipmunk effect (44100/24000
-    ≈ 1.84x). Always pre-transcode the chime to 24 kHz mono in the
-    requested codec so the bitstream parameters match the TTS.
-
-    The transcoded copy is cached next to the source mp3
-    (``threetone.mp3`` → ``threetone.24k.mp3`` / ``.opus`` / etc.).
-    Falls back to the original mp3 only when ffmpeg fails so the caller
-    still has *some* chime to mix in.
-    """
-    if not mp3_chime_path:
-        return mp3_chime_path
-
-    from .const import AUDIO_FORMAT_ENCODER
-
-    base, _ = os.path.splitext(mp3_chime_path)
-    target_path = f"{base}.24k.{target_format}"
-    if os.path.exists(target_path):
-        return target_path
-
-    encoder = AUDIO_FORMAT_ENCODER.get(target_format)
-    if encoder is None:
-        _LOGGER.warning(
-            "No encoder mapping for chime target format %s, using mp3 source",
-            target_format,
-        )
-        return mp3_chime_path
-
-    cmd = ["ffmpeg", "-y", "-i", mp3_chime_path, "-ac", "1", "-ar", "24000"]
-    cmd.extend(encoder["codec_args"])
-    cmd.extend(encoder["container_args"])
-    cmd.append(target_path)
-    try:
-        subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        _LOGGER.info("Transcoded chime to %s @ 24kHz: %s", target_format, target_path)
-        return target_path
-    except Exception as exc:
-        _LOGGER.warning(
-            "Failed to transcode chime %s to %s (%s); falling back to mp3 source",
-            mp3_chime_path, target_format, exc,
-        )
-        return mp3_chime_path
 
 
 def get_media_duration(file_path: str) -> float:
@@ -393,15 +313,12 @@ async def process_audio(
     audio_format = input_format or detect_audio_format(audio_content)
     _LOGGER.debug("TTS audio format: %s (hint=%s)", audio_format, input_format)
 
-    # When chime is enabled, transcode it on-demand into the same codec
-    # the TTS came in as. Cheap (chime files are tiny) and unlocks the
-    # ``-c copy`` fast path for chime-only requests, which skips the
-    # decode/encode roundtrip on the much larger TTS payload.
-    actual_chime_path = chime_path
-    if chime_enabled and chime_path:
-        actual_chime_path = await hass.async_add_executor_job(
-            ensure_chime_in_format, chime_path, audio_format,
-        )
+    # The chime path is passed straight through to ffmpeg. The
+    # ``filter_complex`` graph in ``build_ffmpeg_command`` runs an
+    # ``aresample`` + ``aformat`` step on every input before concat, so
+    # any sample rate / channel layout / codec combination on the chime
+    # is normalised against the TTS audio in a single re-encode pass.
+    actual_chime_path = chime_path if chime_enabled else None
 
     # Pick a temp-file suffix ffmpeg can use to auto-identify the input.
     # ``pcm`` has no header, so we strip the suffix and rely on the
