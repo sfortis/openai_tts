@@ -148,21 +148,29 @@ def ensure_wav_chimes(chime_dir: str) -> None:
 
 
 def ensure_chime_in_format(mp3_chime_path: str, target_format: str) -> str:
-    """Return a chime file path matching ``target_format``, transcoding on demand.
+    """Return a chime path matching ``target_format`` AND TTS sample rate.
 
-    Sibling files are cached next to the source MP3 (``threetone.mp3`` →
-    ``threetone.opus`` / ``.aac`` / ``.flac`` / ``.wav``). PCM uses ``.pcm``
-    raw bytes. Falls back to the original mp3 when ffmpeg fails so the
-    caller still has *some* chime to mix in.
+    The bundled chimes are at 44.1 kHz (some at 22.05 kHz). OpenAI TTS
+    output is at 24 kHz. When the chime-only fast path uses the concat
+    demuxer with ``-c copy``, the TTS half ends up replayed at the
+    chime's sample rate which produces a chipmunk effect (44100/24000
+    ≈ 1.84x). Always pre-transcode the chime to 24 kHz mono in the
+    requested codec so the bitstream parameters match the TTS.
+
+    The transcoded copy is cached next to the source mp3
+    (``threetone.mp3`` → ``threetone.24k.mp3`` / ``.opus`` / etc.).
+    Falls back to the original mp3 only when ffmpeg fails so the caller
+    still has *some* chime to mix in.
     """
-    if target_format == "mp3" or not mp3_chime_path:
+    if not mp3_chime_path:
         return mp3_chime_path
-    base, _ = os.path.splitext(mp3_chime_path)
-    target_path = f"{base}.{target_format}"
-    if os.path.exists(target_path):
-        return target_path
 
     from .const import AUDIO_FORMAT_ENCODER
+
+    base, _ = os.path.splitext(mp3_chime_path)
+    target_path = f"{base}.24k.{target_format}"
+    if os.path.exists(target_path):
+        return target_path
 
     encoder = AUDIO_FORMAT_ENCODER.get(target_format)
     if encoder is None:
@@ -178,7 +186,7 @@ def ensure_chime_in_format(mp3_chime_path: str, target_format: str) -> str:
     cmd.append(target_path)
     try:
         subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
-        _LOGGER.info("Transcoded chime to %s: %s", target_format, target_path)
+        _LOGGER.info("Transcoded chime to %s @ 24kHz: %s", target_format, target_path)
         return target_path
     except Exception as exc:
         _LOGGER.warning(
