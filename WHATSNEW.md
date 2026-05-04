@@ -6,6 +6,8 @@
 - **Mistral Voxtral support (issue #63)**. The engine now detects JSON-wrapped audio responses (Content-Type `application/json`) and base64-decodes the audio payload (`audio_data` / `audio` / `data` field) before handing the bytes back to Home Assistant. Combined with omitting the `speed` field when it equals the default 1.0, this lets `voxtral-mini-tts-latest` work end-to-end through the existing custom-endpoint flow.
 - **Upstream error bodies are surfaced**. HTTP 4xx errors from the TTS provider now include the response body (first 200 chars) in the exception message, so issues like "Invalid model", "Voice not found" or schema-rejection details show up directly in the logs instead of just `HTTP 4xx`.
 - **Custom voice text persists across reconfigure**. When the endpoint is not OpenAI, the voice field is a free-text input (Mistral slugs, custom cloned voice ids, etc.). Reconfigure was silently dropping the saved value back to the OpenAI default; it now keeps whatever the user typed.
+- **Chipmunk effect with chime enabled is fixed**. The bundled chimes are at 44.1 kHz while OpenAI TTS is at 24 kHz; the concat-copy fast path was leaving the TTS half playing at the chime's sample rate. The chime is now pre-resampled to 24 kHz mono in the requested codec the first time it is used.
+- **Friendlier error messages**. Provider rejections are no longer labelled "OpenAI API error" when you're using Mistral or another backend. Auth, quota, rate-limit and server errors now carry a one-line hint pointing at the likely fix.
 
 ## v3.8
 
