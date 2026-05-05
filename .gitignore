@@ -15,6 +15,7 @@ __pycache__/
 **/.nfs*
 
 .claude/
+internal_docs/
 .codex/
 .cursor/
 .aider*

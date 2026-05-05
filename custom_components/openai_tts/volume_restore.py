@@ -559,19 +559,28 @@ async def announce(
         # integration that exposes neither the URL nor a synchronous
         # speak), we fall back to the duration-based timer.
         if watcher.any_seen_tts():
+            # Cast-style targets surface the TTS proxy URL on the
+            # speaker; wait for them to roll off it before restoring.
             drain_timeout_s = max(30.0, (duration_ms + 5000) / 1000.0)
             await watcher.wait_for_drain(timeout_s=drain_timeout_s)
             await asyncio.sleep(0.3)  # settle so the unmute doesn't clip
             elapsed_ms = duration_ms
         elif _all_targets_sync_speak(hass, available_players):
-            # Sonos / Music Assistant: speak blocked for the full
-            # announcement, no extra hold needed.
+            # Music Assistant: speak's blocking already covered the
+            # entire announcement, audio is already done. Collapse the
+            # hold to the unmute buffer only, otherwise we'd add a
+            # second copy of the audio_duration on top of what speak
+            # already waited for (~28s for a 12s clip).
             elapsed_ms = duration_ms
         else:
-            # Nothing to lean on; use timer math as a backstop.
-            elapsed_ms = int(
-                (asyncio.get_running_loop().time() - speak_started_at) * 1000
-            )
+            # Fire-and-forget targets (Sonos, anything not in the sync
+            # set): tts.speak dispatched the audio and returned before
+            # playback. Time spent inside speak was local prep
+            # (ffmpeg + network round-trip), NOT playback. Hold the
+            # full audio duration so the volume restore doesn't
+            # interrupt the announcement (Sonos: chops it to just the
+            # leading chime).
+            elapsed_ms = 0
     finally:
         if watcher is not None:
             watcher.stop()
@@ -765,12 +774,19 @@ _TTS_PROXY_MARKER = "/api/tts_proxy/"
 # Platforms whose ``tts.speak`` blocking call only returns AFTER the
 # announcement has finished playing (their integration drives a
 # native announcement primitive that HA waits on synchronously).
-# Anything not in this set is treated as fire-and-forget: speak
-# returns once the URL is dispatched and the audio plays out
-# in the background, so the post-speak hold has to cover the full
-# audio duration.
+#
+# Music Assistant: ``play_announcement`` keeps the service open until
+# the device finishes the clip. For these targets the post-speak hold
+# only needs the unmute buffer; otherwise we'd over-hold by a full
+# audio_duration since the audio already played during speak.
+#
+# Sonos is intentionally NOT in this set. Sonos's HA integration uses
+# ``websocket.play_clip`` which dispatches and returns immediately
+# (~300ms even for a 24s announcement). The audio plays AFTER speak
+# returns. Treating Sonos as sync would collapse the hold and restore
+# volume mid-announcement, which interrupts Sonos's native ducking
+# and chops the audio to just the leading chime.
 _SYNC_SPEAK_PLATFORMS: frozenset[str] = frozenset({
-    "sonos",
     "music_assistant",
 })
 
