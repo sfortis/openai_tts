@@ -478,66 +478,104 @@ async def announce(
     # captures both: the elapsed time we subtract from the post-speak
     # hold ends up being ~0 for fire-and-forget targets and ~audio
     # duration for blocking targets, so we don't double-hold.
+    # Subscribe to the speakers' state bus BEFORE the speak call. On
+    # synchronous platforms (Sonos / MA) the speak service only returns
+    # after the announcement has finished playing; subscribing after
+    # would miss every relevant transition. Whole orchestration runs
+    # under a single ``try/finally`` so a CancelledError (or any other
+    # BaseException) in the middle still tears down the listener.
+    watcher = _TtsPlaybackWatcher(hass, available_players) \
+        if restorer is not None else None
+    if watcher is not None:
+        watcher.start()
+
     speak_started_at = asyncio.get_running_loop().time()
     try:
-        await _call_tts_speak(hass, tts_entity, message, language, options,
-                              available_players)
-    except Exception as err:
-        if restorer is not None:
-            await restorer.restore_immediate(restore_volumes=restore_enabled)
-        raise HomeAssistantError(
-            f"TTS speak failed: {err}"
-        ) from err
+        try:
+            await _call_tts_speak(hass, tts_entity, message, language,
+                                  options, available_players)
+        except Exception as err:
+            if restorer is not None:
+                await restorer.restore_immediate(restore_volumes=restore_enabled)
+            raise HomeAssistantError(
+                f"TTS speak failed: {err}"
+            ) from err
 
-    if restorer is None:
-        # No volume restore and no pause - speak already returned, we're
-        # done. We don't probe the failure sentinel here: ``_call_tts_speak``
-        # already propagated any engine failure as an exception, so reaching
-        # this point means HA either streamed fresh audio or served from its
-        # own TTS cache. A stale sentinel from a prior $0-balance attempt
-        # would cause a false-positive error after audio actually played
-        # (issue #64), so we trust speak's outcome.
-        return
+        if restorer is None:
+            # No volume restore and no pause - speak already returned, we're
+            # done. We don't probe the failure sentinel here:
+            # ``_call_tts_speak`` already propagated any engine failure as
+            # an exception, so reaching this point means HA either streamed
+            # fresh audio or served from its own TTS cache. A stale sentinel
+            # from a prior $0-balance attempt would cause a false-positive
+            # error after audio actually played (issue #64), so we trust
+            # speak's outcome.
+            return
 
-    cached = await _wait_for_cached_duration(
-        hass, tts_entity, message, options, timeout_s=60.0
-    )
-    if cached == DURATION_FAILED_SENTINEL:
-        # Same rationale as above: tts.speak returned successfully, so
-        # something played (likely from HA's TTS cache). The sentinel
-        # is from a previous attempt and no longer reflects reality.
-        # Drop it so the next call doesn't false-trip again, and fall
-        # through to media_player / fallback duration for restore timing.
-        _LOGGER.debug(
-            "Stale failure sentinel for %s after successful speak; clearing",
-            tts_entity,
+        cached = await _wait_for_cached_duration(
+            hass, tts_entity, message, options, timeout_s=60.0
         )
-        clear_stale_failure(
-            hass, message,
-            entity_id=_resolve_unique_id(hass, tts_entity),
-            **_resolved_render_args(hass, tts_entity, options),
-        )
-        cached = None
+        if cached == DURATION_FAILED_SENTINEL:
+            # Same rationale as above: tts.speak returned successfully, so
+            # something played (likely from HA's TTS cache). The sentinel
+            # is from a previous attempt and no longer reflects reality.
+            # Drop it so the next call doesn't false-trip again, and fall
+            # through to media_player / fallback duration for restore timing.
+            _LOGGER.debug(
+                "Stale failure sentinel for %s after successful speak; clearing",
+                tts_entity,
+            )
+            clear_stale_failure(
+                hass, message,
+                entity_id=_resolve_unique_id(hass, tts_entity),
+                **_resolved_render_args(hass, tts_entity, options),
+            )
+            cached = None
 
-    duration_ms = cached
-    if duration_ms is None or duration_ms <= 0:
-        duration_ms = _media_player_duration_ms(hass, available_players)
-    if duration_ms is None or duration_ms <= 0:
-        duration_ms = _DEFAULT_FALLBACK_DURATION_MS
-        _LOGGER.warning(
-            "No duration found in cache or media_player attributes; "
-            "using fallback %d ms",
-            duration_ms,
-        )
+        duration_ms = cached
+        if duration_ms is None or duration_ms <= 0:
+            duration_ms = _media_player_duration_ms(hass, available_players)
+        if duration_ms is None or duration_ms <= 0:
+            duration_ms = _DEFAULT_FALLBACK_DURATION_MS
+            _LOGGER.warning(
+                "No duration found in cache or media_player attributes; "
+                "using fallback %d ms",
+                duration_ms,
+            )
 
-    # Subtract everything that happened since speak started: the
-    # full ``tts.speak`` call (which blocks for the audio duration on
-    # MA / Sonos and returns near-instantly on cast multi-target) plus
-    # the cache poll. Without this, blocking platforms over-hold by ~
-    # the full audio duration.
-    elapsed_ms = int(
-        (asyncio.get_running_loop().time() - speak_started_at) * 1000
-    )
+        # End-of-playback handling combines two deterministic signals:
+        #
+        # * Targets that surfaced the TTS proxy URL in their state during
+        #   speak (typically Cast) get a state-based drain: when their
+        #   ``state`` rolls off ``playing`` / ``buffering`` while their
+        #   ``media_content_id`` was the TTS URL, the audio has ended.
+        # * Targets that never surfaced it (Sonos with music underneath
+        #   ducks the announcement at the device level, so HA never sees
+        #   the URL) are handled by ``tts.speak``'s synchronous blocking
+        #   contract -- by the time speak returned, those announcements
+        #   were already done.
+        #
+        # If neither signal applies (e.g. cache miss in flight, or an
+        # integration that exposes neither the URL nor a synchronous
+        # speak), we fall back to the duration-based timer.
+        if watcher.any_seen_tts():
+            drain_timeout_s = max(30.0, (duration_ms + 5000) / 1000.0)
+            await watcher.wait_for_drain(timeout_s=drain_timeout_s)
+            await asyncio.sleep(0.3)  # settle so the unmute doesn't clip
+            elapsed_ms = duration_ms
+        elif _all_targets_sync_speak(hass, available_players):
+            # Sonos / Music Assistant: speak blocked for the full
+            # announcement, no extra hold needed.
+            elapsed_ms = duration_ms
+        else:
+            # Nothing to lean on; use timer math as a backstop.
+            elapsed_ms = int(
+                (asyncio.get_running_loop().time() - speak_started_at) * 1000
+            )
+    finally:
+        if watcher is not None:
+            watcher.stop()
+
     await restorer.restore_after_playback(
         duration_ms,
         elapsed_ms=elapsed_ms,
@@ -723,6 +761,184 @@ async def _wait_for_cached_duration(
 
 
 _TTS_PROXY_MARKER = "/api/tts_proxy/"
+
+# Platforms whose ``tts.speak`` blocking call only returns AFTER the
+# announcement has finished playing (their integration drives a
+# native announcement primitive that HA waits on synchronously).
+# Anything not in this set is treated as fire-and-forget: speak
+# returns once the URL is dispatched and the audio plays out
+# in the background, so the post-speak hold has to cover the full
+# audio duration.
+_SYNC_SPEAK_PLATFORMS: frozenset[str] = frozenset({
+    "sonos",
+    "music_assistant",
+})
+
+
+def _all_targets_sync_speak(
+    hass: HomeAssistant, entity_ids: List[str]
+) -> bool:
+    """True iff every target's integration drives a synchronous
+    ``tts.speak`` (Sonos / Music Assistant). One non-sync target
+    forces the whole announcement onto the fire-and-forget hold so
+    we never under-hold a Cast peer in a mixed group.
+
+    An empty target list returns False on purpose: there's nothing to
+    rely on for sync semantics, so the caller should fall through to
+    the timer-based hold rather than silently treating "no targets"
+    as "everything is sync".
+    """
+    if not entity_ids:
+        return False
+    er = entity_registry.async_get(hass)
+    for eid in entity_ids:
+        entry = er.async_get(eid)
+        if entry is None or entry.platform not in _SYNC_SPEAK_PLATFORMS:
+            return False
+    return True
+
+
+class _TtsPlaybackWatcher:
+    """Detect end-of-TTS-playback via HA state-change events.
+
+    The TTS announcement window is exactly the period during which a
+    speaker's ``media_content_id`` contains ``/api/tts_proxy/``. We
+    subscribe to ``state_changed`` for the targets, set ``pickup`` once
+    every target has reached the TTS URL at least once, and ``drain``
+    once every previously-on-TTS target has rolled back off it.
+
+    Crucially, the watcher must be started BEFORE ``tts.speak``. On
+    synchronous platforms (Sonos / Music Assistant) the speak service
+    only returns AFTER the announcement has finished playing -- if we
+    subscribe afterwards, both the pickup and drain transitions have
+    already happened on the bus and we'd see nothing.
+    """
+
+    def __init__(self, hass: HomeAssistant, media_players: List[str]) -> None:
+        self.hass = hass
+        self.media_players = list(media_players)
+        self.drain = asyncio.Event()
+        self._seen_tts: Dict[str, bool] = {e: False for e in media_players}
+        self._on_tts: Dict[str, bool] = {e: False for e in media_players}
+        self._unsub = None
+
+    def start(self) -> None:
+        self._unsub = async_track_state_change_event(
+            self.hass, self.media_players, self._listener
+        )
+        for eid in self.media_players:
+            state = self.hass.states.get(eid)
+            if self._is_on_tts(state):
+                self._on_tts[eid] = True
+                self._seen_tts[eid] = True
+        self._check_drain()
+
+    def stop(self) -> None:
+        if self._unsub is not None:
+            self._unsub()
+            self._unsub = None
+
+    @callback
+    def _listener(self, event: Event) -> None:
+        eid = event.data.get("entity_id")
+        if eid not in self._seen_tts:
+            return
+        new_state = event.data.get("new_state")
+        currently = self._is_on_tts(new_state)
+        was = self._on_tts[eid]
+        self._on_tts[eid] = currently
+        if currently and not was:
+            self._seen_tts[eid] = True
+            self._check_drain()  # cancel any premature drain
+        elif was and not currently:
+            self._check_drain()
+
+    @staticmethod
+    def _is_on_tts(state) -> bool:
+        """A speaker is "on TTS" iff it's actively playing the TTS
+        proxy URL. Both conditions must hold: the URL alone isn't
+        enough (Cast keeps the URL in ``media_content_id`` after the
+        audio ends, so we'd never see a drain otherwise), and an
+        active state alone isn't enough (a Sonos with Deezer
+        underneath stays ``playing`` throughout the announcement
+        without ever loading the TTS URL).
+        """
+        if state is None:
+            return False
+        if state.state not in ("playing", "buffering"):
+            return False
+        cid = str(state.attributes.get("media_content_id") or "")
+        return _TTS_PROXY_MARKER in cid
+
+    def any_seen_tts(self) -> bool:
+        """At least one target was observed actively playing the TTS URL."""
+        return any(self._seen_tts.values())
+
+    def all_drained(self) -> bool:
+        """Every target that ever picked up TTS has rolled off it.
+
+        Targets that never picked up are excluded from the gate --
+        their integration didn't surface the TTS URL via state
+        attributes (e.g. Sonos ducks the announcement under the
+        existing queue), so we have no event to wait on. The caller
+        treats those as handled by ``tts.speak``'s synchronous
+        blocking semantics.
+        """
+        return self.any_seen_tts() and not any(
+            self._on_tts[e] for e in self.media_players if self._seen_tts[e]
+        )
+
+    def targets_still_on_tts(self) -> List[str]:
+        """Diagnostic: which targets are still actively on the TTS URL."""
+        return [
+            e for e in self.media_players
+            if self._seen_tts[e] and self._on_tts[e]
+        ]
+
+    def _check_drain(self) -> None:
+        if self.all_drained():
+            self.drain.set()
+        else:
+            # State change brought a target back onto TTS; a future
+            # transition will need to re-fire drain.
+            self.drain.clear()
+
+    async def wait_for_drain(self, *, timeout_s: float) -> bool:
+        """Block until every previously-on-TTS target has rolled off.
+
+        Robust against the asyncio.Event "set then clear before the
+        waiter is scheduled" race: if the event fires but a new pickup
+        clears it before our coroutine resumes, the waiter would have
+        woken up spuriously and ``all_drained()`` would still be False.
+        We re-check after every wakeup and re-arm the wait, capped by
+        the same deadline.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + timeout_s
+        while not self.all_drained():
+            remaining = deadline - loop.time()
+            if remaining <= 0:
+                _LOGGER.warning(
+                    "TTS playback drain timed out after %.1fs on %s; "
+                    "restoring anyway (still on TTS: %s)",
+                    timeout_s, self.media_players,
+                    self.targets_still_on_tts(),
+                )
+                return False
+            # Clear so the next wait blocks on a *future* transition,
+            # not on a stale set from a previous pickup/drain cycle.
+            self.drain.clear()
+            try:
+                await asyncio.wait_for(self.drain.wait(), timeout=remaining)
+            except asyncio.TimeoutError:
+                _LOGGER.warning(
+                    "TTS playback drain timed out after %.1fs on %s; "
+                    "restoring anyway (still on TTS: %s)",
+                    timeout_s, self.media_players,
+                    self.targets_still_on_tts(),
+                )
+                return False
+        return True
 
 
 def _media_player_duration_ms(
