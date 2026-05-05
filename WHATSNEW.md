@@ -1,11 +1,3 @@
-## v3.8.1b2
-
-### Fixes
-
-- **Sonos announcements no longer cut to just the chime**. When background music was playing, the volume restore was firing mid-announcement and chopping the rest of the clip; the speaker now finishes the full TTS before volume is restored.
-- **No more lingering high volume after Music Assistant TTS**. The post-audio hold matches the time MA actually takes to play the announcement instead of adding a second copy of it.
-- **HomePod / Apple TV announcements with chime play reliably**. The merged audio output drops a leading metadata frame that the RAOP decoder rejected, so previously-broken cached announcements now decode and play.
-
 ## v3.8.1b1
 
 ### Fixes
