@@ -179,8 +179,17 @@ DEFAULT_AUDIO_FORMAT = "mp3"
 # filter graph; ``codec_args`` carries the encoder-specific switches.
 # PCM is special-cased: it has no container, so we force the s16le muxer
 # at 24kHz mono to match OpenAI's documented raw output layout.
+#
+# The mp3 entry pins ``-write_xing 0`` on the muxer side: ffmpeg's
+# default leading Xing/Info/LAME metadata frame is what miniaudio
+# (used by pyatv -> HomePod / Apple TV via RAOP) refuses with
+# "failed to init decoder" (-1). Desktop players tolerate it, so the
+# bug only surfaces on Apple's RAOP path. OpenAI's raw mp3 output
+# doesn't carry the same header layout, which is why TTS without the
+# chime+ffmpeg merge played fine.
 AUDIO_FORMAT_ENCODER: dict[str, dict[str, list[str]]] = {
-    "mp3":  {"codec_args": ["-c:a", "libmp3lame", "-b:a", "128k"], "container_args": []},
+    "mp3":  {"codec_args": ["-c:a", "libmp3lame", "-b:a", "128k"],
+             "container_args": ["-write_xing", "0"]},
     "opus": {"codec_args": ["-c:a", "libopus", "-b:a", "96k"],     "container_args": []},
     "aac":  {"codec_args": ["-c:a", "aac", "-b:a", "128k"],        "container_args": []},
     "flac": {"codec_args": ["-c:a", "flac"],                       "container_args": []},
