@@ -242,27 +242,20 @@ def build_ffmpeg_command(
             cmd.extend(["-i", input_path])
     
     # Filter graph for chime+TTS mixing or single-input normalization.
-    # The chime files bundled with the integration are already 24kHz
-    # mono mp3 (pre-baked in the chime/ folder), and OpenAI's TTS API
-    # delivers 24kHz mono mp3 too, so we don't need explicit per-input
-    # aresample/aformat preprocessing -- ffmpeg's concat filter handles
-    # any final normalisation.
-    #
-    # The earlier per-input ``aresample=24000:async=1,aformat=...`` step
-    # was added for a chipmunk bug caused by 44.1kHz chimes that no
-    # longer ship with the integration. Keeping that preprocessing on
-    # produced an mp3 that miniaudio (HomePod / Apple TV via pyatv RAOP)
-    # refused to decode -- exactly the regression that broke working
-    # automations after v3.6.
+    # Both streams are forced to a common PCM layout before concat so
+    # the operation is codec-agnostic.
     if len(input_paths) > 1 and not is_concat:
-        if normalize_audio:
-            graph = (
-                "[1:a]loudnorm=I=-16:TP=-1:LRA=5[tts];"
-                "[0:a][tts]concat=n=2:v=0:a=1[out]"
-            )
-        else:
-            graph = "[0:a][1:a]concat=n=2:v=0:a=1[out]"
-        cmd.extend(["-filter_complex", graph, "-map", "[out]"])
+        norm_step = ",loudnorm=I=-16:TP=-1:LRA=5" if normalize_audio else ""
+        common = "aresample=24000:async=1,aformat=sample_fmts=fltp:channel_layouts=mono"
+        cmd.extend([
+            "-filter_complex",
+            (
+                f"[0:a]{common}[ch];"
+                f"[1:a]{common}{norm_step}[tts];"
+                "[ch][tts]concat=n=2:v=0:a=1[out]"
+            ),
+            "-map", "[out]",
+        ])
     elif normalize_audio:
         cmd.extend(["-af", "loudnorm=I=-16:TP=-1:LRA=5"])
 
