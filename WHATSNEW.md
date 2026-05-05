@@ -1,3 +1,9 @@
+## v3.8.1b3
+
+### Fixes
+
+- **Simpler chime + TTS audio pipeline**. Per-stream resampling and channel-layout normalisation that was added when chimes shipped at 44.1 kHz is now gone — the bundled chimes are already 24 kHz mono, so the extra step only added complexity. The output bitstream is closer to what shipped in v3.6, which should restore compatibility for HomePod / Apple TV setups that started failing on v3.8.
+
 ## v3.8.1b2
 
 ### Fixes
