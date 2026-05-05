@@ -9,7 +9,7 @@ import voluptuous as vol
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 from homeassistant.config_entries import ConfigEntry, ConfigSubentry
 from homeassistant.const import Platform
-from homeassistant.core import HomeAssistant, ServiceCall
+from homeassistant.core import HomeAssistant, ServiceCall, SupportsResponse
 from homeassistant.helpers import config_validation as cv, device_registry as dr, entity_registry as er
 
 from .api_health import OpenAITTSHealthTracker
@@ -495,10 +495,13 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                  is_subentry, is_legacy_entry, hass.services.has_service(DOMAIN, SERVICE_NAME), should_register_service)
     
     if should_register_service:
-        async def _handle_say(call: ServiceCall) -> None:
-            """Handle the say service call."""
+        async def _do_say(call: ServiceCall) -> None:
+            """Inner body of the say service. Raises on any failure;
+            ``_handle_say`` decides whether to surface the exception to
+            the caller or convert it to a response payload.
+            """
             data = call.data
-            
+
             # Debug logging
             _LOGGER.debug("Service call data: %s", data)
             _LOGGER.debug("Service call target: %s", getattr(call, 'target', None))
@@ -598,7 +601,10 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 tts_entity, media_players, message, pause_playback
             )
             
-            # Call our helper with pause_playback parameter
+            # Call the orchestrator. ``announce`` raises HomeAssistantError
+            # on speak / engine failures; ``_do_say`` lets it propagate
+            # so the outer handler can decide whether to surface as a
+            # response payload or re-raise.
             await announce(
                 hass,
                 tts_entity=tts_entity,
@@ -607,16 +613,40 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 language=language,
                 options=options,
                 tts_volume=tts_volume,
-                pause_playback=pause_playback,  # Pass the parameter
+                pause_playback=pause_playback,
             )
 
-        # Register service without advanced targeting options 
-        # (using simpler registration compatible with older HA versions)
+        async def _handle_say(call: ServiceCall) -> dict[str, Any] | None:
+            """Handle the say service call.
+
+            Returns a small status dict when invoked with
+            ``response_variable`` so automations / scripts can branch on
+            success vs failure (e.g. notify on a failed announcement).
+            Without ``return_response`` the service is fire-and-forget
+            and returns ``None`` for backwards compatibility with
+            existing automations.
+            """
+            try:
+                await _do_say(call)
+            except Exception as err:
+                if call.return_response:
+                    return {"success": False, "error": str(err)}
+                raise
+
+            if call.return_response:
+                return {"success": True}
+            return None
+
+        # Register service. ``SupportsResponse.OPTIONAL`` keeps existing
+        # fire-and-forget callers working AND lets newer automations use
+        # ``response_variable`` to capture a {success, error} dict for
+        # error-handling branches (notify on TTS failure etc.).
         hass.services.async_register(
             DOMAIN,
             SERVICE_NAME,
             _handle_say,
-            schema=SAY_SCHEMA
+            schema=SAY_SCHEMA,
+            supports_response=SupportsResponse.OPTIONAL,
         )
         
         _LOGGER.info("OpenAI TTS service 'say' registered successfully")

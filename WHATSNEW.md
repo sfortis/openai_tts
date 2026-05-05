@@ -1,3 +1,9 @@
+## v3.8.1b5
+
+### New
+
+- **`openai_tts.say` now supports `response_variable`**. Automations and scripts can capture a `{success, error}` dict and branch on a failed announcement (e.g. send a phone notification when TTS playback errors out). Existing fire-and-forget callers are unchanged.
+
 ## v3.8.1b4
 
 ### Fixes
