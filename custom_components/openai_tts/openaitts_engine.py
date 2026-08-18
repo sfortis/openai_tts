@@ -124,8 +124,8 @@ class _RequestBuilder:
         if instructions is not None:
             payload["instructions"] = instructions
 
-        if (voice or self._default_voice) == "disabled":
-            del payload['voice']
+        #if payload['voice'] == "disabled":
+        #    del payload['voice']
 
         if extra_payload:
             try:
