@@ -124,9 +124,6 @@ class _RequestBuilder:
         if instructions is not None:
             payload["instructions"] = instructions
 
-        #if payload['voice'] == "disabled":
-        #    del payload['voice']
-
         if extra_payload:
             try:
                 extra = json.loads(extra_payload)
@@ -225,6 +222,9 @@ class OpenAITTSEngine:
             "TTS API request: model=%s, voice=%s, speed=%s",
             payload["model"], payload["voice"], payload["speed"],
         )
+
+        if payload['voice'] == "disabled":
+            del payload['voice']
 
         max_retries = 1
         attempt = 0
