@@ -420,6 +420,10 @@ class OpenAITTSEngine:
         Auth/quota errors are NOT retried - they will fail again
         identically and waking the speaker twice helps no one.
         """
+
+        if payload['voice'] == "disabled":
+            del payload['voice']
+
         attempt = 0
         while True:
             try:
