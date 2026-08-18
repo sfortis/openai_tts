@@ -18,7 +18,7 @@ MODELS = ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"]
 # recommended highest-quality voices.
 VOICES = [
     "alloy", "ash", "ballad", "cedar", "coral", "echo", "fable",
-    "marin", "nova", "onyx", "sage", "shimmer", "verse",
+    "marin", "nova", "onyx", "sage", "shimmer", "verse", "disabled"
 ]
 
 # Per-model voice support. Used by config_flow to render only the

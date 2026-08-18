@@ -62,6 +62,8 @@ say:
               value: shimmer
             - label: Verse (Versatile) · gpt-4o-mini-tts only
               value: verse
+            - label: Disabled (don't send voice value)
+              value: disabled
     speed:
       name: Speed
       description: Speed of the speech (0.25-4.0). 1.0 is normal speed.
