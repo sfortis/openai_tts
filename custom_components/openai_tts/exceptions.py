@@ -57,3 +57,18 @@ class OpenAINetworkError(OpenAITTSError):
     ``network_error`` status separate from generic / unknown failures.
     Typical causes: custom backend offline, DNS misconfig, network down.
     """
+
+
+class OpenAIVoiceDeletedError(OpenAITTSError):
+    """The configured voice no longer exists on the provider.
+
+    Raised when the API rejects a request because the ``voice`` field
+    references an ID that has been deleted (Mistral) or otherwise made
+    unavailable. The TTS layer catches this to surface a Home Assistant
+    Repairs issue so the user gets a one-click path to reconfigure the
+    profile with a current voice.
+    """
+
+    def __init__(self, message: str, voice: str | None = None) -> None:
+        super().__init__(message)
+        self.voice = voice
