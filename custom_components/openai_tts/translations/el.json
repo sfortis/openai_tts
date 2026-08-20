@@ -2,12 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Προσθήκη υπηρεσίας OpenAI TTS",
-        "description": "Ρυθμίστε το OpenAI TTS integration για να δημιουργήσετε TTS agents. Το API key απαιτείται για OpenAI, προαιρετικό για custom endpoints.",
+        "title": "Προσθήκη υπηρεσίας TTS (Βήμα 1 από 2)",
+        "description": "Επιλέξτε τον TTS provider.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "credentials": {
+        "title": "Προσθήκη υπηρεσίας TTS (Βήμα 2 από 2)",
+        "description": "Διαπιστευτήρια API για το {provider}.",
         "data": {
           "name": "Όνομα λογαριασμού (προαιρετικό, π.χ. Προσωπικό / Εργασία)",
-          "api_key": "API key (απαιτείται για OpenAI, προαιρετικό για custom endpoints)",
-          "url": "API endpoint (προαιρετικό)"
+          "api_key": "API key",
+          "url": "API endpoint"
         }
       },
       "reconfigure": {
@@ -36,7 +43,8 @@
       "wrong_api_key": "Μη έγκυρο API key. Παρακαλώ εισάγετε ένα έγκυρο API key.",
       "invalid_api_key": "Μη έγκυρο API key. Παρακαλώ ελέγξτε το API key σας και δοκιμάστε ξανά.",
       "cannot_connect": "Δεν είναι δυνατή η σύνδεση στο OpenAI API. Παρακαλώ ελέγξτε το δίκτυό σας και το API endpoint.",
-      "duplicate_api_key": "Υπάρχει ήδη καταχώρηση με αυτό το API key. Κάθε integration πρέπει να έχει μοναδικό API key."
+      "duplicate_api_key": "Υπάρχει ήδη καταχώρηση με αυτό το API key. Κάθε integration πρέπει να έχει μοναδικό API key.",
+      "url_required": "Απαιτείται API endpoint URL για αυτόν τον πάροχο. Δώστε το πλήρες URL του TTS server σας."
     }
   },
   "config_subentries": {
@@ -64,7 +72,7 @@
             "chime": "Ενεργοποίηση ηχητικού σήματος",
             "chime_sound": "Ήχος σήματος",
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
-            "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
+            "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
             "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)"
           }
@@ -85,7 +93,7 @@
             "chime": "Ενεργοποίηση ηχητικού σήματος",
             "chime_sound": "Ήχος σήματος",
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
-            "instructions": "Προσαρμοσμένες οδηγίες (μόνο gpt-4o-mini-tts)",
+            "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
             "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)"
           }
@@ -120,7 +128,8 @@
           "instructions": "Οδηγίες (αφήστε κενό για απενεργοποίηση)",
           "normalize_audio": "Ενεργοποίηση ενίσχυσης έντασης για τον παραγόμενο ήχο (απαιτεί περισσότερη επεξεργαστική ισχύ)",
           "volume_restore": "Επαναφορά έντασης ηχείων μετά την αναπαραγωγή TTS",
-          "pause_playback": "Παύση πολυμέσων κατά τη διάρκεια TTS (μόνο Sonos)"
+          "announce_mode": "Λειτουργία ανακοίνωσης (τα ηχεία χαμηλώνουν ή κάνουν παύση αντί να αντικαταστήσουν την αναπαραγωγή)",
+          "pause_playback": "Πάντα παύση των τρεχόντων πολυμέσων πριν την ομιλία"
         }
       }
     }
@@ -139,6 +148,12 @@
           "unknown_error": "Άγνωστο σφάλμα"
         }
       }
+    }
+  },
+  "issues": {
+    "voice_deleted": {
+      "title": "Η φωνή TTS διαγράφηκε από τον πάροχο",
+      "description": "Η φωνή `{voice}` που χρησιμοποιεί ο TTS agent `{profile}` δεν υπάρχει πλέον στον πάροχο. Άνοιξε τον διάλογο Reconfigure του agent και επίλεξε νέα φωνή."
     }
   }
 }

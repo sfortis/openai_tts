@@ -2,12 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Add OpenAI TTS Service",
-        "description": "Set up OpenAI TTS integration to create TTS agents. API key is required for OpenAI, optional for custom endpoints.",
+        "title": "Add TTS Service (Step 1 of 2)",
+        "description": "Pick the TTS provider.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "credentials": {
+        "title": "Add TTS Service (Step 2 of 2)",
+        "description": "API credentials for {provider}.",
         "data": {
           "name": "Account name (optional, e.g. Personal / Work)",
-          "api_key": "API Key (required for OpenAI, optional for custom endpoints)",
-          "url": "API Endpoint (optional)"
+          "api_key": "API Key",
+          "url": "API Endpoint"
         }
       },
       "reconfigure": {
@@ -36,7 +43,8 @@
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
       "invalid_api_key": "Invalid API key. Please check your API key and try again.",
       "cannot_connect": "Cannot connect to OpenAI API. Please check your network and API endpoint.",
-      "duplicate_api_key": "An entry with this API key already exists. Each integration entry must have a unique API key."
+      "duplicate_api_key": "An entry with this API key already exists. Each integration entry must have a unique API key.",
+      "url_required": "API endpoint URL is required for this provider. Enter the full URL of your TTS server."
     }
   },
   "config_subentries": {
@@ -64,7 +72,7 @@
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
-            "instructions": "Custom instructions (gpt-4o-mini-tts only)",
+            "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)"
           }
@@ -85,7 +93,7 @@
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
-            "instructions": "Custom instructions (gpt-4o-mini-tts only)",
+            "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)"
           }
@@ -120,7 +128,8 @@
           "instructions": "Instructions (leave empty to disable)",
           "normalize_audio": "Enable loudness for generated audio (uses more CPU)",
           "volume_restore": "Restore speaker volumes after TTS playback",
-          "pause_playback": "Pause media during TTS (Sonos only)"
+          "announce_mode": "Announcement mode (speakers duck or pause instead of replacing what is playing)",
+          "pause_playback": "Always pause current media before speaking"
         }
       }
     }
@@ -139,6 +148,12 @@
           "unknown_error": "Unknown error"
         }
       }
+    }
+  },
+  "issues": {
+    "voice_deleted": {
+      "title": "TTS voice was deleted upstream",
+      "description": "The voice `{voice}` used by TTS agent `{profile}` no longer exists on the provider. Open the agent's Reconfigure dialog and pick a current voice."
     }
   }
 }

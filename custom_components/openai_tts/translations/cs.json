@@ -2,12 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "Přidat OpenAI TTS službu",
-        "description": "Nastavte OpenAI TTS integration pro vytvoření TTS agents. API key je vyžadován pro OpenAI, volitelný pro custom endpoints.",
+        "title": "Přidat TTS službu (Krok 1 z 2)",
+        "description": "Vyberte TTS provider.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "credentials": {
+        "title": "Přidat TTS službu (Krok 2 z 2)",
+        "description": "Přihlašovací údaje API pro {provider}.",
         "data": {
           "name": "Název účtu (volitelné, např. Osobní / Pracovní)",
-          "api_key": "API key (vyžadován pro OpenAI, volitelný pro custom endpoints)",
-          "url": "API endpoint (volitelné)"
+          "api_key": "API key",
+          "url": "API endpoint"
         }
       },
       "reconfigure": {
@@ -36,7 +43,8 @@
       "wrong_api_key": "Neplatný API key. Zadejte prosím platný API key.",
       "invalid_api_key": "Neplatný API key. Zkontrolujte prosím svůj API key a zkuste to znovu.",
       "cannot_connect": "Nelze se připojit k OpenAI API. Zkontrolujte prosím síť a API endpoint.",
-      "duplicate_api_key": "Záznam s tímto API key již existuje. Každý integration musí mít jedinečný API key."
+      "duplicate_api_key": "Záznam s tímto API key již existuje. Každý integration musí mít jedinečný API key.",
+      "url_required": "Pro tohoto poskytovatele je vyžadováno API endpoint URL. Zadejte úplnou adresu vašeho TTS serveru."
     }
   },
   "config_subentries": {
@@ -64,7 +72,7 @@
             "chime": "Povolit zvukový signál",
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
-            "instructions": "Vlastní pokyny (pouze gpt-4o-mini-tts)",
+            "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Audio format (mp3 je bezpečný default, změňte pouze pokud váš backend potřebuje jiný)"
           }
@@ -85,7 +93,7 @@
             "chime": "Povolit zvukový signál",
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
-            "instructions": "Vlastní pokyny (pouze gpt-4o-mini-tts)",
+            "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Audio format (mp3 je bezpečný default, změňte pouze pokud váš backend potřebuje jiný)"
           }
@@ -120,7 +128,8 @@
           "instructions": "Pokyny (ponechte prázdné pro deaktivaci)",
           "normalize_audio": "Povolit zvýšení hlasitosti generovaného audia (vyžaduje více CPU)",
           "volume_restore": "Obnovit hlasitost reproduktorů po přehrávání TTS",
-          "pause_playback": "Pozastavit média během TTS (pouze Sonos)"
+          "announce_mode": "Režim oznámení (reproduktory zeslabí nebo pozastaví přehrávání místo jeho nahrazení)",
+          "pause_playback": "Vždy pozastavit aktuální média před řečí"
         }
       }
     }
@@ -139,6 +148,12 @@
           "unknown_error": "Neznámá chyba"
         }
       }
+    }
+  },
+  "issues": {
+    "voice_deleted": {
+      "title": "TTS hlas byl smazán u poskytovatele",
+      "description": "Hlas `{voice}` používaný TTS agentem `{profile}` již u poskytovatele neexistuje. Otevřete dialog Reconfigure tohoto agenta a vyberte aktuální hlas."
     }
   }
 }

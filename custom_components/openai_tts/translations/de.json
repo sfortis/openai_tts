@@ -2,12 +2,19 @@
   "config": {
     "step": {
       "user": {
-        "title": "OpenAI TTS-Dienst hinzufügen",
-        "description": "Richten Sie das OpenAI TTS integration ein, um TTS agents zu erstellen. API key ist für OpenAI erforderlich, für custom endpoints optional.",
+        "title": "TTS-Dienst hinzufügen (Schritt 1 von 2)",
+        "description": "Wählen Sie den TTS provider.",
+        "data": {
+          "provider": "Provider"
+        }
+      },
+      "credentials": {
+        "title": "TTS-Dienst hinzufügen (Schritt 2 von 2)",
+        "description": "API-Anmeldedaten für {provider}.",
         "data": {
           "name": "Kontoname (optional, z.B. Privat / Arbeit)",
-          "api_key": "API key (für OpenAI erforderlich, für custom endpoints optional)",
-          "url": "API endpoint (optional)"
+          "api_key": "API key",
+          "url": "API endpoint"
         }
       },
       "reconfigure": {
@@ -36,7 +43,8 @@
       "wrong_api_key": "Ungültiger API key. Bitte geben Sie einen gültigen API key ein.",
       "invalid_api_key": "Ungültiger API key. Bitte überprüfen Sie Ihren API key und versuchen Sie es erneut.",
       "cannot_connect": "Verbindung zur OpenAI-API nicht möglich. Bitte überprüfen Sie Ihr Netzwerk und das API endpoint.",
-      "duplicate_api_key": "Ein Eintrag mit diesem API key existiert bereits. Jedes integration muss einen eindeutigen API key haben."
+      "duplicate_api_key": "Ein Eintrag mit diesem API key existiert bereits. Jedes integration muss einen eindeutigen API key haben.",
+      "url_required": "Für diesen Anbieter ist eine API-Endpoint-URL erforderlich. Geben Sie die vollständige URL Ihres TTS-Servers ein."
     }
   },
   "config_subentries": {
@@ -64,7 +72,7 @@
             "chime": "Signalton aktivieren",
             "chime_sound": "Signalton-Sound",
             "normalize_audio": "Audiolautstärke normalisieren",
-            "instructions": "Benutzerdefinierte Anweisungen (nur gpt-4o-mini-tts)",
+            "instructions": "Sprachanweisungen",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
             "audio_format": "Audio format (mp3 ist das sichere default, nur ändern wenn Ihr backend ein anderes benötigt)"
           }
@@ -85,7 +93,7 @@
             "chime": "Signalton aktivieren",
             "chime_sound": "Signalton-Sound",
             "normalize_audio": "Audiolautstärke normalisieren",
-            "instructions": "Benutzerdefinierte Anweisungen (nur gpt-4o-mini-tts)",
+            "instructions": "Sprachanweisungen",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
             "audio_format": "Audio format (mp3 ist das sichere default, nur ändern wenn Ihr backend ein anderes benötigt)"
           }
@@ -120,7 +128,8 @@
           "instructions": "Anweisungen (leer lassen zum Deaktivieren)",
           "normalize_audio": "Lautstärkeerhöhung für erzeugtes Audio aktivieren (verwendet mehr CPU)",
           "volume_restore": "Lautsprecherlautstärke nach TTS-Wiedergabe wiederherstellen",
-          "pause_playback": "Medien während TTS pausieren (nur Sonos)"
+          "announce_mode": "Ansagemodus (Lautsprecher senken die Lautstärke oder pausieren, statt die Wiedergabe zu ersetzen)",
+          "pause_playback": "Aktuelle Medien vor der Sprache immer pausieren"
         }
       }
     }
@@ -139,6 +148,12 @@
           "unknown_error": "Unbekannter Fehler"
         }
       }
+    }
+  },
+  "issues": {
+    "voice_deleted": {
+      "title": "TTS-Stimme wurde beim Anbieter gelöscht",
+      "description": "Die Stimme `{voice}` des TTS-Agenten `{profile}` existiert beim Anbieter nicht mehr. Öffnen Sie den Reconfigure-Dialog des Agenten und wählen Sie eine aktuelle Stimme."
     }
   }
 }

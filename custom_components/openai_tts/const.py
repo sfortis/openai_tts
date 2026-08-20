@@ -1,6 +1,7 @@
 """
 Constants for OpenAI TTS custom component
 """
+from typing import Any
 
 DOMAIN = "openai_tts"
 CONF_API_KEY = "api_key"
@@ -8,7 +9,279 @@ CONF_MODEL = "model"
 CONF_VOICE = "voice"
 CONF_SPEED = "speed"
 CONF_URL = "url"
+CONF_PROVIDER = "provider"  # provider preset key, e.g. "openai", "mistral", "custom"
 DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
+
+# Provider presets shown in the parent-entry config flow as a single
+# dropdown so a user picks "OpenAI" / "Mistral" / "Custom" instead of
+# typing the right URL, voice-field name, and audio_format defaults
+# from memory. Each entry is a self-contained recipe consumed both by
+# the config flow (URL / extra_payload defaults, voice catalog) and by
+# the engine (voice field name, JSON envelope handling already lives
+# in openaitts_engine.py and is provider-agnostic). Add new providers
+# by extending this dict; nothing else in the codebase should need a
+# branch on the provider key.
+PROVIDER_OPENAI = "openai"
+PROVIDER_MISTRAL = "mistral"
+PROVIDER_GROQ = "groq"
+PROVIDER_LEMONFOX = "lemonfox"
+PROVIDER_KOKORO = "kokoro"
+PROVIDER_CUSTOM = "custom"
+DEFAULT_PROVIDER = PROVIDER_OPENAI
+
+PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
+    PROVIDER_OPENAI: {
+        "label": "OpenAI",
+        "url": DEFAULT_URL,
+        "voice_field": "voice",
+        "default_model": "gpt-4o-mini-tts",
+        "default_format": "mp3",
+        # voice catalog stays in VOICES below; OpenAI is the source of truth
+        "voice_catalog": None,
+        # Model catalog ``None`` means "fall back to ``MODELS``" (the
+        # OpenAI list). Other presets set their own catalogue so a
+        # Mistral subentry doesn't show ``tts-1`` in the dropdown.
+        "model_catalog": None,
+        "extra_payload_default": None,
+        "requires_api_key": True,
+        # OpenAI supports every container we know about and chunked
+        # streaming on all of them.
+        "allowed_formats": None,
+        "max_text_length": 4096,
+        "supports_streaming": True,
+        # OpenAI documents ``speed`` (0.25-4.0) on the speech endpoint.
+        # ``extra_payload`` is suppressed because the request schema
+        # is fixed - exposing the field would only invite users to
+        # type things the API would reject anyway.
+        "supports_speed": True,
+        "supports_extra_payload": False,
+    },
+    PROVIDER_MISTRAL: {
+        "label": "Mistral Voxtral",
+        "url": "https://api.mistral.ai/v1/audio/speech",
+        "voice_field": "voice",
+        "default_model": "voxtral-mini-tts-latest",
+        "model_catalog": ["voxtral-mini-tts-latest"],
+        "default_format": "mp3",
+        # Mistral has no built-in voice catalogue: every voice is
+        # user-cloned via ``POST /v1/audio/voices`` from a sample.
+        # Instead of shipping stale slugs we fetch the live list at
+        # config-flow time (see ``supports_voice_listing`` below) and
+        # fall back to free-text when the call fails or the account
+        # has no cloned voices yet.
+        "voice_catalog": None,
+        "extra_payload_default": None,
+        "requires_api_key": True,
+        # Voxtral accepts the same MP3/Opus/WAV/PCM/FLAC family OpenAI
+        # does. Length cap left open: Mistral's documented max bounces
+        # between releases and isn't strictly enforced, so we'd rather
+        # surface their real error than reject a request locally.
+        "allowed_formats": None,
+        "max_text_length": None,
+        "supports_streaming": True,
+        # ``GET /v1/audio/voices`` returns ``{items, total}`` with
+        # ``id`` (voice_id) + ``name`` per voice. Used by the config
+        # flow to populate the voice dropdown dynamically.
+        "supports_voice_listing": True,
+        # Verified empirically (HTTP 422 ``extra_forbidden body.speed``
+        # for any value other than 1.0): Voxtral hard-rejects the
+        # ``speed`` field. Hide the slider so the user doesn't pick a
+        # value that will fail at runtime. Extra payload is also off
+        # because the request schema is fixed.
+        "supports_speed": False,
+        "supports_extra_payload": False,
+    },
+    PROVIDER_GROQ: {
+        # Groq's hosted Orpheus v1 TTS endpoint, served via their
+        # OpenAI-compatible audio router. Orpheus only emits WAV today
+        # (response_format=wav), so the default audio_format is set
+        # accordingly. The User-Agent header the engine sends
+        # ("HomeAssistant-OpenAI-TTS") satisfies the 403/code 1010
+        # anti-bot screen reported in issue #40. Users who want the
+        # Arabic Saudi variant can reconfigure the model to
+        # ``canopylabs/orpheus-arabic-saudi`` and pick an Arabic voice
+        # (abdullah, fahad, sultan, lulwa, noura, aisha) via the
+        # custom-voice free-text field.
+        "label": "Groq (Orpheus TTS)",
+        "url": "https://api.groq.com/openai/v1/audio/speech",
+        "voice_field": "voice",
+        "default_model": "canopylabs/orpheus-v1-english",
+        "model_catalog": [
+            "canopylabs/orpheus-v1-english",
+            "canopylabs/orpheus-arabic-saudi",
+        ],
+        "default_format": "wav",
+        # Orpheus v1 English voices. Users can still type a different
+        # voice manually via the custom-voice free-text field (e.g. the
+        # Arabic Saudi voices when paired with the Arabic model).
+        "voice_catalog": [
+            "autumn",
+            "diana",
+            "hannah",
+            "austin",
+            "daniel",
+            "troy",
+        ],
+        "extra_payload_default": None,
+        "requires_api_key": True,
+        # Orpheus only emits WAV today (response_format=wav). Picking
+        # mp3/opus/etc. on the dropdown produced an opaque 400 from the
+        # Groq router, so we lock the list down. Length cap stays open;
+        # the Groq router does enforce a per-request limit but it varies
+        # by model and we'd rather pass through their error verbatim.
+        "allowed_formats": ["wav"],
+        "max_text_length": None,
+        "supports_streaming": True,
+        # Verified empirically: Orpheus accepts ``speed`` in the
+        # request body but ignores it (3 calls at 0.5 / 1.0 / 2.0
+        # returned identical byte counts). Hide the slider so users
+        # don't think they're tuning something that's actually
+        # silently dropped.
+        "supports_speed": False,
+        "supports_extra_payload": False,
+    },
+    PROVIDER_LEMONFOX: {
+        # Lemonfox.ai hosts the open-source Kokoro-82M voice model
+        # behind an OpenAI-compatible ``/v1/audio/speech`` endpoint -
+        # cheaper alternative to OpenAI ($0.30/1M chars at the time
+        # of writing) with broad multilingual coverage. The default
+        # catalogue below lists the English voices Lemonfox documents
+        # by short name. Users who want the full multilingual
+        # Kokoro range (af_/am_/bf_/bm_/ef_/em_/ff_/jf_/jm_/zf_/zm_
+        # prefixed slugs covering ES/FR/IT/PT/JA/ZH/HI etc.) can type
+        # the full id via the custom-value path on the voice picker.
+        "label": "Lemonfox.ai (Kokoro TTS)",
+        "url": "https://api.lemonfox.ai/v1/audio/speech",
+        "voice_field": "voice",
+        # Lemonfox runs a single underlying model; ``tts-1`` is the
+        # OpenAI-compatible alias they accept and the value is
+        # otherwise ignored. Custom_value stays on so users on a
+        # newer Lemonfox model alias don't need an integration update.
+        "default_model": "tts-1",
+        "model_catalog": ["tts-1"],
+        "default_format": "mp3",
+        # English short-name voices documented by Lemonfox. The
+        # service also accepts the full Kokoro slugs (af_sarah,
+        # bm_george, jf_alpha, ...) for non-English languages, but
+        # short names work fine for the default English use case.
+        "voice_catalog": [
+            "heart", "bella", "sarah", "jessica", "river", "sky",
+            "nicole", "aoede", "kore", "alloy",
+            "adam", "echo", "michael", "eric", "liam", "onyx", "puck",
+            "alice", "emma", "isabella", "lily",
+            "daniel", "fable", "george", "lewis",
+        ],
+        "extra_payload_default": None,
+        "requires_api_key": True,
+        # Lemonfox supports the same MP3/Opus/AAC/FLAC/WAV/PCM family
+        # OpenAI does. Length cap left open: docs quote a per-request
+        # limit but it varies; surface their real error if exceeded.
+        "allowed_formats": None,
+        "max_text_length": None,
+        "supports_streaming": True,
+        # Kokoro accepts ``speed`` (0.25-4.0) on the OpenAI-compatible
+        # wrapper. Extra payload off because the schema is fixed.
+        "supports_speed": True,
+        "supports_extra_payload": False,
+    },
+    PROVIDER_KOKORO: {
+        # Self-hosted shortcut for ``remsky/Kokoro-FastAPI``, the most
+        # common docker deployment of the Kokoro-82M voice model.
+        # Pre-fills the default ``localhost:8880`` URL so users with
+        # the stock docker-compose setup don't have to type the
+        # endpoint by hand. Issue #41 had multiple users (putt6359,
+        # K-RAD) explicitly asking for Kokoro-FastAPI integration;
+        # this preset is the zero-config path that closes that loop.
+        "label": "Kokoro-FastAPI (self-hosted Kokoro)",
+        "url": "http://localhost:8880/v1/audio/speech",
+        "voice_field": "voice",
+        # Kokoro-FastAPI maps ``tts-1`` / ``tts-1-hd`` / ``kokoro`` to
+        # the same underlying model in ``openai_mappings.json``. We
+        # default to ``kokoro`` as the canonical native name so the
+        # config matches the upstream Quick Start examples verbatim.
+        "default_model": "kokoro",
+        "model_catalog": ["kokoro", "tts-1", "tts-1-hd"],
+        "default_format": "mp3",
+        # No static catalog: Kokoro-FastAPI exposes the live list at
+        # ``GET /v1/audio/voices`` so we fetch the currently-installed
+        # voicepacks (English ``af_/am_/bf_/bm_`` plus any locale
+        # voicepacks the user has downloaded - JA / ZH / ES / FR /
+        # IT / PT / HI). That way the dropdown matches reality and
+        # the user never has to type a slug like ``af_bella``
+        # themselves.
+        "voice_catalog": None,
+        "extra_payload_default": None,
+        # Default Kokoro-FastAPI docker compose runs without auth, so
+        # the API key field stays optional. Users behind a reverse
+        # proxy that adds Bearer auth can still fill it in.
+        "requires_api_key": False,
+        "allowed_formats": None,
+        "max_text_length": None,
+        # Kokoro-FastAPI advertises chunked streaming and accepts
+        # ``speed`` on the OpenAI-compatible wrapper. Extra payload
+        # off because the request schema is fixed.
+        "supports_streaming": True,
+        "supports_speed": True,
+        "supports_extra_payload": False,
+        # ``GET /v1/audio/voices`` returns ``{"voices": [...]}`` with
+        # plain string voice names. Voice listing handler treats this
+        # as authoritative and renders one option per name.
+        "supports_voice_listing": True,
+    },
+    PROVIDER_CUSTOM: {
+        # Catch-all preset for any OpenAI-compatible TTS endpoint we
+        # don't have a dedicated preset for. Covers self-hosted servers
+        # (speaches.ai, Alltalk V2, LocalAI, OpenedAI-Speech, pocket-tts,
+        # Microsoft VibeVoice, vLLM-served Qwen3-TTS, ...) and any
+        # third-party hosted proxy that exposes the OpenAI speech
+        # contract. URL is empty so the user fills in their endpoint;
+        # API key is optional because many self-hosted setups don't
+        # gate the endpoint, while hosted proxies usually do.
+        "label": "Custom / Self-hosted (any OpenAI-compatible endpoint)",
+        "url": "",  # user enters
+        "voice_field": "voice",
+        "default_model": None,
+        "model_catalog": None,
+        "default_format": "mp3",
+        "voice_catalog": None,
+        "extra_payload_default": None,
+        "requires_api_key": False,
+        # Backend capabilities are deployment-specific, so leave
+        # every dial open and let the operator constrain via
+        # ``extra_payload`` or by picking a different audio_format
+        # if their server is picky.
+        "allowed_formats": None,
+        "max_text_length": None,
+        "supports_streaming": True,
+        "supports_speed": True,
+        "supports_extra_payload": True,
+    },
+}
+
+
+def preset_for(provider_key: str | None) -> dict[str, Any]:
+    """Return the preset for ``provider_key`` (falls back to OpenAI).
+
+    Tolerates both ``None`` and unknown keys so callers don't have to
+    pre-validate.
+    """
+    if not provider_key:
+        return PROVIDER_PRESETS[PROVIDER_OPENAI]
+    return PROVIDER_PRESETS.get(provider_key, PROVIDER_PRESETS[PROVIDER_OPENAI])
+
+
+def audio_format_options_for(preset: dict[str, Any]) -> list[dict[str, str]]:
+    """Filter ``AUDIO_FORMAT_LABELS`` down to the preset's allowlist.
+
+    ``allowed_formats=None`` means every format goes through (OpenAI,
+    self-hosted). Used by the config flow so users can't pick e.g. mp3
+    on Groq Orpheus, which only emits WAV.
+    """
+    allowed = preset.get("allowed_formats")
+    if not allowed:
+        return AUDIO_FORMAT_LABELS
+    allowed_set = set(allowed)
+    return [opt for opt in AUDIO_FORMAT_LABELS if opt["value"] in allowed_set]
 UNIQUE_ID = "unique_id"
 
 MODELS = ["tts-1", "tts-1-hd", "gpt-4o-mini-tts"]
@@ -33,6 +306,51 @@ VOICES_BY_MODEL: dict[str, list[str]] = {
     "tts-1-hd": _LEGACY_TTS_VOICES,
     "gpt-4o-mini-tts": VOICES,  # 13 voices, supports all
 }
+
+# Models that accept the OpenAI ``instructions`` parameter on the
+# speech endpoint. Today only ``gpt-4o-mini-tts``; ``tts-1`` /
+# ``tts-1-hd`` ignore the field, and other providers (Mistral
+# Voxtral, Groq Orpheus, ...) don't speak this dialect at all -
+# Orpheus has its own bracketed vocal-direction syntax in the
+# ``input`` text instead. The config flow uses this set to show
+# the instructions input only on supported models so users don't
+# fill in a field that the backend will silently drop.
+INSTRUCTIONS_MODELS: frozenset[str] = frozenset({"gpt-4o-mini-tts"})
+
+
+def model_supports_instructions(model: str | None) -> bool:
+    """True when ``model`` accepts the ``instructions`` request field.
+
+    Strict membership test, used by the config flow to decide whether
+    to render the instructions input. Request building uses
+    ``model_may_accept_instructions`` instead, which is deliberately
+    more permissive about custom backends.
+    """
+    return bool(model) and model in INSTRUCTIONS_MODELS
+
+
+def model_may_accept_instructions(model: str | None) -> bool:
+    """True unless ``model`` is a known OpenAI model that rejects instructions.
+
+    Used when building the request body, where the question is not "may
+    the user edit this field" but "will sending it break the call".
+
+    A profile can hold an ``instructions`` value that its current model
+    does not accept, because the value is kept when the user switches
+    models rather than silently discarded. Sending it to ``tts-1`` or
+    ``tts-1-hd`` makes OpenAI reject the request, so it is dropped for
+    those.
+
+    Unknown model names are treated as capable. A custom backend served
+    under an arbitrary slug may well accept instructions, and guessing
+    otherwise would make the field unusable for exactly the deployments
+    that need it most.
+    """
+    if not model:
+        return True
+    if model in INSTRUCTIONS_MODELS:
+        return True
+    return model not in MODELS
 
 
 def voices_for_model(model: str | None) -> list[str]:
@@ -192,8 +510,35 @@ AUDIO_FORMAT_ENCODER: dict[str, dict[str, list[str]]] = {
 # Toggle to snapshot & restore volumes
 CONF_VOLUME_RESTORE = "volume_restore"
 
-# Toggle to pause/resume media playback
+# Legacy "always pause the current media before speaking" toggle.
+# Predates announcement mode and keeps its original meaning: when the
+# user has switched it on, playing targets are paused before the speak
+# regardless of what announcement mode decides. Default off.
+#
+# Kept as its own key on purpose. Reusing it to carry announcement
+# mode would have silently redefined a setting users had already saved,
+# turning "don't pause my music" into "manage my music".
 CONF_PAUSE_PLAYBACK = "pause_playback"
+
+# Announcement-mode toggle, the modern setting. Mirrors the
+# ``announce`` field on the ``openai_tts.say`` service. Semantics on
+# True (the default):
+#   * Speakers exposing ``MediaPlayerEntityFeature.MEDIA_ANNOUNCE``
+#     (Sonos, Music Assistant, newer Cast) get a native announcement
+#     - the device ducks under the speak and auto-resumes; we don't
+#     touch their volume.
+#   * Speakers without that capability go through manual pause +
+#     speak + resume so the user doesn't lose the music on Cast /
+#     Bluetooth.
+# On False the integration is hands-off: the speaker handles the
+# incoming media however it normally does (Cast replaces, BT
+# overlays, Sonos still ducks at firmware level).
+#
+# Entries that predate this key are migrated in ``__init__.py``: a
+# saved ``pause_playback`` value carries over, so someone who had
+# explicitly opted out of media management keeps that behaviour.
+CONF_ANNOUNCE_MODE = "announce_mode"
+DEFAULT_ANNOUNCE_MODE = True
 
 # Profile name for sub-entries
 CONF_PROFILE_NAME = "profile_name"
