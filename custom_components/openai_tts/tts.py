@@ -20,9 +20,10 @@ from homeassistant.components.tts import (
     TextToSpeechEntity,
     TTSAudioRequest,
     TTSAudioResponse,
+    Voice,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.exceptions import ConfigEntryAuthFailed, MaxLengthExceeded
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
@@ -50,6 +51,7 @@ from .const import (
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
     VOICES,
+    is_openai_endpoint,
 )
 from .entity_helpers import is_subentry, sanitize_profile_name
 from .exceptions import (
@@ -61,6 +63,7 @@ from .exceptions import (
 )
 from .openaitts_engine import OpenAITTSEngine
 from .utils import detect_audio_format, get_media_duration, is_valid_audio, process_audio
+from .voice_discovery import async_get_cached_remote_voices
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -206,6 +209,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # same reason.
         self._duration_cache = MessageDurationCache(hass, self._attr_unique_id)
 
+        # Populated lazily by ``async_get_supported_voices`` /
+        # ``async_added_to_hass`` for custom (non-OpenAI) backends that
+        # expose a voice-listing endpoint. ``None`` until a fetch has
+        # been attempted at least once; ``[]``/populated list after.
+        # Kept as plain (id, name) tuples - see voice_discovery.py.
+        self._cached_remote_voices: list[tuple[str, str]] | None = None
+
         # The health tracker lives on the parent entry. Subentries inherit it
         # via parent_entry; legacy entries are their own parent.
         parent_entry_id = (
@@ -242,6 +252,21 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         await self._restore_persisted_state()
+        # Warm the remote voice-discovery cache (no-op for OpenAI
+        # endpoints, cheap/cached for custom ones) so the
+        # ``available_voices`` attribute and the Assist pipeline dropdown
+        # (async_get_supported_voices, which MUST stay synchronous - see
+        # its docstring) both reflect the real catalogue as soon as
+        # possible, rather than only after the pipeline UI is first
+        # opened and finding a cold, empty cache.
+        try:
+            await self._async_refresh_remote_voices()
+        except Exception:  # pragma: no cover - defensive, never should raise
+            _LOGGER.exception(
+                "Voice discovery warm-up failed for %s; will retry on demand",
+                self.entity_id,
+            )
+        self.async_write_ha_state()
         _LOGGER.info("TTS entity %s registered with Home Assistant", self.entity_id)
 
     async def async_will_remove_from_hass(self) -> None:
@@ -283,10 +308,18 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # from the service call so its lookup hash matches what tts.py
         # used at store time. Removing one breaks cache lookups and
         # forces fallback timing.
+        if self._cached_remote_voices:
+            available = [vid for vid, _name in self._cached_remote_voices]
+        else:
+            # Either an OpenAI endpoint (static catalogue is correct),
+            # or a custom endpoint we haven't successfully discovered
+            # yet - static list is still the best available fallback.
+            available = VOICES
+
         return {
             "media_duration": self._last_duration_ms,
             "failure_cache_size": self._duration_cache.size,
-            "available_voices": VOICES,
+            "available_voices": available,
             "current_voice": self._get_config_value(CONF_VOICE) or self._engine._voice,
             "current_model": self._get_config_value(CONF_MODEL) or self._engine._model,
             "current_speed": self._get_config_value(CONF_SPEED) or self._engine._speed,
@@ -303,6 +336,74 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     @property
     def supported_languages(self) -> list[str]:
         return SUPPORTED_LANGUAGES
+
+    @callback
+    def async_get_supported_voices(self, language: str) -> list[Voice] | None:
+        """Return the voices this entity supports, for the Assist pipeline UI.
+
+        This is what actually populates the "Voice" dropdown on the
+        Settings -> Voice Assistants -> (pipeline) screen once this
+        entity is selected as the TTS engine - it is unrelated to the
+        ``available_voices`` extra_state_attribute, which is informational
+        only. Previously unimplemented, so the pipeline UI had nothing to
+        show for this entity regardless of backend.
+
+        IMPORTANT: Home Assistant core calls this synchronously - see
+        ``homeassistant/components/tts/entity.py`` (decorated ``@callback``,
+        defined with plain ``def``) and the call site in
+        ``homeassistant/components/tts/__init__.py``
+        (``engine_instance.async_get_supported_voices(language)``, not
+        awaited). Any custom-backend voice discovery therefore CANNOT
+        happen inside this method - it must already be cached before this
+        is called. ``_cached_remote_voices`` is populated by
+        ``_async_refresh_remote_voices`` from ``async_added_to_hass`` (and
+        can be refreshed on demand elsewhere); this method only ever reads
+        that cache or falls back.
+        """
+        endpoint_url = self._config.data.get(CONF_URL) or (
+            self._parent_entry.data.get(CONF_URL) if self._parent_entry else None
+        )
+
+        if is_openai_endpoint(endpoint_url):
+            return [Voice(voice_id=v, name=v.capitalize()) for v in VOICES]
+
+        if self._cached_remote_voices:
+            return [
+                Voice(voice_id=vid, name=name)
+                for vid, name in self._cached_remote_voices
+            ]
+
+        # Discovery hasn't completed / failed - degrade gracefully rather
+        # than returning an empty (or None) list, which would leave the
+        # pipeline UI with no voice picker at all for this entity.
+        current_voice = self._get_config_value(CONF_VOICE) or self._engine._voice
+        if current_voice:
+            return [Voice(voice_id=current_voice, name=current_voice)]
+        return None
+
+    async def _async_refresh_remote_voices(self, *, force_refresh: bool = False) -> None:
+        """Populate ``_cached_remote_voices`` for custom (non-OpenAI) backends.
+
+        Async - safe to call from ``async_added_to_hass`` or any other
+        coroutine context. Must never be called from
+        ``async_get_supported_voices`` itself (that method is sync-only
+        per the HA core contract - see its docstring).
+        """
+        endpoint_url = self._config.data.get(CONF_URL) or (
+            self._parent_entry.data.get(CONF_URL) if self._parent_entry else None
+        )
+        if is_openai_endpoint(endpoint_url):
+            self._cached_remote_voices = None
+            return
+
+        api_key = self._config.data.get(CONF_API_KEY) or (
+            self._parent_entry.data.get(CONF_API_KEY) if self._parent_entry else None
+        )
+        domain_data_root = self.hass.data.setdefault(DOMAIN, {})
+        self._cached_remote_voices = await async_get_cached_remote_voices(
+            self.hass, domain_data_root, endpoint_url, api_key,
+            force_refresh=force_refresh,
+        )
 
     @property
     def supported_options(self) -> list[str]:
@@ -831,11 +932,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 
-        # Post-processing stays in the requested format end to end. The
-        # ``filter_complex`` graph in ``build_ffmpeg_command`` re-samples
-        # both the chime and the TTS input to a common PCM layout before
-        # concat and picks the right encoder for the output. HA still has
-        # its ``preferred_format`` ffmpeg layer as a safety net if the
+        # Post-processing now stays in the requested format end to end:
+        # ``ensure_chime_in_format`` transcodes the chime to match, and
+        # ``build_ffmpeg_command`` picks the right encoder for the
+        # output. The bytes that come out of ``_maybe_post_process``
+        # therefore match the requested ``audio_format`` regardless of
+        # whether chime/normalize ran. HA still has its
+        # ``preferred_format`` ffmpeg layer as a safety net if the
         # downstream player needs a different container.
         delivered_format = audio_format
 

@@ -49,6 +49,7 @@ from .const import (
     CONF_PAUSE_PLAYBACK,
     CONF_PROFILE_NAME,
 )
+from .voice_discovery import async_get_cached_remote_voices
 
 SUBENTRY_TYPE_PROFILE = "profile"
 
@@ -555,6 +556,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         is_openai = is_openai_endpoint(endpoint_url)
         allowed_voices = voices_for_model(self._step1_model)
         default_voice = "shimmer" if "shimmer" in allowed_voices else allowed_voices[0]
+        discovered_voices: list[tuple[str, str]] | None = None
 
         if is_openai:
             # ``custom_value`` is OFF on OpenAI endpoints so the picker
@@ -569,10 +571,30 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 }
             })
         else:
-            # Custom backend (e.g. Chatterbox) - we don't know the
-            # voice catalogue, so let the user type whatever the
-            # backend understands.
-            voice_field = selector({"text": {}})
+            # Custom backend (e.g. Chatterbox, Kokoro) - try to discover
+            # its real voice catalogue via GET .../audio/voices. Falls
+            # back to free text if the backend doesn't support listing.
+            api_key = parent_entry.data.get(CONF_API_KEY) if parent_entry else None
+            discovered_voices = await async_get_cached_remote_voices(
+                self.hass, self.hass.data.setdefault(DOMAIN, {}), endpoint_url, api_key
+            )
+            if discovered_voices:
+                voice_field = selector({
+                    "select": {
+                        "options": [
+                            {"value": vid, "label": f"{name} ({vid})" if name != vid else vid}
+                            for vid, name in discovered_voices
+                        ],
+                        "mode": "dropdown",
+                        "sort": True,
+                        # Keep free-text as an escape hatch in case
+                        # discovery is stale or incomplete.
+                        "custom_value": True,
+                    }
+                })
+                default_voice = discovered_voices[0][0]
+            else:
+                voice_field = selector({"text": {}})
 
         step2_fields: dict[Any, Any] = {
             vol.Required(CONF_VOICE, default=default_voice): voice_field,
@@ -745,7 +767,29 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 }
             })
         else:
-            voice_field = selector({"text": {}})
+            api_key = parent_entry.data.get(CONF_API_KEY) if parent_entry else None
+            discovered_voices = await async_get_cached_remote_voices(
+                self.hass, self.hass.data.setdefault(DOMAIN, {}), endpoint_url, api_key
+            )
+            if discovered_voices:
+                voice_field = selector({
+                    "select": {
+                        "options": [
+                            {"value": vid, "label": f"{name} ({vid})" if name != vid else vid}
+                            for vid, name in discovered_voices
+                        ],
+                        "mode": "dropdown",
+                        "sort": True,
+                        "custom_value": True,
+                    }
+                })
+                # Keep the existing saved voice as default even if it
+                # isn't in the freshly-discovered list (e.g. backend
+                # temporarily unreachable during a previous save) -
+                # custom_value=True means it still renders correctly.
+                default_voice = existing_voice
+            else:
+                voice_field = selector({"text": {}})
 
         step2_fields: dict[Any, Any] = {
             vol.Required(CONF_VOICE, default=default_voice): voice_field,
