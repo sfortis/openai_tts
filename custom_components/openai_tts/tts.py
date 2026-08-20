@@ -42,6 +42,7 @@ from .const import (
     CONF_MODEL,
     CONF_NORMALIZE_AUDIO,
     CONF_PROFILE_NAME,
+    CONF_PROVIDER,
     CONF_SPEED,
     CONF_URL,
     CONF_VOICE,
@@ -50,6 +51,8 @@ from .const import (
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
     VOICES,
+    preset_for,
+    is_openai_endpoint,
 )
 from .entity_helpers import is_subentry, sanitize_profile_name
 from .exceptions import (
@@ -58,8 +61,10 @@ from .exceptions import (
     OpenAIQuotaExceededError,
     OpenAIRateLimitError,
     OpenAITTSError,
+    OpenAIVoiceDeletedError,
 )
 from .openaitts_engine import OpenAITTSEngine
+from .repairs import create_voice_deleted_issue
 from .utils import detect_audio_format, get_media_duration, is_valid_audio, process_audio
 
 _LOGGER = logging.getLogger(__name__)
@@ -420,6 +425,17 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     def _can_use_streaming(self, text: str, options: dict) -> bool:
         if options.get(CONF_CHIME_ENABLE) or options.get(CONF_NORMALIZE_AUDIO):
             return False
+        # Some backends (older self-hosted servers, pocket-tts variants
+        # that don't speak chunked HTTP cleanly) deliver corrupted audio
+        # via the streaming path even when the atomic path works. The
+        # parent entry's preset can flip this off so HA falls back to
+        # ``async_get_tts_audio`` for those providers.
+        parent = self._parent_entry or self._config
+        provider_key = (
+            parent.data.get(CONF_PROVIDER) if parent is not None else None
+        )
+        if not preset_for(provider_key).get("supports_streaming", True):
+            return False
         return len(text) >= MIN_STREAMING_TEXT_LENGTH
 
     def _resolve_options(self, options: dict | None) -> dict[str, Any]:
@@ -637,6 +653,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 self.entity_id, err,
             )
             raise ConfigEntryAuthFailed(str(err)) from err
+        if isinstance(err, OpenAIVoiceDeletedError):
+            self._raise_voice_deleted_repair(err)
+            return
         if isinstance(err, OpenAIQuotaExceededError):
             _LOGGER.error(
                 "OpenAI TTS quota exhausted for %s: %s. "
@@ -652,6 +671,73 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         if isinstance(err, OpenAITTSError):
             _LOGGER.error("OpenAI TTS error for %s: %s", self.entity_id, err)
             return
+
+    def _raise_voice_deleted_repair(self, err: "OpenAIVoiceDeletedError") -> None:
+        """Surface a Repairs panel issue for an upstream-deleted voice.
+
+        Raised when we have no static catalogue that could have caught
+        the bad voice at configuration time. Two cases qualify:
+        providers whose catalogue changes between sessions (Mistral's
+        user-cloned voices, Kokoro's installed voicepacks) and
+        self-hosted backends, where the voice is free text and only the
+        backend knows what is valid.
+
+        Skipped for providers with a static catalogue (OpenAI's 13
+        built-ins, Groq's 6 Orpheus voices, Lemonfox's Kokoro list).
+        There the config flow already offered the valid names, so the
+        same error really means the user typed something incompatible.
+        That is a config mistake, not an external state change, and a
+        Repairs notice on top of a typo is noise.
+
+        Best-effort: needs both the parent entry id (to scope the
+        issue correctly) and the subentry id (one issue per profile).
+        Legacy entries that don't carry a subentry id silently fall
+        back to plain logging.
+        """
+        _LOGGER.error(
+            "OpenAI TTS voice %s rejected upstream for %s: %s",
+            err.voice, self.entity_id, err,
+        )
+
+        parent_entry = self._parent_entry or self._config
+        provider_key = (
+            parent_entry.data.get(CONF_PROVIDER) if parent_entry is not None else None
+        )
+        preset = preset_for(provider_key)
+        endpoint_url = (
+            parent_entry.data.get(CONF_URL) if parent_entry is not None else None
+        )
+        # A static catalogue exists either as an explicit preset list or,
+        # for OpenAI itself, as the built-in ``VOICES`` the picker is
+        # locked to. Note the endpoint check rather than the preset name:
+        # an entry predating the provider wizard resolves to the OpenAI
+        # preset even when it points at a self-hosted backend, and those
+        # users do need the notice.
+        has_static_catalog = (
+            bool(preset.get("voice_catalog"))
+            or is_openai_endpoint(endpoint_url)
+        )
+        if has_static_catalog and not preset.get("supports_voice_listing"):
+            _LOGGER.debug(
+                "Not raising a repair for %s: provider has a static voice "
+                "catalogue, so the rejected voice is a configuration typo",
+                self.entity_id,
+            )
+            return
+
+        parent_entry_id = (
+            self._parent_entry.entry_id if self._parent_entry else None
+        )
+        subentry_id = getattr(self._config, "subentry_id", None)
+        profile_name = self._config.data.get(CONF_PROFILE_NAME) or self.entity_id
+        if parent_entry_id and subentry_id:
+            create_voice_deleted_issue(
+                self.hass,
+                parent_entry_id,
+                subentry_id,
+                profile_name,
+                err.voice,
+            )
 
     async def async_get_tts_audio(
         self, message: str, language: str, options: dict[str, Any] | None = None

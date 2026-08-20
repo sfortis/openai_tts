@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
@@ -24,13 +25,18 @@ from .const import (
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
     CONF_PROFILE_NAME,
+    CONF_PROVIDER,
+    CONF_ANNOUNCE_MODE,
+    CONF_PAUSE_PLAYBACK,
     DEFAULT_URL,
     CONF_API_KEY,
     UNIQUE_ID,
     CONF_URL,
     is_openai_endpoint,
     voices_for_model,
+    preset_for,
 )
+from .repairs import clear_repairs_for_entry
 from .volume_restore import announce
 from .utils import normalize_entity_ids
 from homeassistant.exceptions import HomeAssistantError
@@ -61,7 +67,12 @@ SAY_SCHEMA = vol.Schema(
         vol.Optional("chime_sound"): cv.string,
         vol.Optional("normalize_audio"): cv.boolean,
         vol.Optional("volume"): vol.All(vol.Coerce(float), vol.Range(min=0.0, max=1.0)),
-        vol.Optional("pause_playback"): cv.boolean,  # Added pause_playback
+        # ``announce`` is the modern flag (default True) that lets each
+        # speaker decide via ``MEDIA_ANNOUNCE`` capability detection.
+        # ``pause_playback`` is kept as a legacy alias - the engine
+        # maps it onto ``announce`` when the new field is missing.
+        vol.Optional("announce"): cv.boolean,
+        vol.Optional("pause_playback"): cv.boolean,
         vol.Optional("entity_id"): cv.entity_ids,  # For direct entity targeting
         vol.Optional("device_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string])),  # For device targeting
         vol.Optional("area_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string]))     # For area targeting
@@ -370,12 +381,44 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
     return True
 
 
+def _seed_announce_mode_option(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Give ``announce_mode`` a starting value on pre-existing entries.
+
+    Announcement mode was introduced after ``pause_playback`` and
+    defaults to on. Turning it on unconditionally would change the
+    behaviour of installs where the user had deliberately left media
+    management off, so a saved ``pause_playback`` value carries over as
+    the initial ``announce_mode``. Entries that never saved either key
+    fall through to the default at read time.
+
+    Idempotent: once ``announce_mode`` is present the function does
+    nothing, so it is safe to call on every setup.
+    """
+    if CONF_ANNOUNCE_MODE in entry.options:
+        return
+    if CONF_PAUSE_PLAYBACK not in entry.options:
+        return
+
+    carried = bool(entry.options[CONF_PAUSE_PLAYBACK])
+    _LOGGER.info(
+        "Seeding announce_mode=%s on entry %s from its saved "
+        "pause_playback setting",
+        carried, entry.entry_id,
+    )
+    hass.config_entries.async_update_entry(
+        entry,
+        options={**entry.options, CONF_ANNOUNCE_MODE: carried},
+    )
+
+
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     """Set up OpenAI TTS and register the openai_tts.say service."""
     _LOGGER.debug("async_setup_entry called for %s (version %s.%s)",
                  entry.entry_id, entry.version, entry.minor_version)
     # Store entry for reference
     hass.data.setdefault(DOMAIN, {})
+
+    _seed_announce_mode_option(hass, entry)
 
     # Migration is now handled during async_migrate_entry, no need for pending migration
     
@@ -457,13 +500,19 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         if hass.data.get(DOMAIN, {}).get(f"{entry.entry_id}_migrating"):
             _LOGGER.debug("Skipping reload during migration for entry %s", entry.entry_id)
             return
-        
+
         # Check if Home Assistant is still starting up
         # This prevents phantom reloads during startup
         if not hass.is_running:
             _LOGGER.debug("Skipping reload during Home Assistant startup for entry %s", entry.entry_id)
             return
-        
+
+        # Subentry reconfigures route through this listener too. Clear
+        # any per-subentry Repairs issues (e.g. voice_deleted) raised
+        # by an earlier failed TTS call - the next call recreates them
+        # if the new configuration is still broken.
+        clear_repairs_for_entry(hass, entry)
+
         _LOGGER.info("Config entry updated for OpenAI TTS entry %s, reloading", entry.entry_id)
         await hass.config_entries.async_reload(entry.entry_id)
     
@@ -568,6 +617,29 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             message = data["message"]
             language = data.get("language", "en")
 
+            # Reject overlength input before we hit the network, but
+            # only when we actually know which preset the entry uses
+            # (i.e. it has ``CONF_PROVIDER`` set). Legacy entries from
+            # before the wizard don't carry the key and may point at a
+            # custom backend with a different cap; defaulting them to
+            # OpenAI's 4096 would silently regress >4096-char messages
+            # that worked in 3.7. Better to let the upstream surface
+            # its real error in those cases.
+            parent_entry_id = entity_entry.config_entry_id if entity_entry else None
+            parent_entry = (
+                hass.config_entries.async_get_entry(parent_entry_id)
+                if parent_entry_id else None
+            )
+            provider_key = parent_entry.data.get(CONF_PROVIDER) if parent_entry else None
+            if provider_key:
+                preset = preset_for(provider_key)
+                max_len = preset.get("max_text_length")
+                if max_len is not None and len(message) > max_len:
+                    raise ValueError(
+                        f"Message length {len(message)} exceeds the "
+                        f"{preset['label']} provider limit of {max_len} characters"
+                    )
+
             # For chime/normalize_audio: use service call value if provided, else entity default
             # Note: data.get("chime") returns None if not in call, False if explicitly set to False
             chime_value = data.get("chime") if "chime" in data else entity_defaults.get("chime", False)
@@ -594,11 +666,17 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
             _validate_voice_compatibility(hass, tts_entity, options.get("voice"))
             
             tts_volume = data.get("volume")
-            pause_playback = data.get("pause_playback")  # Get pause_playback from service call
-            
+            # ``announce`` is the new explicit flag; ``pause_playback``
+            # is the legacy alias kept for existing automations. When
+            # both are absent, ``announce()`` falls back to the
+            # profile-level config (with its own legacy alias chain).
+            announce_mode = data.get("announce")
+            pause_playback = data.get("pause_playback")
+
             _LOGGER.debug(
-                "Calling announce with: tts_entity=%s, media_players=%s, message=%s, pause_playback=%s",
-                tts_entity, media_players, message, pause_playback
+                "Calling announce with: tts_entity=%s, media_players=%s, message=%s, "
+                "announce=%s, pause_playback=%s",
+                tts_entity, media_players, message, announce_mode, pause_playback,
             )
             
             # Call the orchestrator. ``announce`` raises HomeAssistantError
@@ -614,6 +692,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
                 options=options,
                 tts_volume=tts_volume,
                 pause_playback=pause_playback,
+                announce=announce_mode,
             )
 
         async def _handle_say(call: ServiceCall) -> dict[str, Any] | None:
