@@ -25,28 +25,37 @@ from typing import Any, Dict, List, Optional, Set
 
 from homeassistant.components.media_player import (
     ATTR_MEDIA_VOLUME_LEVEL,
+    MediaPlayerEntityFeature,
     SERVICE_MEDIA_PAUSE,
     SERVICE_MEDIA_PLAY,
     STATE_PLAYING,
 )
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
 from homeassistant.const import (
+    ATTR_SUPPORTED_FEATURES,
+    STATE_IDLE,
     STATE_OFF,
+    STATE_STANDBY,
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
 from homeassistant.core import Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry
-from homeassistant.helpers.event import async_track_state_change_event
-
-from .api_health import (
-    API_STATUS_AUTH_FAILED,
-    API_STATUS_QUOTA_EXCEEDED,
-    OpenAITTSHealthTracker,
+from homeassistant.helpers.event import (
+    async_call_later,
+    async_track_state_change_event,
 )
+
+from .api_health import OpenAITTSHealthTracker
 from .cache import DURATION_FAILED_SENTINEL, clear_stale_failure, lookup_duration
-from .const import CONF_PAUSE_PLAYBACK, CONF_VOLUME_RESTORE, DOMAIN
+from .const import (
+    CONF_ANNOUNCE_MODE,
+    CONF_PAUSE_PLAYBACK,
+    CONF_VOLUME_RESTORE,
+    DEFAULT_ANNOUNCE_MODE,
+    DOMAIN,
+)
 from .utils import (
     call_media_player_service,
     get_media_player_state,
@@ -55,13 +64,37 @@ from .utils import (
 
 _LOGGER = logging.getLogger(__name__)
 
-# Health statuses that guarantee the next API call will fail. When the
-# entity's tracker is in one of these, ``announce()`` aborts before
-# ``tts.speak`` runs - calling it anyway only wakes the speaker (chime
-# + music interrupt) for audio that will never arrive.
-PERSISTENT_FAILURE_STATUSES = frozenset(
-    {API_STATUS_AUTH_FAILED, API_STATUS_QUOTA_EXCEEDED}
-)
+# Buffering is a transient state Cast devices dwell in for ~200-800ms
+# right after ``play_media`` while the receiver loads the URL. We
+# can't treat it as ``playing`` (issuing pause to a buffering Cast
+# triggers a play-then-pause cycle on the receiver firmware - the user
+# hears a brief blast of audio), and we can't treat it as ``idle``
+# (skipping pause/volume here is what caused the original spike when
+# buffering rolled into playing during tts.speak). Instead, when we
+# see buffering, we wait briefly for it to settle to a stable state.
+_BUFFERING_STATE = "buffering"
+_BUFFERING_SETTLE_TIMEOUT_S = 2.0
+_BUFFERING_SETTLE_POLL_S = 0.1
+
+# Don't bother seeking back after a Cast replay when the user was still
+# in the opening seconds of the item - the seek round-trip is more
+# disruptive than the couple of seconds it would recover.
+_RESUME_SEEK_MIN_POSITION_S = 5.0
+
+# How long to keep watching for a platform-driven auto-resume after the
+# announcement. Music Assistant's resume lands 1-3 s late, so the window
+# has to outlast that; it runs on a timer rather than blocking the
+# service call.
+_LATE_RESUME_WATCH_S = 5.0
+
+# How long the hands-off path waits for the engine to record a failure
+# before declaring the announcement successful. The engine writes the
+# sentinel from the streaming task, which completes just after
+# ``tts.speak`` returns, so a single immediate read would race with it.
+# Kept short: this delay is paid on every hands-off call, and a provider
+# error is recorded as soon as the response arrives.
+_FAILURE_SETTLE_TIMEOUT_S = 3.0
+
 HEALTH_TRACKER_KEY_SUFFIX = "_health_tracker"
 
 # Pre-speak readiness window. We block ``tts.speak`` until every
@@ -133,23 +166,89 @@ async def _wait_until_speakers_ready(
                 _LOGGER.debug("Listener dispose failed: %s", exc)
 
 
+async def _await_buffering_settle(
+    hass: HomeAssistant,
+    entity_id: str,
+    *,
+    timeout_s: float = _BUFFERING_SETTLE_TIMEOUT_S,
+    poll_s: float = _BUFFERING_SETTLE_POLL_S,
+) -> str:
+    """Poll ``entity_id`` until its state leaves ``buffering``.
+
+    Returns the resolved state, or ``"buffering"`` on timeout. Cast
+    Default Receiver dwells in ``buffering`` for a few hundred ms after
+    a fresh ``play_media``; we don't want to issue ``media_pause`` while
+    it's there because that triggers a play-then-pause cycle on the
+    receiver firmware (audible blast). Bounded so we don't pin the
+    announcement on a stuck stream.
+    """
+    deadline = asyncio.get_event_loop().time() + timeout_s
+    state_obj = hass.states.get(entity_id)
+    if state_obj is None:
+        return STATE_UNKNOWN
+    state = state_obj.state
+    while state == _BUFFERING_STATE:
+        if asyncio.get_event_loop().time() >= deadline:
+            _LOGGER.debug(
+                "prepare(): %s still buffering after %.1fs, treating as-is",
+                entity_id, timeout_s,
+            )
+            break
+        await asyncio.sleep(poll_s)
+        state_obj = hass.states.get(entity_id)
+        if state_obj is None:
+            return STATE_UNKNOWN
+        state = state_obj.state
+    _LOGGER.debug(
+        "prepare(): %s settled out of buffering -> %s", entity_id, state,
+    )
+    return state
+
+
 # ---------------------------------------------------------------------------
 # Entry / tracker resolution helpers
 # ---------------------------------------------------------------------------
 
 
-def _resolve_config_entry(hass: HomeAssistant, tts_entity: str):
-    """Return the parent ConfigEntry that owns ``tts_entity``, or None.
+def _resolve_profile_flag(
+    hass: HomeAssistant, tts_entity: str, key: str, default: Any
+) -> Any:
+    """Read a boolean-ish setting for ``tts_entity`` from its own config.
 
-    Used so flags like ``volume_restore`` and ``pause_playback`` come
-    from the integration entry that actually produced the entity, not
-    from an unrelated ``entries[0]`` in multi-account setups.
+    Lookup order, most specific first:
+
+    1. The profile subentry's ``data`` - where per-profile settings
+       live for entries created by the profile wizard.
+    2. The parent entry's ``options`` - where the legacy options flow
+       writes, and the only place these toggles have a UI today.
+    3. The parent entry's ``data`` - pre-options-flow entries.
+
+    Reading only the parent's ``options`` was wrong for profile-based
+    entries: a parent that owns subentries has an empty ``options``
+    dict, so every profile silently fell through to the default no
+    matter what the user had configured.
     """
     er = entity_registry.async_get(hass)
-    entry = er.async_get(tts_entity)
-    if entry is None or entry.config_entry_id is None:
-        return None
-    return hass.config_entries.async_get_entry(entry.config_entry_id)
+    registry_entry = er.async_get(tts_entity)
+    if registry_entry is None or registry_entry.config_entry_id is None:
+        return default
+    parent = hass.config_entries.async_get_entry(
+        registry_entry.config_entry_id
+    )
+    if parent is None:
+        return default
+
+    subentry_id = getattr(registry_entry, "config_subentry_id", None)
+    if subentry_id:
+        subentry = (getattr(parent, "subentries", None) or {}).get(subentry_id)
+        if subentry is not None and key in subentry.data:
+            return subentry.data[key]
+
+    if key in parent.options:
+        return parent.options[key]
+    if key in parent.data:
+        return parent.data[key]
+    return default
 
 
 def _resolve_health_tracker(
@@ -170,6 +269,20 @@ def _is_cast_platform(hass: HomeAssistant, entity_id: str) -> bool:
     er = entity_registry.async_get(hass)
     entry = er.async_get(entity_id)
     return entry is not None and entry.platform == "cast"
+
+
+def _is_ma_platform(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when ``entity_id`` is owned by the Music Assistant integration.
+
+    MA's ``media_pause`` does NOT stick on DLNA-backed players (observed
+    on JBL Authentics via universal_player + DLNA): the queue auto-
+    resumes within ~300ms of the pause command landing. ``media_stop``
+    is sticky and preserves the current track + position, so resuming
+    later with ``media_play`` continues from where the queue was.
+    """
+    er = entity_registry.async_get(hass)
+    entry = er.async_get(entity_id)
+    return entry is not None and entry.platform == "music_assistant"
 
 
 def _resolve_unique_id(hass: HomeAssistant, tts_entity: str) -> str | None:
@@ -201,17 +314,126 @@ class _VolumeRestorer:
         self.entity_ids = entity_ids
         self._original_volumes: Dict[str, float] = {}
         self._paused_media: Set[str] = set()
+        # Cast Default Receiver leaks ~150-400ms of the previous URL
+        # right when ``play_media announce=True`` arrives over a paused
+        # session - the receiver firmware briefly resumes the held
+        # stream while it loads the announcement. ``media_stop`` instead
+        # clears the receiver state entirely, so there's nothing to
+        # leak. We snapshot the URL here so we can replay it after the
+        # announcement (regular ``media_play`` doesn't restart a
+        # stopped session).
+        self._stopped_media: Dict[str, Dict[str, Any]] = {}
+        # Targets that were idle/off/standby right before the
+        # announcement. Music Assistant's announce flow auto-resumes
+        # the previously queued track once the announcement ends, even
+        # if the queue had been paused and the user expected silence.
+        # We use this set after restore to detect that uninvited
+        # playback and ``media_stop`` it.
+        self._was_inactive: Set[str] = set()
+        # Targets that the device's announcement layer is handling, so
+        # ``_set_announcement_volume`` and ``restore`` know to leave
+        # them alone. Populated by ``prepare()`` when announce_mode is on.
+        self._native_announce_skipped: Set[str] = set()
 
     async def prepare(
         self,
         target_volume: Optional[float],
         pause_playback: bool,
+        announce_mode: bool = True,
+        force_manual: bool = False,
     ) -> None:
-        """Turn devices on, snapshot volumes, optionally pause, set level."""
+        """Turn devices on, snapshot volumes, optionally pause, set level.
+
+        Native-announce targets are ALWAYS skipped by the manual flow.
+        Those are the ones ``_native_announce_targets`` identifies:
+        Sonos and Music Assistant by platform, plus anything that
+        advertises ``MEDIA_ANNOUNCE`` at runtime. There is a single
+        ``tts.speak`` call for every target regardless of platform;
+        what differs is that HA's speak already carries
+        ``announce=True`` into ``play_media``, so those devices duck
+        and restore on their own. A parallel ``volume_set`` from this
+        side would just spike the underlying music a second time.
+
+        The ``announce_mode`` flag still controls behaviour for the
+        non-native targets (Cast without the feature bit / Bluetooth):
+
+        * ``True`` (default): manual pause + speak + resume so the
+          user doesn't lose the music on Cast.
+        * ``False``: hands-off, the speaker handles the incoming
+          media however it normally does (Cast replaces, BT
+          overlays).
+        """
+        _LOGGER.debug(
+            "prepare(): targets=%s target_volume=%s pause_playback=%s announce_mode=%s",
+            self.entity_ids, target_volume, pause_playback, announce_mode,
+        )
+        # Native-announce targets are owned by the device's
+        # announcement layer when no explicit volume override is in
+        # play. With a service-call volume present we instead force
+        # all targets onto the manual pause + speak + resume flow:
+        # MA's native announce_volume hits the same global volume as
+        # a manual volume_set on speakers without per-stream support
+        # (JBL Authentics et al), so the user couldn't actually
+        # control the announcement loudness. Pausing first and
+        # bumping the volume after avoids the audible spike and
+        # gives reliable per-call volume control - we trade MA's
+        # auto-ducking for it on this single announcement.
+        if force_manual:
+            skip_protection: Set[str] = set()
+            _LOGGER.debug(
+                "prepare(): force_manual=True (volume override active); "
+                "treating all targets as manual"
+            )
+        else:
+            skip_protection = _native_announce_targets(
+                self.hass, self.entity_ids
+            )
+        self._native_announce_skipped = skip_protection
+        if skip_protection:
+            _LOGGER.debug(
+                "prepare(): skipping pause/volume for native-announce targets: %s",
+                sorted(skip_protection),
+            )
         states = await asyncio.gather(
             *(get_media_player_state(self.hass, eid) for eid in self.entity_ids),
             return_exceptions=True,
         )
+
+        # Buffering pre-pass. A target that is mid-load has to settle
+        # before we can decide whether to pause it, but the settle is a
+        # wait, not work: doing it inside the per-entity loop below made
+        # N buffering targets cost N x the settle timeout, with the
+        # music still playing at its original level the whole time.
+        # Settle them all at once, then re-read their state so the
+        # decisions below see post-settle attributes rather than the
+        # stale pre-settle snapshot.
+        buffering_idx = [
+            i for i, sx in enumerate(states)
+            if not isinstance(sx, Exception)
+            and sx[0] == _BUFFERING_STATE
+        ]
+        if buffering_idx:
+            buffering_ids = [self.entity_ids[i] for i in buffering_idx]
+            _LOGGER.debug(
+                "prepare(): settling %d buffering target(s) concurrently: %s",
+                len(buffering_ids), buffering_ids,
+            )
+            await asyncio.gather(
+                *(
+                    _await_buffering_settle(self.hass, eid)
+                    for eid in buffering_ids
+                ),
+                return_exceptions=True,
+            )
+            refreshed = await asyncio.gather(
+                *(
+                    get_media_player_state(self.hass, eid)
+                    for eid in buffering_ids
+                ),
+                return_exceptions=True,
+            )
+            for i, fresh in zip(buffering_idx, refreshed):
+                states[i] = fresh
 
         turn_on_tasks = []
         pause_tasks = []
@@ -227,6 +449,30 @@ class _VolumeRestorer:
                 _LOGGER.warning("Media player %s not available", entity_id)
                 continue
 
+            # Native-announce targets are owned by the device's
+            # announcement layer in this mode; skip the volume snapshot
+            # and the pause so we don't fight the firmware.
+            #
+            # Powering the device on is NOT skipped. A speaker sitting
+            # in ``off`` cannot render an announcement no matter who
+            # owns the ducking, and ``_wait_until_speakers_ready``
+            # below needs the turn_on to have been issued before it can
+            # block on readiness. Skipping this is how a Music
+            # Assistant player in ``off`` ended up receiving
+            # ``tts.speak`` while still powered down.
+            if entity_id in skip_protection:
+                needs_power = state.lower() == "off"
+                _LOGGER.debug(
+                    "prepare(): %s state=%s -> native announce, untouched%s",
+                    entity_id, state,
+                    " (turn_on queued)" if needs_power else "",
+                )
+                if needs_power:
+                    turn_on_tasks.append(
+                        call_media_player_service(self.hass, "turn_on", entity_id)
+                    )
+                continue
+
             volume = attrs.get(ATTR_MEDIA_VOLUME_LEVEL)
             if volume is not None:
                 self._original_volumes[entity_id] = float(volume)
@@ -235,18 +481,112 @@ class _VolumeRestorer:
                 # capture it once turn-on completes.
                 capture_after_on.append(entity_id)
 
+            _LOGGER.debug(
+                "prepare(): %s state=%s vol=%s",
+                entity_id, state, volume,
+            )
+
+            # Snapshot inactive targets so we can detect / cancel any
+            # auto-resume by the platform's announce layer (see
+            # ``_was_inactive`` rationale in __init__).
+            if state in (STATE_IDLE, STATE_OFF, STATE_STANDBY):
+                self._was_inactive.add(entity_id)
+
             if state.lower() == "off":
                 turn_on_tasks.append(
                     call_media_player_service(self.hass, "turn_on", entity_id)
                 )
 
-            if pause_playback and state == STATE_PLAYING:
-                self._paused_media.add(entity_id)
+            # Idle device with a queued media URL: send ``media_stop`` so
+            # the platform's announce layer doesn't have an active
+            # playback session to interleave with the announcement. We
+            # deliberately don't ``clear_playlist`` here because the
+            # user's curated queue must survive the announcement -
+            # ``media_stop`` halts playback but leaves the queue intact.
+            #
+            # Note: this alone doesn't prevent Music Assistant's
+            # post-announcement auto-resume (MA's announce service is
+            # hardcoded to resume the queue when the announcement ends,
+            # even if it was paused before). That leak is handled by
+            # ``_stop_unintended_playback`` below, which watches for
+            # the unwanted resume and pauses immediately to preserve
+            # the queue position.
+            if (
+                state in (STATE_IDLE, STATE_STANDBY)
+                and attrs.get("media_content_id")
+            ):
+                _LOGGER.info(
+                    "prepare(): %s idle with queued media - "
+                    "media_stop pre-TTS",
+                    entity_id,
+                )
                 pause_tasks.append(
                     call_media_player_service(
-                        self.hass, SERVICE_MEDIA_PAUSE, entity_id
+                        self.hass, "media_stop", entity_id
                     )
                 )
+
+            if pause_playback and state == STATE_PLAYING:
+                if _is_cast_platform(self.hass, entity_id):
+                    # Cast: media_stop + snapshot URL for replay. See
+                    # ``_stopped_media`` rationale on __init__.
+                    #
+                    # Only when the snapshot is actually replayable.
+                    # An app-driven session (Spotify, YouTube, Plex)
+                    # reports an id ``play_media`` cannot resolve, so
+                    # stopping it would lose the music permanently.
+                    content_id = attrs.get("media_content_id") or ""
+                    if _is_replayable_media_id(content_id):
+                        self._stopped_media[entity_id] = {
+                            "media_content_id": content_id,
+                            "media_content_type": (
+                                attrs.get("media_content_type") or "music"
+                            ),
+                            # ``play_media`` always restarts at zero, so
+                            # remember where we were and seek back after
+                            # the announcement when the device allows it.
+                            "media_position": attrs.get("media_position") or 0,
+                        }
+                        pause_tasks.append(
+                            call_media_player_service(
+                                self.hass, "media_stop", entity_id
+                            )
+                        )
+                    else:
+                        # Nothing we can replay - fall back to pause so
+                        # the session survives, even if the Cast
+                        # handover blip may still occur.
+                        _LOGGER.debug(
+                            "prepare(): %s content_id %r is not replayable, "
+                            "pausing instead of stopping",
+                            entity_id, content_id,
+                        )
+                        self._paused_media.add(entity_id)
+                        pause_tasks.append(
+                            call_media_player_service(
+                                self.hass, SERVICE_MEDIA_PAUSE, entity_id
+                            )
+                        )
+                elif _is_ma_platform(self.hass, entity_id):
+                    # Music Assistant: ``media_pause`` doesn't stick
+                    # (queue auto-resumes within ~300ms). Use
+                    # ``media_stop`` instead - it sticks and preserves
+                    # the queue position so a later ``media_play`` (in
+                    # ``_resume_paused_media``) resumes from the same
+                    # spot.
+                    self._paused_media.add(entity_id)
+                    pause_tasks.append(
+                        call_media_player_service(
+                            self.hass, "media_stop", entity_id
+                        )
+                    )
+                else:
+                    self._paused_media.add(entity_id)
+                    pause_tasks.append(
+                        call_media_player_service(
+                            self.hass, SERVICE_MEDIA_PAUSE, entity_id
+                        )
+                    )
 
         if turn_on_tasks:
             await asyncio.gather(*turn_on_tasks, return_exceptions=True)
@@ -263,6 +603,10 @@ class _VolumeRestorer:
                         self._original_volumes[entity_id] = float(actual)
 
         if pause_tasks:
+            _LOGGER.debug(
+                "prepare(): awaiting %d pause task(s) before volume change",
+                len(pause_tasks),
+            )
             await asyncio.gather(*pause_tasks, return_exceptions=True)
             # Pause is async on most media platforms - the service call
             # returns instantly but the device takes a few hundred ms
@@ -271,8 +615,25 @@ class _VolumeRestorer:
             # spike on the music that's still playing while pause
             # propagates.
             await asyncio.sleep(0.4)
+            _LOGGER.debug("prepare(): pause settle done (0.4s)")
+        elif pause_playback:
+            _LOGGER.debug(
+                "prepare(): pause_playback=True but no playing targets, skipping pause"
+            )
 
         if target_volume is not None:
+            _LOGGER.debug(
+                "prepare(): about to set announcement volume %.2f "
+                "(playing-and-not-paused targets: %s)",
+                target_volume,
+                [
+                    eid for eid in self.entity_ids
+                    if eid not in self._paused_media
+                    and eid not in self._stopped_media
+                    and (s := self.hass.states.get(eid)) is not None
+                    and s.state == STATE_PLAYING
+                ],
+            )
             await self._set_announcement_volume(target_volume)
 
         # Cast multi-room sync compensation. When more than one cast device
@@ -293,9 +654,23 @@ class _VolumeRestorer:
             await asyncio.sleep(1.0)
 
     async def _set_announcement_volume(self, target: float) -> None:
-        """Push every speaker to ``target`` (skip ones already there)."""
+        """Push every speaker to ``target`` (skip ones already there).
+
+        Targets we marked as native-announce in ``prepare()`` are
+        skipped: their device-level announcement layer already ducks
+        the music for us, and a global volume_set would spike the
+        underlying playback for the few seconds before the speak
+        actually starts.
+        """
         tasks = []
         for entity_id in self.entity_ids:
+            if entity_id in self._native_announce_skipped:
+                _LOGGER.debug(
+                    "Skipping volume override for %s (native announce target)",
+                    entity_id,
+                )
+                continue
+
             current = self._original_volumes.get(entity_id)
             if current is None or abs(current - target) > 0.01:
                 _LOGGER.info(
@@ -326,9 +701,10 @@ class _VolumeRestorer:
             # Same settle as the happy-path restore: let the volume
             # change reach the device before we unpause, so the music
             # doesn't briefly come back at the announcement level.
-            if self._paused_media:
+            if self._paused_media or self._stopped_media:
                 await asyncio.sleep(0.4)
         await self._resume_paused_media()
+        self._stop_unintended_playback()
 
     async def restore_after_playback(
         self,
@@ -374,9 +750,10 @@ class _VolumeRestorer:
             # before we unpause - otherwise the music would briefly
             # come back at the announcement volume while the restore
             # request is still propagating.
-            if self._paused_media:
+            if self._paused_media or self._stopped_media:
                 await asyncio.sleep(0.4)
         await self._resume_paused_media()
+        self._stop_unintended_playback()
 
     async def _restore_one(self, entity_id: str, original_volume: float) -> bool:
         try:
@@ -394,16 +771,234 @@ class _VolumeRestorer:
             _LOGGER.error("Failed to restore volume for %s: %s", entity_id, exc)
             return False
 
-    async def _resume_paused_media(self) -> None:
-        if not self._paused_media:
+    def _stop_unintended_playback(self) -> None:
+        """Cancel auto-resume by platform-level announce flows.
+
+        Music Assistant's ``play_announcement`` (invoked by HA's
+        ``tts.speak`` for MA-served media_players that advertise the
+        MEDIA_ANNOUNCE feature) restores the previously queued track
+        when the announcement ends, even if the queue was paused and
+        the user expected silence. MA does NOT expose a "don't resume"
+        flag - the resume is hardcoded in its announce flow.
+
+        Scope: only targets whose announcement is owned by the device
+        or the platform, and which were inactive before the
+        announcement. Targets we paused ourselves are resumed by
+        ``_resume_paused_media``, and a target we merely powered on has
+        no queue to auto-resume, so pausing it would only truncate the
+        announcement it was turned on for.
+
+        Anything currently rendering the TTS clip itself is left alone
+        for the same reason: ``media_content_id`` still carries the TTS
+        proxy URL while our own announcement is audible, and pausing
+        there cuts the message off mid-sentence.
+
+        Non-blocking by design. The immediate check is fired as a
+        background task and the late-resume listener tears itself down
+        on a timer, so ``openai_tts.say`` returns as soon as volumes
+        are restored instead of waiting out the watch window.
+        """
+        if not self._was_inactive:
             return
-        await asyncio.gather(
-            *(
-                call_media_player_service(self.hass, SERVICE_MEDIA_PLAY, eid)
-                for eid in self._paused_media
-            ),
-            return_exceptions=True,
+
+        targets = {
+            eid for eid in self._was_inactive
+            if eid not in self._paused_media
+            and eid not in self._stopped_media
+            and eid in self._native_announce_skipped
+        }
+        if not targets:
+            return
+
+        handled: Set[str] = set()
+
+        def _stop_action(eid: str) -> str:
+            # MA's media_pause auto-resumes within ~300ms on DLNA
+            # backends; media_stop sticks and still preserves the queue
+            # position (a later media_play continues from the saved
+            # offset). For non-MA platforms, media_pause is the right
+            # tool and keeps position too.
+            return "media_stop" if _is_ma_platform(self.hass, eid) else SERVICE_MEDIA_PAUSE
+
+        def _is_our_announcement(state: Any) -> bool:
+            """True while the entity is still rendering our TTS clip."""
+            if state is None:
+                return False
+            content_id = state.attributes.get("media_content_id") or ""
+            return _TTS_PROXY_MARKER in content_id
+
+        async def _pause_now(eid: str, action: str) -> None:
+            await call_media_player_service(self.hass, action, eid)
+
+        # Immediate check: MA may have already resumed by the time we
+        # got here (race with the hold window). Catch those first.
+        for eid in sorted(targets):
+            state = self.hass.states.get(eid)
+            if state is None or state.state not in (STATE_PLAYING, _BUFFERING_STATE):
+                continue
+            if _is_our_announcement(state):
+                _LOGGER.debug(
+                    "%s is still playing the announcement, not pausing", eid,
+                )
+                continue
+            action = _stop_action(eid)
+            _LOGGER.info(
+                "Pausing unintended auto-resume on %s via %s "
+                "(pre-TTS was inactive, now %s)",
+                eid, action, state.state,
+            )
+            handled.add(eid)
+            self.hass.async_create_task(_pause_now(eid, action))
+
+        # Late-resume watch: MA's auto-resume can fire 1-3s after the
+        # announcement ends, which can be AFTER the immediate check
+        # above. Listen for any state -> playing transition on the
+        # remaining targets so we react in ~100-200ms instead of
+        # waiting for another poll. Bounded so we don't accidentally
+        # pause a deliberate play action that the user kicks off 30s
+        # later.
+        remaining = targets - handled
+        if not remaining:
+            return
+
+        disposers: List[Any] = []
+
+        def _teardown() -> None:
+            while disposers:
+                d = disposers.pop()
+                try:
+                    d()
+                except Exception:  # pragma: no cover - defensive
+                    pass
+
+        @callback
+        def _on_change(event: Event) -> None:
+            new_state = event.data.get("new_state")
+            if new_state is None:
+                return
+            eid = event.data.get("entity_id")
+            if eid in handled or eid not in remaining:
+                return
+            if new_state.state not in (STATE_PLAYING, _BUFFERING_STATE):
+                return
+            if _is_our_announcement(new_state):
+                return
+            handled.add(eid)
+            action = _stop_action(eid)
+            _LOGGER.info(
+                "Late auto-resume on %s, sending %s "
+                "(preserves queue position)",
+                eid, action,
+            )
+            self.hass.async_create_task(_pause_now(eid, action))
+            if handled >= remaining:
+                _teardown()
+
+        disposers.extend(
+            async_track_state_change_event(self.hass, eid, _on_change)
+            for eid in remaining
         )
+
+        @callback
+        def _on_timeout(_now: Any) -> None:
+            _teardown()
+
+        async_call_later(self.hass, _LATE_RESUME_WATCH_S, _on_timeout)
+
+    async def _wait_for_announce_done(
+        self,
+        entity_id: str,
+        *,
+        timeout_s: float = 25.0,
+        poll_s: float = 0.4,
+    ) -> None:
+        """For MA entities, wait until the device leaves the announce
+        playback state before sending resume commands.
+
+        Music Assistant sets ``ANNOUNCEMENT_IN_PROGRESS=True`` on the
+        player during its announce flow and explicitly ignores incoming
+        queue commands (play/pause/next) while that flag is set ("Ignore
+        queue command: An announcement is in progress" in MA's source).
+        If we ``media_play`` while the announce is still running on the
+        device, MA drops it on the floor and the queue stays idle when
+        the announcement ends - the user gets no resume.
+
+        We watch the HA state instead (we don't have direct access to
+        MA's internal flag) and treat ``idle`` / ``paused`` as the
+        announce being released. Bounded by ``timeout_s`` so a stuck
+        announce never freezes our restore path.
+        """
+        deadline = asyncio.get_event_loop().time() + timeout_s
+        while asyncio.get_event_loop().time() < deadline:
+            s = self.hass.states.get(entity_id)
+            if s is None or s.state not in (STATE_PLAYING, _BUFFERING_STATE):
+                return
+            await asyncio.sleep(poll_s)
+        _LOGGER.debug(
+            "_resume_paused_media: %s still playing after %.1fs, "
+            "sending media_play anyway",
+            entity_id, timeout_s,
+        )
+
+    async def _resume_paused_media(self) -> None:
+        async def _resume_one(eid: str) -> None:
+            # Music Assistant ignores queue commands while its
+            # announcement is still in progress. Wait for the
+            # announcement to release the player before sending play.
+            if _is_ma_platform(self.hass, eid):
+                await self._wait_for_announce_done(eid)
+            await call_media_player_service(
+                self.hass, SERVICE_MEDIA_PLAY, eid
+            )
+
+        async def _replay_one(eid: str, snapshot: Dict[str, Any]) -> None:
+            # Cast targets we ``media_stop``-ed need a fresh
+            # ``play_media`` to pick up the URL again -
+            # SERVICE_MEDIA_PLAY on a stopped receiver is a no-op since
+            # there's no current item.
+            await self.hass.services.async_call(
+                "media_player", "play_media",
+                {
+                    "entity_id": eid,
+                    "media_content_id": snapshot["media_content_id"],
+                    "media_content_type": snapshot["media_content_type"],
+                },
+                blocking=True,
+            )
+            # ``play_media`` restarts the item from the beginning. Seek
+            # back to where the user was, so a stopped 40-minute
+            # podcast doesn't silently rewind to zero. Skipped when the
+            # device can't seek or we were near the start anyway.
+            position = snapshot.get("media_position") or 0
+            if position < _RESUME_SEEK_MIN_POSITION_S:
+                return
+            if not _supports_media_seek(self.hass, eid):
+                _LOGGER.debug(
+                    "_resume_paused_media: %s cannot seek, resuming from 0 "
+                    "(was at %.0fs)",
+                    eid, position,
+                )
+                return
+            try:
+                await self.hass.services.async_call(
+                    "media_player", "media_seek",
+                    {"entity_id": eid, "seek_position": position},
+                    blocking=False,
+                )
+            except HomeAssistantError as err:
+                _LOGGER.debug(
+                    "_resume_paused_media: seek to %.0fs on %s failed: %s",
+                    position, eid, err,
+                )
+
+        resume_tasks = [_resume_one(eid) for eid in self._paused_media]
+        resume_tasks.extend(
+            _replay_one(eid, snapshot)
+            for eid, snapshot in self._stopped_media.items()
+        )
+        if not resume_tasks:
+            return
+        await asyncio.gather(*resume_tasks, return_exceptions=True)
 
 # ---------------------------------------------------------------------------
 # announce() - top-level orchestration
@@ -419,8 +1014,26 @@ async def announce(
     options: Optional[Dict[str, Any]] = None,
     tts_volume: Optional[float] = None,
     pause_playback: Optional[bool] = None,
+    announce: Optional[bool] = None,
 ) -> None:
     """Run a TTS announcement with automatic volume save/restore.
+
+    ``announce`` is the modern flag (``True`` by default at the call
+    sites). Behaviour:
+
+    * ``announce=True``  - speakers exposing ``MEDIA_ANNOUNCE`` skip
+      our manual pause / volume_set / restore so the device's native
+      announcement layer handles ducking and auto-resume; speakers
+      without the feature fall back to manual pause + speak + resume
+      so the user doesn't lose what was playing.
+    * ``announce=False`` - fire-and-forget (Cast replaces the current
+      media, Bluetooth overlays, Sonos still ducks at the firmware
+      level). Use when an automation explicitly wants the speaker's
+      default behaviour.
+
+    ``pause_playback`` is kept for backwards compatibility with
+    existing automations: it's mapped 1:1 onto ``announce`` when the
+    new flag isn't provided.
 
     Raises ``HomeAssistantError`` when the call cannot complete - either
     because the API is in a persistent failure state, or because the
@@ -432,16 +1045,36 @@ async def announce(
 
     _abort_if_persistent_failure(hass, tts_entity)
 
-    config_entry = _resolve_config_entry(hass, tts_entity)
     restore_enabled = (
         tts_volume is not None
-        or (config_entry and config_entry.options.get(CONF_VOLUME_RESTORE, False))
-    )
-    pause_enabled = (
-        pause_playback if pause_playback is not None
-        else bool(
-            config_entry and config_entry.options.get(CONF_PAUSE_PLAYBACK, False)
+        or bool(
+            _resolve_profile_flag(
+                hass, tts_entity, CONF_VOLUME_RESTORE, False
+            )
         )
+    )
+    # Resolution order for the announcement-mode flag:
+    #  1. Explicit ``announce`` argument (the service field)
+    #  2. Explicit ``pause_playback`` argument (legacy service alias,
+    #     kept so old automations keep working)
+    #  3. The profile's stored ``announce_mode`` setting
+    #  4. Default: announcement mode on
+    if announce is not None:
+        announce_enabled = bool(announce)
+    elif pause_playback is not None:
+        announce_enabled = bool(pause_playback)
+    else:
+        announce_enabled = bool(
+            _resolve_profile_flag(
+                hass, tts_entity, CONF_ANNOUNCE_MODE, DEFAULT_ANNOUNCE_MODE
+            )
+        )
+
+    # The legacy stored ``pause_playback`` toggle keeps its original
+    # meaning: force a pause of whatever is playing, independently of
+    # announcement mode. It only ever adds pausing, never removes it.
+    stored_pause_playback = bool(
+        _resolve_profile_flag(hass, tts_entity, CONF_PAUSE_PLAYBACK, False)
     )
 
     available_players = _filter_available(hass, media_players)
@@ -454,12 +1087,33 @@ async def announce(
         len(available_players), "" if restore_enabled else "out",
     )
 
-    # Build a restorer when EITHER feature is requested - pause needs
-    # the same prepare-and-resume scaffolding that volume restore uses,
-    # so a call with ``pause_playback=True`` but no volume change still
-    # has to go through ``_VolumeRestorer``. Without this, pause was a
-    # silent no-op on calls that didn't also enable volume restore.
-    needs_restorer = restore_enabled or pause_enabled
+    # Build a restorer when ANY of the manual-protection features
+    # is requested. Even when ``announce_enabled=True`` we still need
+    # the restorer to handle non-native targets (Cast / Bluetooth):
+    # for those, "announce mode" means "pause + speak + resume" so
+    # the user's music isn't lost. ``pause_playback=True`` is the
+    # legacy path that always pauses; we collapse it onto the same
+    # manual flow.
+    # Explicit per-call volume override forces all targets through
+    # the manual pause+volume+resume path. This gives the user
+    # reliable per-announcement volume control even on MA-served
+    # speakers without per-stream volume support (JBL Authentics,
+    # most consumer Cast wraps), at the cost of losing MA's
+    # native auto-ducking for this single announcement.
+    #
+    # A volume override also implies pause: bumping the device
+    # volume while the music is still playing audibly spikes it for
+    # the few seconds before tts.speak takes over. Pausing first
+    # makes the volume change inaudible and the resume on the way
+    # out brings the music back at the original level.
+    force_manual = tts_volume is not None
+    pause_for_manual = (
+        announce_enabled
+        or pause_playback is True
+        or stored_pause_playback
+        or force_manual
+    )
+    needs_restorer = restore_enabled or pause_for_manual or force_manual
     restorer = (
         _VolumeRestorer(hass, available_players) if needs_restorer else None
     )
@@ -467,33 +1121,70 @@ async def announce(
     if restorer is not None:
         await restorer.prepare(
             target_volume=tts_volume if restore_enabled else None,
-            pause_playback=pause_enabled,
+            pause_playback=pause_for_manual,
+            announce_mode=announce_enabled,
+            force_manual=force_manual,
         )
 
-    # Time the entire speak window. Some platforms (cast multi-target)
-    # return from ``tts.speak`` almost immediately while the audio is
-    # still streaming, while others (Music Assistant native, blocking
-    # TTS on Sonos, etc.) only return AFTER the clip has finished
-    # playing. Using ``speak_started_at`` instead of speak-completed
-    # captures both: the elapsed time we subtract from the post-speak
-    # hold ends up being ~0 for fire-and-forget targets and ~audio
-    # duration for blocking targets, so we don't double-hold.
     # Subscribe to the speakers' state bus BEFORE the speak call. On
     # synchronous platforms (Sonos / MA) the speak service only returns
     # after the announcement has finished playing; subscribing after
     # would miss every relevant transition. Whole orchestration runs
     # under a single ``try/finally`` so a CancelledError (or any other
     # BaseException) in the middle still tears down the listener.
+    #
+    # How much of the announcement has already elapsed by the time
+    # speak returns is not measured from the clock here. It is decided
+    # per signal further down (drain / synchronous speak / fallback),
+    # because wall time inside speak means completely different things
+    # on a fire-and-forget target and on a blocking one.
     watcher = _TtsPlaybackWatcher(hass, available_players) \
         if restorer is not None else None
     if watcher is not None:
         watcher.start()
 
-    speak_started_at = asyncio.get_running_loop().time()
+    # Drop any failure sentinel left over from an earlier attempt BEFORE
+    # speaking. That turns an ambiguous "is this sentinel current?"
+    # question into a decisive one: whatever is present after the speak
+    # was written by this attempt.
+    #
+    # Both halves matter. Trusting an old sentinel produced false
+    # failures after audio had actually played from HA's own TTS cache
+    # (issue #64). Ignoring a current one is worse: HA swallows errors
+    # raised inside the streaming path, so ``tts.speak`` returns
+    # normally even when nothing reached the speaker, and the caller
+    # would be told the announcement succeeded.
+    render_args = _resolved_render_args(hass, tts_entity, options)
+    resolved_unique_id = _resolve_unique_id(hass, tts_entity)
+    if clear_stale_failure(
+        hass, message, entity_id=resolved_unique_id, **render_args
+    ):
+        _LOGGER.debug(
+            "Cleared a pre-existing failure sentinel for %s before speaking",
+            tts_entity,
+        )
+
+    async def _attempt_failed() -> bool:
+        """True when this attempt wrote a failure sentinel.
+
+        Polls briefly rather than reading once. The engine marks the
+        failure from the streaming task, which finishes shortly AFTER
+        ``tts.speak`` returns, so an immediate read races with the write
+        and reports success for a call that actually failed. The window
+        is short because a failure is recorded as soon as the provider
+        answers.
+        """
+        cached = await _wait_for_cached_duration(
+            hass, tts_entity, message, options,
+            timeout_s=_FAILURE_SETTLE_TIMEOUT_S,
+        )
+        return cached == DURATION_FAILED_SENTINEL
+
     try:
         try:
             await _call_tts_speak(hass, tts_entity, message, language,
-                                  options, available_players)
+                                  options, available_players,
+                                  tts_volume=tts_volume)
         except Exception as err:
             if restorer is not None:
                 await restorer.restore_immediate(restore_volumes=restore_enabled)
@@ -502,35 +1193,36 @@ async def announce(
             ) from err
 
         if restorer is None:
-            # No volume restore and no pause - speak already returned, we're
-            # done. We don't probe the failure sentinel here:
-            # ``_call_tts_speak`` already propagated any engine failure as
-            # an exception, so reaching this point means HA either streamed
-            # fresh audio or served from its own TTS cache. A stale sentinel
-            # from a prior $0-balance attempt would cause a false-positive
-            # error after audio actually played (issue #64), so we trust
-            # speak's outcome.
+            # No volume restore and no pause, so there is nothing to hold
+            # or roll back. The sentinel is still worth probing: it was
+            # cleared before the speak, so finding one here means the
+            # engine failed during this attempt and no audio played.
+            if await _attempt_failed():
+                raise HomeAssistantError(
+                    f"TTS generation failed for {tts_entity}; no audio was "
+                    "delivered to the speakers. Check the integration log "
+                    "for the provider error."
+                )
             return
 
         cached = await _wait_for_cached_duration(
             hass, tts_entity, message, options, timeout_s=60.0
         )
         if cached == DURATION_FAILED_SENTINEL:
-            # Same rationale as above: tts.speak returned successfully, so
-            # something played (likely from HA's TTS cache). The sentinel
-            # is from a previous attempt and no longer reflects reality.
-            # Drop it so the next call doesn't false-trip again, and fall
-            # through to media_player / fallback duration for restore timing.
-            _LOGGER.debug(
-                "Stale failure sentinel for %s after successful speak; clearing",
-                tts_entity,
+            # Written by this attempt, since the pre-speak clear removed
+            # anything older. No audio played, so roll the volumes back
+            # now instead of holding for a clip that does not exist, and
+            # tell the caller.
+            _LOGGER.error(
+                "TTS failed for %s during this attempt; restoring volumes "
+                "without holding", tts_entity,
             )
-            clear_stale_failure(
-                hass, message,
-                entity_id=_resolve_unique_id(hass, tts_entity),
-                **_resolved_render_args(hass, tts_entity, options),
+            await restorer.restore_immediate(restore_volumes=restore_enabled)
+            raise HomeAssistantError(
+                f"TTS generation failed for {tts_entity}; no audio was "
+                "delivered to the speakers. Check the integration log for "
+                "the provider error."
             )
-            cached = None
 
         duration_ms = cached
         if duration_ms is None or duration_ms <= 0:
@@ -602,9 +1294,13 @@ def _abort_if_persistent_failure(hass: HomeAssistant, tts_entity: str) -> None:
 
     Done before any speaker prep so the cast/Sonos doesn't wake up for
     a request that can't possibly produce audio.
+
+    The tracker decides, via ``blocks_requests``, which also ages the
+    block out after a while so a resolved balance or key is discovered
+    without needing a config entry reload.
     """
     tracker = _resolve_health_tracker(hass, tts_entity)
-    if tracker is None or tracker.status not in PERSISTENT_FAILURE_STATUSES:
+    if tracker is None or not tracker.blocks_requests():
         return
     last_error = tracker.data.get("last_error_message")
     msg = (
@@ -637,6 +1333,7 @@ async def _call_tts_speak(
     language: str,
     options: Dict[str, Any],
     media_players: List[str],
+    tts_volume: Optional[float] = None,
 ) -> None:
     """Invoke HA's ``tts.speak`` exactly once.
 
@@ -648,6 +1345,16 @@ async def _call_tts_speak(
     we'd see an exception (e.g. an internal ``quote_from_bytes`` bug in
     HA's URL helper) the message is often already audible. Surfacing the
     failure once is preferable to playing it twice.
+
+    Every target goes through this one call - there is no per-platform
+    announcement service. HA's ``tts.speak`` sets ``announce=True`` on
+    the resulting ``play_media``, which is what lets devices exposing
+    ``MEDIA_ANNOUNCE`` duck and restore by themselves.
+
+    ``tts_volume`` is accepted for symmetry with the caller's signature
+    but isn't used here: HA's ``tts.speak`` doesn't carry per-call
+    volume to ``play_media``, so the actual loudness control happens in
+    the manual pause+volume+resume flow inside ``_VolumeRestorer``.
     """
     service_data = {
         "message": message,
@@ -789,6 +1496,120 @@ _TTS_PROXY_MARKER = "/api/tts_proxy/"
 _SYNC_SPEAK_PLATFORMS: frozenset[str] = frozenset({
     "music_assistant",
 })
+
+# Platforms whose ``tts.speak`` flows through a native announcement
+# layer that already handles ducking + per-announcement volume at the
+# device firmware level. Pushing a manual ``volume_set`` over those
+# targets actually changes the underlying music volume because the
+# device exposes a single global volume - we hear that as a brief
+# loudness spike on whatever is playing while the announcement
+# warms up. For these platforms the safe default is "let the
+# device decide the announcement loudness" and skip our volume bump
+# unless the caller also asked for ``pause_playback`` (in which case
+# the music has stopped, so the volume change is no longer audible).
+_NATIVE_ANNOUNCE_PLATFORMS: frozenset[str] = frozenset({
+    # Sonos firmware ducks the underlying playback at the device
+    # level when an announcement arrives.
+    "sonos",
+    # Music Assistant has its own announcement controller (chime +
+    # TTS + post-announce restore) that, even on DLNA/Cast wraps,
+    # behaves better than our manual stop+speak+resume - the latter
+    # fights MA's internal ANNOUNCEMENT_IN_PROGRESS lock and ends up
+    # leaving the queue idle or advanced when our resume gets
+    # ignored. We trust MA's native flow here. Volume overrides
+    # still force the manual path via ``force_manual=True`` in
+    # ``announce()`` so explicit per-call volume control keeps
+    # working.
+    "music_assistant",
+})
+
+
+def _is_replayable_media_id(content_id: str | None) -> bool:
+    """True when ``play_media`` can restore this item on its own.
+
+    ``media_content_id`` is only a real address for URL-backed
+    playback. When a Cast session is driven by a receiver app (Spotify,
+    YouTube, Plex) the id is an app-internal reference such as
+    ``spotify:track:...`` or an opaque provider string, and handing it
+    back to ``play_media`` restores nothing - the user's music is gone
+    for good. Those sessions get paused instead, which costs the brief
+    Cast handover blip but always comes back.
+    """
+    if not content_id:
+        return False
+    return content_id.startswith(("http://", "https://"))
+
+
+def _supports_media_seek(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when the entity accepts ``media_seek``."""
+    state = hass.states.get(entity_id)
+    if state is None:
+        return False
+    try:
+        features = int(state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(features & MediaPlayerEntityFeature.SEEK)
+
+
+def _supports_media_announce(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when the entity advertises ``MEDIA_ANNOUNCE``.
+
+    HA's ``tts.speak`` hands ``play_media`` an ``announce=True`` flag.
+    Integrations that declare ``MediaPlayerEntityFeature.MEDIA_ANNOUNCE``
+    act on it: the device ducks whatever is playing, plays the clip,
+    and restores the previous stream itself. For those targets our own
+    pause / volume_set / resume sequence is not just redundant, it
+    fights the device.
+
+    Read from the live state attributes rather than the entity
+    registry, because ``supported_features`` is a runtime property. A
+    target that is unavailable reports nothing, in which case we fall
+    back on the platform allowlist in the caller.
+    """
+    state = hass.states.get(entity_id)
+    if state is None:
+        return False
+    try:
+        features = int(state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0)
+    except (TypeError, ValueError):
+        return False
+    return bool(features & MediaPlayerEntityFeature.MEDIA_ANNOUNCE)
+
+
+def _native_announce_targets(
+    hass: HomeAssistant, entity_ids: List[str]
+) -> Set[str]:
+    """Return the subset of ``entity_ids`` that announce natively.
+
+    A target qualifies either by advertising ``MEDIA_ANNOUNCE`` at
+    runtime or by sitting on a platform in
+    ``_NATIVE_ANNOUNCE_PLATFORMS``. The allowlist is kept as a
+    supplement rather than replaced: Sonos and Music Assistant duck at
+    a level our capability check cannot see (Sonos does it in device
+    firmware, MA in its own announcement controller), and either can
+    report the feature bit inconsistently depending on the underlying
+    player wrap.
+
+    Used by ``_set_announcement_volume`` and ``prepare()`` to avoid
+    forcing a global volume bump on devices that already duck for us.
+    """
+    if not entity_ids:
+        return set()
+    er = entity_registry.async_get(hass)
+    out: Set[str] = set()
+    for eid in entity_ids:
+        entry = er.async_get(eid)
+        if entry and entry.platform in _NATIVE_ANNOUNCE_PLATFORMS:
+            out.add(eid)
+            continue
+        if _supports_media_announce(hass, eid):
+            _LOGGER.debug(
+                "%s advertises MEDIA_ANNOUNCE - treating as native announce",
+                eid,
+            )
+            out.add(eid)
+    return out
 
 
 def _all_targets_sync_speak(

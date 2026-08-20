@@ -145,9 +145,22 @@ say:
           max: 1.0
           step: 0.05
           mode: slider
-    pause_playback:
-      name: Pause Playback
-      description: Pause any currently playing media during announcement. Falls back to the profile setting when omitted.
+    announce:
+      name: Announcement mode
+      description: >-
+        On (default): each speaker decides. Targets that advertise the
+        MEDIA_ANNOUNCE feature, plus Sonos and Music Assistant, use
+        their native announcement layer, so the music ducks and
+        resumes on the device. Targets without that capability are
+        paused before the speak and resumed after, so nothing is
+        lost. Off: fire-and-forget; the speaker does whatever it
+        does for an incoming media (Cast replaces the track, Sonos
+        still ducks at firmware level, Bluetooth overlays).
       required: false
       selector:
         boolean:
+    # NOTE: ``pause_playback`` remains accepted by the service handler
+    # as a legacy alias for ``announce`` so existing automations keep
+    # working untouched. It's intentionally not surfaced in the UI -
+    # advertising both fields confused users (issue #N: "why do I
+    # see two toggles that mean the same thing?").
