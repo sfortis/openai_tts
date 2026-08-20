@@ -44,7 +44,7 @@ from .api_health import (
     OpenAITTSHealthTracker,
     STATUS_DESCRIPTIONS,
 )
-from .const import DOMAIN
+from .const import CONF_PROVIDER, DOMAIN, preset_for
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -70,7 +70,7 @@ async def async_setup_entry(
             entry.entry_id,
         )
         return
-    async_add_entities([OpenAITTSAPIStatusSensor(tracker)])
+    async_add_entities([OpenAITTSAPIStatusSensor(tracker, entry)])
 
 
 class OpenAITTSAPIStatusSensor(
@@ -87,13 +87,24 @@ class OpenAITTSAPIStatusSensor(
     _attr_entity_category = EntityCategory.DIAGNOSTIC
     _attr_icon = "mdi:cloud-check"
 
-    def __init__(self, tracker: OpenAITTSHealthTracker) -> None:
+    def __init__(
+        self,
+        tracker: OpenAITTSHealthTracker,
+        entry: ConfigEntry,
+    ) -> None:
         super().__init__(tracker)
         self._attr_unique_id = f"{tracker.entry_id}_api_status"
+        # Provider-aware device labels: a Mistral entry shouldn't
+        # introduce itself as "OpenAI TTS API" in Devices & Services.
+        # Falls back to the OpenAI preset for entries with no
+        # CONF_PROVIDER (created before the wizard) so the historical
+        # name stays put for those.
+        preset = preset_for(entry.data.get(CONF_PROVIDER))
+        provider_label = preset["label"]
         self._attr_device_info = {
             "identifiers": {(DOMAIN, f"{tracker.entry_id}_health")},
-            "name": "OpenAI TTS API",
-            "manufacturer": "OpenAI",
+            "name": f"{provider_label} TTS API",
+            "manufacturer": provider_label,
             "model": "TTS Health Tracker",
             "entry_type": "service",
         }
