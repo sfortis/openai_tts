@@ -540,6 +540,26 @@ CONF_PAUSE_PLAYBACK = "pause_playback"
 CONF_ANNOUNCE_MODE = "announce_mode"
 DEFAULT_ANNOUNCE_MODE = True
 
+# Sentence-level streaming pipelining.
+#
+# When on, and the text arrives gradually from a streaming conversation
+# agent, synthesis starts on the first completed sentence instead of
+# waiting for the agent to finish writing. This only affects the voice
+# assistant path: ``openai_tts.say`` passes a finished string, which
+# Home Assistant wraps in a single-chunk generator, so it keeps issuing
+# exactly one request.
+#
+# Off by default. It only helps when the conversation agent is slow
+# enough for the wait to be audible, and it has a real cost: each
+# sentence is a separate request, and OpenAI has no way to carry
+# prosody across requests (no equivalent of ElevenLabs'
+# ``previous_request_ids``), so the tone can shift mid-reply.
+#
+# Restricted at runtime to the audio formats that can be joined without
+# leaving several container headers inside one stream. See
+# ``streaming.PIPELINEABLE_FORMATS``.
+CONF_STREAM_PIPELINING = "stream_pipelining"
+
 # Profile name for sub-entries
 CONF_PROFILE_NAME = "profile_name"
 
