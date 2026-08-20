@@ -32,6 +32,25 @@ API_STATUS_SERVER_ERROR = "server_error"
 API_STATUS_NETWORK_ERROR = "network_error"
 API_STATUS_UNKNOWN_ERROR = "unknown_error"
 
+# Statuses that guarantee the next API call fails for a reason the user
+# has to fix outside Home Assistant: a dead key, an empty balance.
+BLOCKING_STATUSES: frozenset[str] = frozenset(
+    {API_STATUS_AUTH_FAILED, API_STATUS_QUOTA_EXCEEDED}
+)
+
+# How long a blocking status suppresses calls before one is let through.
+#
+# Without a window the block is permanent: only a success clears the
+# status, and no success is possible while every call is blocked, so the
+# only way out is reloading the config entry. That is defensible for a
+# bad API key, where the fix is a reconfigure and reloads anyway, but
+# wrong for an exhausted balance: the user tops up at the provider and
+# changes nothing here, so Home Assistant has to find out by trying.
+#
+# Ten minutes keeps the cost low. A blocked speaker wakes at most once
+# per window, and the failure path restores its volume immediately.
+BLOCKING_RETRY_AFTER_S = 600.0
+
 # All statuses that the sensor can publish (used as ENUM options).
 ALL_STATUSES: tuple[str, ...] = (
     API_STATUS_OK,
@@ -110,6 +129,38 @@ class OpenAITTSHealthTracker(DataUpdateCoordinator[dict[str, Any]]):
     def is_problem(self) -> bool:
         """True when the sensor should report an active problem."""
         return self.status != API_STATUS_OK
+
+    def blocks_requests(
+        self, retry_after_s: float = BLOCKING_RETRY_AFTER_S
+    ) -> bool:
+        """True when a request should be refused without being attempted.
+
+        A blocking status stops being blocking once ``retry_after_s`` has
+        passed since the failure was recorded, which lets a single call
+        through to discover that the problem is gone. If it still fails,
+        ``record_error`` stamps a fresh timestamp and the window starts
+        again.
+        """
+        if self.status not in BLOCKING_STATUSES:
+            return False
+        raw = self.data.get("last_error_at")
+        if not raw:
+            # Status without a timestamp: nothing to age out, stay blocked.
+            return True
+        try:
+            failed_at = datetime.fromisoformat(raw)
+        except (TypeError, ValueError):
+            return True
+        if failed_at.tzinfo is None:
+            failed_at = failed_at.replace(tzinfo=timezone.utc)
+        elapsed = (datetime.now(timezone.utc) - failed_at).total_seconds()
+        if elapsed < retry_after_s:
+            return True
+        _LOGGER.info(
+            "API status %s is %.0fs old; letting one request through to "
+            "check whether it has been resolved", self.status, elapsed,
+        )
+        return False
 
     def record_success(self) -> None:
         """Note a successful TTS call. Clears any prior unhealthy status."""

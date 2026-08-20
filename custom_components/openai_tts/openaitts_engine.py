@@ -30,6 +30,7 @@ import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers.aiohttp_client import async_get_clientsession
 
+from .const import model_may_accept_instructions
 from .exceptions import (
     OpenAIAuthError,
     OpenAINetworkError,
@@ -37,6 +38,7 @@ from .exceptions import (
     OpenAIRateLimitError,
     OpenAIServerError,
     OpenAITTSError,
+    OpenAIVoiceDeletedError,
 )
 
 _LOGGER = logging.getLogger(__name__)
@@ -45,14 +47,115 @@ DEFAULT_TIMEOUT_SECONDS = 30
 STREAMING_TIMEOUT_SECONDS = 60
 INITIAL_BUFFER_BYTES = 1024
 
+# Retry knobs for transient failures (5xx, 429, network blips). Auth /
+# quota / voice-deleted errors are skipped by ``_is_retryable`` so this
+# only applies to errors that have a real chance of clearing on the
+# next attempt. ``MAX_RETRIES`` is the number of *retries* on top of
+# the initial attempt, so the total request count is bounded at
+# ``1 + MAX_RETRIES`` (2 by default).
+#
+# Deliberately kept at a single retry. The per-attempt timeout is what
+# dominates the worst case: with ``STREAMING_TIMEOUT_SECONDS`` at 60 a
+# hanging provider already costs 2 x 60 + 1 = 121 s, and Home
+# Assistant's own TTS / service timeouts fire well before that. A
+# second retry only pushes the user-visible failure further out
+# without ever getting a chance to succeed. Flat (non-exponential) by
+# design - the user is waiting on the speaker, exponential backoff
+# would just turn dropped audio into longer silence.
+MAX_RETRIES = 1
+RETRY_DELAY_SECONDS = 1
 
-def _classify_http_error(status: int, body_snippet: str = "") -> OpenAITTSError:
+
+_VOICE_DELETED_PATTERNS = (
+    # Free-text fallback for backends that don't expose a structured
+    # error code. Each entry is matched case-insensitively against
+    # the body. Kept narrow so generic 400s like
+    # "voice argument is required" don't false-positive.
+    "voice does not exist",
+    "voice has been deleted",
+    "voice_not_found",
+    "voice_deleted",
+    "invalid voice",
+    "unknown voice",
+    # Groq's response when the voice slug is unknown / typo'd.
+    "voice must be",
+    "voice should be",
+)
+
+# Structured error codes / types that mean "this voice can't be used".
+# Matched against ``error.code`` and ``error.type`` from the JSON body.
+# Mistral uses ``type=invalid_voice`` (numeric ``code=1902``); the OpenAI
+# pattern is ``code=invalid_voice`` / ``code=voice_not_found``.
+_VOICE_DELETED_JSON_TOKENS = frozenset({
+    "invalid_voice",
+    "voice_not_found",
+    "voice_deleted",
+    "voice_does_not_exist",
+})
+
+
+def _voice_deletion_via_json(body_snippet: str) -> bool:
+    """Return True when the JSON envelope flags a voice-level error.
+
+    Looks at the typed fields first because they're stable across
+    provider releases - free-form messages can change wording from
+    one model rev to the next, codes generally don't.
+    """
+    body_snippet = body_snippet.strip()
+    if not body_snippet or not body_snippet.startswith("{"):
+        return False
+    try:
+        envelope = json.loads(body_snippet)
+    except (json.JSONDecodeError, ValueError):
+        return False
+    # OpenAI-style nests under ``error``; Mistral keeps the fields at
+    # the top level. Try both.
+    candidates = []
+    if isinstance(envelope, dict):
+        candidates.append(envelope)
+        nested = envelope.get("error")
+        if isinstance(nested, dict):
+            candidates.append(nested)
+    for cand in candidates:
+        type_ = str(cand.get("type", "")).lower()
+        code = str(cand.get("code", "")).lower()
+        if type_ in _VOICE_DELETED_JSON_TOKENS:
+            return True
+        if code in _VOICE_DELETED_JSON_TOKENS:
+            return True
+    return False
+
+
+def _looks_like_voice_deletion(body_snippet: str) -> bool:
+    """Detect a 4xx body that says 'this voice no longer exists'.
+
+    Two-tier check: structured JSON tokens first (Mistral
+    ``type=invalid_voice``, OpenAI ``code=invalid_voice``), free-text
+    pattern matching second (Groq, custom backends without a code).
+    The JSON tier is the authoritative source whenever it's present
+    so a future wording change in the message text doesn't silently
+    break detection.
+    """
+    if not body_snippet:
+        return False
+    if _voice_deletion_via_json(body_snippet):
+        return True
+    haystack = body_snippet.lower()
+    return any(p in haystack for p in _VOICE_DELETED_PATTERNS)
+
+
+def _classify_http_error(
+    status: int, body_snippet: str = "", voice: str | None = None
+) -> OpenAITTSError:
     """Map an HTTP status (and optional body) to a typed exception.
 
     The body snippet is appended to the message for 4xx responses so the
     user (or issue tracker) can see what the upstream server actually
     complained about. We trim to 200 chars to keep logs readable; the
     full body remains visible at DEBUG via the existing read-2048 path.
+
+    ``voice`` lets the engine pass the voice slug it was trying to use
+    so a downstream Repairs issue can name the missing voice.
     """
     detail = f" - {body_snippet[:200]}" if body_snippet and 400 <= status < 500 else ""
     if status in (401, 403):
@@ -78,6 +181,15 @@ def _classify_http_error(status: int, body_snippet: str = "") -> OpenAITTSError:
         return OpenAIServerError(
             f"TTS provider server error (HTTP {status}). Usually temporary; "
             "the integration retries once before giving up."
+        )
+    # 4xx that mentions the voice is gone: surface a dedicated error
+    # so the TTS layer can raise a Repairs issue instead of letting
+    # this look like a generic bad request.
+    if 400 <= status < 500 and _looks_like_voice_deletion(body_snippet):
+        return OpenAIVoiceDeletedError(
+            f"Configured voice {voice or '?'} no longer exists on the "
+            f"provider (HTTP {status}).{detail}",
+            voice=voice,
         )
     return OpenAITTSError(
         f"TTS provider rejected the request (HTTP {status}).{detail}"
@@ -186,8 +298,23 @@ class _RequestBuilder:
         effective_speed = speed if speed is not None else self._default_speed
         if effective_speed is not None and abs(float(effective_speed) - 1.0) > 1e-9:
             payload["speed"] = effective_speed
+        # Keep ``instructions`` out of the body when the model is a known
+        # OpenAI one that rejects it. The profile may still hold a value
+        # from when it was pointed at ``gpt-4o-mini-tts``; that value is
+        # preserved on purpose, but sending it to ``tts-1`` fails the
+        # whole request. Custom backends under unrecognised model names
+        # still get it.
         if instructions is not None:
-            payload["instructions"] = instructions
+            effective_model = payload["model"]
+            if model_may_accept_instructions(
+                effective_model if isinstance(effective_model, str) else None
+            ):
+                payload["instructions"] = instructions
+            else:
+                _LOGGER.debug(
+                    "Dropping instructions for model %s, which does not "
+                    "accept the field", effective_model,
+                )
 
         if extra_payload:
             # Be lenient with whitespace and the common ```json fenced
@@ -302,7 +429,6 @@ class OpenAITTSEngine:
             payload["model"], payload["voice"], payload.get("speed", 1.0),
         )
 
-        max_retries = 1
         attempt = 0
         while True:
             try:
@@ -329,28 +455,30 @@ class OpenAITTSEngine:
                     body_snippet = http_err.read(2048).decode("utf-8", errors="replace")
                 except Exception:
                     pass
-                classified = _classify_http_error(http_err.code, body_snippet)
-                _LOGGER.error(
-                    "OpenAI TTS HTTP %s on attempt %d: %s",
-                    http_err.code, attempt + 1, classified,
+                classified = _classify_http_error(
+                    http_err.code, body_snippet, voice=voice
                 )
-                if not _is_retryable(classified) or attempt >= max_retries:
+                _LOGGER.error(
+                    "OpenAI TTS HTTP %s on attempt %d/%d: %s",
+                    http_err.code, attempt + 1, MAX_RETRIES + 1, classified,
+                )
+                if not _is_retryable(classified) or attempt >= MAX_RETRIES:
                     raise classified from http_err
                 attempt += 1
-                time.sleep(1)
+                time.sleep(RETRY_DELAY_SECONDS)
                 continue
 
             except URLError as net_err:
                 _LOGGER.error(
-                    "Network error fetching TTS audio (attempt %d): %s",
-                    attempt + 1, net_err,
+                    "Network error fetching TTS audio (attempt %d/%d): %s",
+                    attempt + 1, MAX_RETRIES + 1, net_err,
                 )
-                if attempt >= max_retries:
+                if attempt >= MAX_RETRIES:
                     raise OpenAINetworkError(
                         f"Network error fetching TTS audio: {net_err}"
                     ) from net_err
                 attempt += 1
-                time.sleep(1)
+                time.sleep(RETRY_DELAY_SECONDS)
                 continue
 
             except OpenAITTSError:
@@ -358,15 +486,15 @@ class OpenAITTSEngine:
 
             except Exception as exc:
                 _LOGGER.error(
-                    "Unknown error fetching TTS audio (attempt %d): %s",
-                    attempt + 1, exc,
+                    "Unknown error fetching TTS audio (attempt %d/%d): %s",
+                    attempt + 1, MAX_RETRIES + 1, exc,
                 )
-                if attempt >= max_retries:
+                if attempt >= MAX_RETRIES:
                     raise OpenAITTSError(
                         f"Unknown error fetching TTS audio: {exc}"
                     ) from exc
                 attempt += 1
-                time.sleep(1)
+                time.sleep(RETRY_DELAY_SECONDS)
 
     async def async_get_tts_stream(
         self,
@@ -419,11 +547,10 @@ class OpenAITTSEngine:
             owns_session = True
 
         chunk_size = 4096 if response_format == "opus" else 8192
-        max_retries = 1
 
         try:
             response = await self._open_stream_with_retries(
-                session, payload, headers, max_retries
+                session, payload, headers, MAX_RETRIES
             )
             try:
                 content_type = response.headers.get("Content-Type", "")
@@ -533,15 +660,15 @@ class OpenAITTSEngine:
                 raise
             except aiohttp.ClientError as e:
                 _LOGGER.error(
-                    "Network error opening TTS stream (attempt %d): %s",
-                    attempt + 1, e,
+                    "Network error opening TTS stream (attempt %d/%d): %s",
+                    attempt + 1, max_retries + 1, e,
                 )
                 if attempt >= max_retries:
                     raise OpenAINetworkError(
                         f"Network error opening TTS stream: {e}"
                     ) from e
                 attempt += 1
-                await asyncio.sleep(1)
+                await asyncio.sleep(RETRY_DELAY_SECONDS)
                 continue
 
             if response.status < 400:
@@ -555,12 +682,14 @@ class OpenAITTSEngine:
             except Exception:
                 pass
             response.release()
-            classified = _classify_http_error(response.status, body_snippet)
+            classified = _classify_http_error(
+                response.status, body_snippet, voice=payload.get("voice"),
+            )
             if not _is_retryable(classified) or attempt >= max_retries:
                 raise classified
             _LOGGER.warning(
-                "TTS stream HTTP %s on attempt %d (retryable): %s",
-                response.status, attempt + 1, classified,
+                "TTS stream HTTP %s on attempt %d/%d (retryable): %s",
+                response.status, attempt + 1, max_retries + 1, classified,
             )
             attempt += 1
-            await asyncio.sleep(1)
+            await asyncio.sleep(RETRY_DELAY_SECONDS)
