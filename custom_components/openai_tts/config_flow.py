@@ -58,6 +58,7 @@ from .const import (
     CONF_PAUSE_PLAYBACK,
     DEFAULT_ANNOUNCE_MODE,
     CONF_PROFILE_NAME,
+    CONF_STREAM_PIPELINING,
 )
 
 SUBENTRY_TYPE_PROFILE = "profile"
@@ -819,6 +820,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
                     "audio_format": CONF_AUDIO_FORMAT,
+                    "stream_pipelining": CONF_STREAM_PIPELINING,
                 }
                 mapped_input: dict[str, Any] = {
                     CONF_PROFILE_NAME: self._step1_profile_name,
@@ -959,6 +961,15 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "sort": False,
             }
         })
+        # Sentence pipelining. Offered on every streaming-capable preset
+        # even though it needs a wav or pcm format, because the format is
+        # chosen on this same form and cannot gate a field rendered
+        # alongside it. A mismatch is handled at request time by falling
+        # back to a single request, with a debug line saying so.
+        if preset.get("supports_streaming", True):
+            step2_fields[
+                vol.Optional("stream_pipelining", default=False)
+            ] = selector({"boolean": {}})
         step2_schema = vol.Schema(step2_fields)
 
         return self.async_show_form(
@@ -1050,6 +1061,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
                     "audio_format": CONF_AUDIO_FORMAT,
+                    "stream_pipelining": CONF_STREAM_PIPELINING,
                 }
                 mapped_input: dict[str, Any] = {CONF_MODEL: self._step1_model}
                 for key, value in user_input.items():
@@ -1229,6 +1241,13 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "sort": False,
             }
         })
+        if preset.get("supports_streaming", True):
+            step2_fields[
+                vol.Optional(
+                    "stream_pipelining",
+                    default=existing_data.get(CONF_STREAM_PIPELINING, False),
+                )
+            ] = selector({"boolean": {}})
         step2_schema = vol.Schema(step2_fields)
 
         return self.async_show_form(

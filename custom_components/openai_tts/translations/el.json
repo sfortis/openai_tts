@@ -74,7 +74,8 @@
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
-            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)"
+            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)",
+            "stream_pipelining": "Έναρξη ομιλίας πριν ολοκληρωθεί η απάντηση (απαιτεί WAV ή PCM, μόνο για φωνητικό βοηθό)"
           }
         },
         "reconfigure": {
@@ -95,7 +96,8 @@
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
-            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)"
+            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)",
+            "stream_pipelining": "Έναρξη ομιλίας πριν ολοκληρωθεί η απάντηση (απαιτεί WAV ή PCM, μόνο για φωνητικό βοηθό)"
           }
         }
       },

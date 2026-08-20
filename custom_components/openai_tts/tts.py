@@ -14,7 +14,7 @@ import os
 from asyncio import CancelledError
 from datetime import datetime
 from functools import partial
-from typing import Any, AsyncGenerator
+from typing import Any, AsyncGenerator, AsyncIterable
 
 from homeassistant.components.tts import (
     TextToSpeechEntity,
@@ -42,6 +42,7 @@ from .const import (
     CONF_MODEL,
     CONF_NORMALIZE_AUDIO,
     CONF_PROFILE_NAME,
+    CONF_STREAM_PIPELINING,
     CONF_PROVIDER,
     CONF_SPEED,
     CONF_URL,
@@ -64,6 +65,7 @@ from .exceptions import (
     OpenAIVoiceDeletedError,
 )
 from .openaitts_engine import OpenAITTSEngine
+from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
 from .repairs import create_voice_deleted_issue
 from .utils import detect_audio_format, get_media_duration, is_valid_audio, process_audio
 
@@ -437,6 +439,89 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         if not preset_for(provider_key).get("supports_streaming", True):
             return False
         return len(text) >= MIN_STREAMING_TEXT_LENGTH
+
+    def _pipelining_allowed(self, options: dict, audio_format: str) -> bool:
+        """True when this request may synthesise sentence by sentence.
+
+        Deliberately does not look at the text: the whole point is to
+        decide before the text has been read. Whether pipelining
+        actually happens still depends on the text arriving gradually,
+        which ``pipelined_audio_stream`` works out for itself. A plain
+        ``openai_tts.say`` message reaches it as one chunk and collapses
+        to a single request.
+        """
+        if not self._get_config_value(CONF_STREAM_PIPELINING):
+            return False
+        if audio_format not in PIPELINEABLE_FORMATS:
+            # mp3 and friends would need several container headers in one
+            # stream. See the note in streaming.py.
+            _LOGGER.debug(
+                "Pipelining is enabled but format %s cannot be joined; "
+                "falling back to a single request", audio_format,
+            )
+            return False
+        if options.get(CONF_CHIME_ENABLE) or options.get(CONF_NORMALIZE_AUDIO):
+            # Both need the finished audio, so there is nothing to gain.
+            return False
+        parent = self._parent_entry or self._config
+        provider_key = (
+            parent.data.get(CONF_PROVIDER) if parent is not None else None
+        )
+        return bool(preset_for(provider_key).get("supports_streaming", True))
+
+    async def _pipelined_stream(
+        self,
+        message_gen: AsyncIterable[str],
+        resolved: dict[str, Any],
+        audio_format: str,
+    ) -> AsyncGenerator[bytes, None]:
+        """Bridge the pipelining helper to this entity's engine.
+
+        No duration is recorded here, on purpose. ``volume_restore``
+        sizes its hold from the cached duration, and a pipelined reply
+        has no total length until its last sentence is synthesised. A
+        missing cache entry makes the restorer fall back cleanly; a
+        partial one would mis-size a hold. This path is only reached
+        from the assist pipeline, which does not use the restorer at
+        all, so nothing needs that figure.
+        """
+
+        async def _synthesize(text: str) -> AsyncGenerator[bytes, None]:
+            first = True
+            async for chunk in self._engine.async_get_tts_stream(
+                text=text,
+                response_format=audio_format,
+                voice=resolved["voice"],
+                model=resolved["model"],
+                speed=resolved["speed"],
+                instructions=resolved["instructions"],
+                extra_payload=resolved["extra_payload"],
+            ):
+                if first:
+                    # Same guard as the single-request path: a backend
+                    # serving a JSON error body with HTTP 200 must not
+                    # reach the cache (issue #64).
+                    if not is_valid_audio(chunk, expected_format=audio_format):
+                        raise OpenAIInvalidResponseError(
+                            "First pipelined chunk is not valid audio"
+                        )
+                    first = False
+                yield chunk
+
+        def _spawn(coro: Any, name: str) -> Any:
+            return self.hass.async_create_background_task(coro, name)
+
+        try:
+            async for chunk in pipelined_audio_stream(
+                message_gen, _synthesize, audio_format, _spawn
+            ):
+                yield chunk
+        except OpenAITTSError as err:
+            await self._handle_engine_error(err)
+            raise
+        else:
+            if self._health_tracker is not None:
+                self._health_tracker.record_success()
 
     def _resolve_options(self, options: dict | None) -> dict[str, Any]:
         """Merge service-call options with entity defaults."""
@@ -846,12 +931,29 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         """
         _LOGGER.info("async_stream_tts_audio called for entity %s", self.entity_id)
 
+        options = request.options or {}
+        resolved = self._resolve_options(options)
+
+        # Decide on pipelining BEFORE touching the generator: draining it
+        # is exactly the thing that makes early synthesis impossible.
+        pipeline_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
+        if self._pipelining_allowed(options, pipeline_format):
+            _LOGGER.info(
+                "Streaming TTS - voice: %s, model: %s, format: %s, "
+                "mode: sentence-pipelined",
+                resolved["voice"], resolved["model"], pipeline_format,
+            )
+            return TTSAudioResponse(
+                extension=pipeline_format,
+                data_gen=self._pipelined_stream(
+                    request.message_gen, resolved, pipeline_format
+                ),
+            )
+
         full_text = ""
         async for text_chunk in request.message_gen:
             full_text += text_chunk
 
-        options = request.options or {}
-        resolved = self._resolve_options(options)
         # Drop any failure sentinel from a previous attempt with the
         # same key BEFORE volume_restore can read it. Otherwise a
         # retry sees the stale 0 immediately after tts.speak returns

@@ -74,7 +74,8 @@
             "normalize_audio": "Normalize audio volume",
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
-            "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)"
+            "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)",
+            "stream_pipelining": "Start speaking before the reply is complete (needs WAV or PCM; voice assistant only)"
           }
         },
         "reconfigure": {
@@ -95,7 +96,8 @@
             "normalize_audio": "Normalize audio volume",
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
-            "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)"
+            "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)",
+            "stream_pipelining": "Start speaking before the reply is complete (needs WAV or PCM; voice assistant only)"
           }
         }
       },
