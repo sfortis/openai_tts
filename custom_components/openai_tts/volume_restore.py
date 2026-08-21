@@ -20,6 +20,7 @@ without re-running the engine. Ordering:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import logging
 from typing import Any, Dict, List, Optional, Set
 
@@ -1171,17 +1172,35 @@ async def announce(
     )
 
     # Claim the targets for the duration of this announcement, so a
-    # concurrent one is not mistaken for an unwanted auto-resume. Released
-    # in the finally below, after the hold has run.
+    # concurrent one is not mistaken for an unwanted auto-resume.
     _mark_announcing(available_players)
 
-    if restorer is not None:
-        await restorer.prepare(
-            target_volume=tts_volume if restore_enabled else None,
-            pause_playback=pause_for_manual,
-            announce_mode=announce_enabled,
-            force_manual=force_manual,
-        )
+    # Everything from here on runs guarded. ``prepare()`` lowers volumes
+    # and pauses media, and every one of those changes has to be undone
+    # on any exit, including cancellation. Home Assistant cancels this
+    # coroutine routinely: an automation with ``mode: restart`` that
+    # announces twice in quick succession, or a shutdown mid-clip. When
+    # that happened the speaker stayed at announcement volume and paused
+    # music never came back, and the next announcement then snapshotted
+    # the lowered volume as the original, making it permanent.
+    restored = False
+    claim_released = False
+    watcher: _TtsPlaybackWatcher | None = None
+
+    def _release_claim() -> None:
+        """Stop the watcher and release the targets. Safe to call twice."""
+        nonlocal claim_released
+        if claim_released:
+            return
+        claim_released = True
+        if watcher is not None:
+            watcher.stop()
+        # Release BEFORE restoring. The restore runs the auto-resume
+        # watcher, which must see a zero count for these targets or it
+        # would skip its own work. With two overlapping announcements the
+        # count is still positive here, which is exactly right: the other
+        # one is still playing and must not be cut off.
+        _clear_announcing(available_players)
 
     # Subscribe to the speakers' state bus BEFORE the speak call. On
     # synchronous platforms (Sonos / MA) the speak service only returns
@@ -1195,10 +1214,8 @@ async def announce(
     # per signal further down (drain / synchronous speak / fallback),
     # because wall time inside speak means completely different things
     # on a fire-and-forget target and on a blocking one.
-    watcher = _TtsPlaybackWatcher(hass, available_players) \
-        if restorer is not None else None
-    if watcher is not None:
-        watcher.start()
+    if restorer is not None:
+        watcher = _TtsPlaybackWatcher(hass, available_players)
 
     # Drop any failure sentinel left over from an earlier attempt BEFORE
     # speaking. That turns an ambiguous "is this sentinel current?"
@@ -1238,6 +1255,16 @@ async def announce(
         return cached == DURATION_FAILED_SENTINEL
 
     try:
+        if restorer is not None:
+            await restorer.prepare(
+                target_volume=tts_volume if restore_enabled else None,
+                pause_playback=pause_for_manual,
+                announce_mode=announce_enabled,
+                force_manual=force_manual,
+            )
+        if watcher is not None:
+            watcher.start()
+
         try:
             await _call_tts_speak(hass, tts_entity, message, language,
                                   options, available_players,
@@ -1330,22 +1357,25 @@ async def announce(
             # interrupt the announcement (Sonos: chops it to just the
             # leading chime).
             elapsed_ms = 0
+        _release_claim()
+        await restorer.restore_after_playback(
+            duration_ms,
+            elapsed_ms=elapsed_ms,
+            restore_volumes=restore_enabled,
+        )
+        restored = True
     finally:
-        if watcher is not None:
-            watcher.stop()
-        # Release the claim BEFORE restoring. The restore runs the
-        # auto-resume watcher, which must see a zero count for these
-        # targets or it would skip its own work. With two overlapping
-        # announcements the count is still positive here, which is
-        # exactly right: the other one is still playing and must not be
-        # cut off.
-        _clear_announcing(available_players)
-
-    await restorer.restore_after_playback(
-        duration_ms,
-        elapsed_ms=elapsed_ms,
-        restore_volumes=restore_enabled,
-    )
+        _release_claim()
+        if restorer is not None and not restored:
+            # Undo whatever prepare() changed. Shielded because we may be
+            # here precisely because this coroutine was cancelled: the
+            # shield keeps the unwind running even though awaiting it
+            # raises again, so volumes and paused media still recover.
+            unwind = asyncio.shield(
+                restorer.restore_immediate(restore_volumes=restore_enabled)
+            )
+            with contextlib.suppress(asyncio.CancelledError):
+                await unwind
 
 
 # ---------------------------------------------------------------------------
