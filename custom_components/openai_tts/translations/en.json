@@ -37,14 +37,17 @@
     "abort": {
       "already_configured": "This instance is already configured",
       "reconfigure_successful": "Configuration updated successfully",
-      "reauth_successful": "Re-authentication successful"
+      "reauth_successful": "Re-authentication successful",
+      "unknown_error": "Something went wrong and the entry could not be found. Check the Home Assistant log."
     },
     "error": {
       "wrong_api_key": "Invalid API key. Please enter a valid API key.",
       "invalid_api_key": "Invalid API key. Please check your API key and try again.",
       "cannot_connect": "Cannot connect to OpenAI API. Please check your network and API endpoint.",
       "duplicate_api_key": "An entry with this API key already exists. Each integration entry must have a unique API key.",
-      "url_required": "API endpoint URL is required for this provider. Enter the full URL of your TTS server."
+      "url_required": "API endpoint URL is required for this provider. Enter the full URL of your TTS server.",
+      "unknown_error": "Something went wrong. Check the Home Assistant log for the details.",
+      "api_key_required": "An API key is required for OpenAI's own endpoint. Leave it empty only when pointing at a self-hosted backend that does not need one."
     }
   },
   "config_subentries": {
@@ -113,19 +116,21 @@
         "already_exists": "A profile with this name already exists",
         "pipelining_needs_no_chime": "Turn the chime off to stream. A chime has to be attached to the finished audio, so speech cannot start before the reply is complete.",
         "pipelining_needs_no_normalize": "Turn loudness normalisation off to stream. Normalisation measures the whole clip, so speech cannot start before the reply is complete.",
-        "pipelining_needs_joinable_format": "Pick MP3, WAV or PCM to stream. The other formats state their total length up front, so only the first sentence would be played."
+        "pipelining_needs_joinable_format": "Pick MP3, WAV or PCM to stream. The other formats state their total length up front, so only the first sentence would be played.",
+        "unknown_error": "Something went wrong. Check the Home Assistant log for the details.",
+        "profile_name_required": "Give the TTS agent a name."
       },
       "abort": {
         "already_configured": "Profile already configured",
         "reconfigure_successful": "TTS agent reconfigured successfully",
-        "subentry_not_found": "TTS agent not found"
+        "subentry_not_found": "This TTS agent no longer exists. It may have been deleted in another window."
       }
     }
   },
   "options": {
     "abort": {
       "no_options_available": "This integration entry has no configurable options. Use the subentries to configure individual TTS agents.",
-      "not_supported": "Options flow is not supported for this entry"
+      "not_supported": "This entry uses the newer profile setup. Use Reconfigure, or Add TTS agent, instead."
     },
     "step": {
       "init": {

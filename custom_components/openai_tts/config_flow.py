@@ -232,14 +232,21 @@ async def async_validate_api_key(api_key: str, url: str) -> bool:
         _LOGGER.error("Timeout during API validation")
         raise CannotConnect("Connection timed out") from err
 
-async def validate_user_input(user_input: dict) -> None:
-    """Validate user input for config flow."""
+def validate_user_input(user_input: dict) -> str | None:
+    """Return an error translation key for bad input, or None if it is fine.
+
+    Returns a key rather than raising, so the caller can put it straight
+    into ``errors`` where the frontend will translate it. Raising a
+    ``ValueError`` here meant the message ended up in the error slot as
+    untranslatable prose.
+    """
     api_url = user_input.get(CONF_URL, DEFAULT_URL)
     api_key = user_input.get(CONF_API_KEY)
 
     # API key is only required for the default OpenAI endpoint
     if api_url == DEFAULT_URL and not api_key:
-        raise ValueError("API key is required for OpenAI API")
+        return "api_key_required"
+    return None
 
 def get_chime_options() -> list[dict[str, str]]:
     """Scan chime folder and return dropdown options."""
@@ -325,7 +332,13 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
             # / future migrations know which preset created this entry.
             user_input[CONF_PROVIDER] = self._provider_key
             try:
-                await validate_user_input(user_input)
+                if invalid := validate_user_input(user_input):
+                    return self.async_show_form(
+                        step_id="credentials",
+                        data_schema=self._credentials_schema(preset, user_input),
+                        errors={"base": invalid},
+                        description_placeholders={"provider": preset["label"]},
+                    )
 
                 api_key = user_input.get(CONF_API_KEY, "")
                 api_url = (user_input.get(CONF_URL) or "").strip()
@@ -404,12 +417,15 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_api_key"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except HomeAssistantError as e:
-                _LOGGER.exception(str(e))
-                errors["base"] = str(e)
-            except ValueError as e:
-                _LOGGER.exception(str(e))
-                errors["base"] = str(e)
+            except HomeAssistantError:
+                # ``errors`` values are translation keys, not prose, so
+                # the exception text goes to the log and the user gets a
+                # key the frontend can look up.
+                _LOGGER.exception("Unexpected Home Assistant error")
+                errors["base"] = "unknown_error"
+            except ValueError:
+                _LOGGER.exception("Invalid value submitted")
+                errors["base"] = "unknown_error"
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"
@@ -558,7 +574,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 if CONF_URL not in user_input:
                     user_input[CONF_URL] = DEFAULT_URL
 
-                await validate_user_input(user_input)
+                if invalid := validate_user_input(user_input):
+                    errors["base"] = invalid
 
                 api_key = user_input.get(CONF_API_KEY, "")
                 api_url = user_input.get(CONF_URL, DEFAULT_URL)
@@ -612,12 +629,15 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 errors["base"] = "invalid_api_key"
             except CannotConnect:
                 errors["base"] = "cannot_connect"
-            except HomeAssistantError as e:
-                _LOGGER.exception(str(e))
-                errors["base"] = str(e)
-            except ValueError as e:
-                _LOGGER.exception(str(e))
-                errors["base"] = str(e)
+            except HomeAssistantError:
+                # ``errors`` values are translation keys, not prose, so
+                # the exception text goes to the log and the user gets a
+                # key the frontend can look up.
+                _LOGGER.exception("Unexpected Home Assistant error")
+                errors["base"] = "unknown_error"
+            except ValueError:
+                _LOGGER.exception("Invalid value submitted")
+                errors["base"] = "unknown_error"
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"
@@ -769,26 +789,25 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         if user_input is not None:
             try:
                 profile_name = user_input.get(CONF_PROFILE_NAME, "")
-                if not profile_name:
-                    raise ValueError("Profile name is required")
-
                 # Reject duplicates here so the user sees the error
                 # before investing in step 2.
                 parent_entry = self._get_entry()
                 existing_subentries = getattr(parent_entry, "subentries", {}) or {}
-                for sub in existing_subentries.values():
-                    if sub.data.get(CONF_PROFILE_NAME) == profile_name:
-                        raise ValueError("Profile name already exists")
+                duplicate = any(
+                    sub.data.get(CONF_PROFILE_NAME) == profile_name
+                    for sub in existing_subentries.values()
+                )
+                if not profile_name:
+                    errors["base"] = "profile_name_required"
+                elif duplicate:
+                    errors["base"] = "already_exists"
+                else:
+                    # Stash step-1 selections on the flow so step 2 can
+                    # read them and show the right voice list.
+                    self._step1_profile_name = profile_name
+                    self._step1_model = user_input.get(CONF_MODEL, "tts-1")
+                    return await self.async_step_voice_audio()
 
-                # Stash step-1 selections on the flow so step 2 can read
-                # them and show the right voice list.
-                self._step1_profile_name = profile_name
-                self._step1_model = user_input.get(CONF_MODEL, "tts-1")
-                return await self.async_step_voice_audio()
-
-            except ValueError as e:
-                _LOGGER.exception(str(e))
-                errors["base"] = str(e)
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"

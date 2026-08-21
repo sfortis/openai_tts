@@ -37,14 +37,17 @@
     "abort": {
       "already_configured": "Diese Instanz ist bereits konfiguriert",
       "reconfigure_successful": "Konfiguration erfolgreich aktualisiert",
-      "reauth_successful": "Erneute Authentifizierung erfolgreich"
+      "reauth_successful": "Erneute Authentifizierung erfolgreich",
+      "unknown_error": "Etwas ist schiefgelaufen und der Eintrag wurde nicht gefunden. Prüfen Sie das Home Assistant Protokoll."
     },
     "error": {
       "wrong_api_key": "Ungültiger API key. Bitte geben Sie einen gültigen API key ein.",
       "invalid_api_key": "Ungültiger API key. Bitte überprüfen Sie Ihren API key und versuchen Sie es erneut.",
       "cannot_connect": "Verbindung zur OpenAI-API nicht möglich. Bitte überprüfen Sie Ihr Netzwerk und das API endpoint.",
       "duplicate_api_key": "Ein Eintrag mit diesem API key existiert bereits. Jedes integration muss einen eindeutigen API key haben.",
-      "url_required": "Für diesen Anbieter ist eine API-Endpoint-URL erforderlich. Geben Sie die vollständige URL Ihres TTS-Servers ein."
+      "url_required": "Für diesen Anbieter ist eine API-Endpoint-URL erforderlich. Geben Sie die vollständige URL Ihres TTS-Servers ein.",
+      "unknown_error": "Etwas ist schiefgelaufen. Details finden Sie im Home Assistant Protokoll.",
+      "api_key_required": "Für den OpenAI-Endpunkt ist ein API-Schlüssel erforderlich. Lassen Sie das Feld nur bei einem selbst gehosteten Backend leer, das keinen benötigt."
     }
   },
   "config_subentries": {
@@ -113,19 +116,21 @@
         "already_exists": "Ein Profil mit diesem Namen existiert bereits",
         "pipelining_needs_no_chime": "Schalten Sie den Signalton aus, um zu streamen. Der Signalton wird an das fertige Audio angefügt, daher kann die Sprache nicht vor Fertigstellung der Antwort beginnen.",
         "pipelining_needs_no_normalize": "Schalten Sie die Lautstärkenormalisierung aus, um zu streamen. Die Normalisierung vermisst den gesamten Clip, daher kann die Sprache nicht vorher beginnen.",
-        "pipelining_needs_joinable_format": "Wählen Sie MP3, WAV oder PCM, um zu streamen. Die anderen Formate geben ihre Gesamtlänge vorab an, sodass nur der erste Satz abgespielt würde."
+        "pipelining_needs_joinable_format": "Wählen Sie MP3, WAV oder PCM, um zu streamen. Die anderen Formate geben ihre Gesamtlänge vorab an, sodass nur der erste Satz abgespielt würde.",
+        "unknown_error": "Etwas ist schiefgelaufen. Details finden Sie im Home Assistant Protokoll.",
+        "profile_name_required": "Geben Sie dem TTS-Agenten einen Namen."
       },
       "abort": {
         "already_configured": "Profil bereits konfiguriert",
         "reconfigure_successful": "TTS agent erfolgreich neu konfiguriert",
-        "subentry_not_found": "TTS agent nicht gefunden"
+        "subentry_not_found": "Dieser TTS-Agent existiert nicht mehr. Er wurde möglicherweise in einem anderen Fenster gelöscht."
       }
     }
   },
   "options": {
     "abort": {
       "no_options_available": "Dieses integration hat keine konfigurierbaren Optionen. Verwenden Sie die Untereinträge, um einzelne TTS agents zu konfigurieren.",
-      "not_supported": "Der Optionsfluss wird für diesen Eintrag nicht unterstützt"
+      "not_supported": "Dieser Eintrag verwendet die neuere Profileinrichtung. Verwenden Sie stattdessen Neu konfigurieren oder TTS-Agent hinzufügen."
     },
     "step": {
       "init": {

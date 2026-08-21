@@ -37,14 +37,17 @@
     "abort": {
       "already_configured": "Tato instance je již nakonfigurována",
       "reconfigure_successful": "Konfigurace byla úspěšně aktualizována",
-      "reauth_successful": "Opětovné ověření bylo úspěšné"
+      "reauth_successful": "Opětovné ověření bylo úspěšné",
+      "unknown_error": "Něco se pokazilo a záznam nebyl nalezen. Zkontrolujte protokol Home Assistant."
     },
     "error": {
       "wrong_api_key": "Neplatný API key. Zadejte prosím platný API key.",
       "invalid_api_key": "Neplatný API key. Zkontrolujte prosím svůj API key a zkuste to znovu.",
       "cannot_connect": "Nelze se připojit k OpenAI API. Zkontrolujte prosím síť a API endpoint.",
       "duplicate_api_key": "Záznam s tímto API key již existuje. Každý integration musí mít jedinečný API key.",
-      "url_required": "Pro tohoto poskytovatele je vyžadováno API endpoint URL. Zadejte úplnou adresu vašeho TTS serveru."
+      "url_required": "Pro tohoto poskytovatele je vyžadováno API endpoint URL. Zadejte úplnou adresu vašeho TTS serveru.",
+      "unknown_error": "Něco se pokazilo. Podrobnosti najdete v protokolu Home Assistant.",
+      "api_key_required": "Pro vlastní endpoint OpenAI je vyžadován API klíč. Ponechte prázdné jen u self-hosted backendu, který jej nepotřebuje."
     }
   },
   "config_subentries": {
@@ -113,19 +116,21 @@
         "already_exists": "Profil s tímto názvem již existuje",
         "pipelining_needs_no_chime": "Pro streamování vypněte zvukový signál. Signál se připojuje k hotovému zvuku, takže řeč nemůže začít před dokončením odpovědi.",
         "pipelining_needs_no_normalize": "Pro streamování vypněte normalizaci hlasitosti. Normalizace měří celou nahrávku, takže řeč nemůže začít před dokončením odpovědi.",
-        "pipelining_needs_joinable_format": "Pro streamování zvolte MP3, WAV nebo PCM. Ostatní formáty uvádějí celkovou délku předem, takže by se přehrála jen první věta."
+        "pipelining_needs_joinable_format": "Pro streamování zvolte MP3, WAV nebo PCM. Ostatní formáty uvádějí celkovou délku předem, takže by se přehrála jen první věta.",
+        "unknown_error": "Něco se pokazilo. Podrobnosti najdete v protokolu Home Assistant.",
+        "profile_name_required": "Zadejte název TTS agenta."
       },
       "abort": {
         "already_configured": "Profil je již nakonfigurován",
         "reconfigure_successful": "TTS agent byl úspěšně překonfigurován",
-        "subentry_not_found": "TTS agent nebyl nalezen"
+        "subentry_not_found": "Tento TTS agent již neexistuje. Mohl být smazán v jiném okně."
       }
     }
   },
   "options": {
     "abort": {
       "no_options_available": "Tento integration nemá konfigurovatelné možnosti. Pro konfiguraci jednotlivých TTS agents použijte podpoložky.",
-      "not_supported": "Tok možností není pro tuto položku podporován"
+      "not_supported": "Tento záznam používá novější nastavení profilů. Použijte Překonfigurovat nebo Přidat TTS agenta."
     },
     "step": {
       "init": {

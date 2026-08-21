@@ -37,14 +37,17 @@
     "abort": {
       "already_configured": "Αυτή η παρουσία είναι ήδη ρυθμισμένη",
       "reconfigure_successful": "Η ρύθμιση ενημερώθηκε επιτυχώς",
-      "reauth_successful": "Η επαναπιστοποίηση ολοκληρώθηκε επιτυχώς"
+      "reauth_successful": "Η επαναπιστοποίηση ολοκληρώθηκε επιτυχώς",
+      "unknown_error": "Κάτι πήγε λάθος και η καταχώρηση δεν βρέθηκε. Δες το log του Home Assistant."
     },
     "error": {
       "wrong_api_key": "Μη έγκυρο API key. Παρακαλώ εισάγετε ένα έγκυρο API key.",
       "invalid_api_key": "Μη έγκυρο API key. Παρακαλώ ελέγξτε το API key σας και δοκιμάστε ξανά.",
       "cannot_connect": "Δεν είναι δυνατή η σύνδεση στο OpenAI API. Παρακαλώ ελέγξτε το δίκτυό σας και το API endpoint.",
       "duplicate_api_key": "Υπάρχει ήδη καταχώρηση με αυτό το API key. Κάθε integration πρέπει να έχει μοναδικό API key.",
-      "url_required": "Απαιτείται API endpoint URL για αυτόν τον πάροχο. Δώστε το πλήρες URL του TTS server σας."
+      "url_required": "Απαιτείται API endpoint URL για αυτόν τον πάροχο. Δώστε το πλήρες URL του TTS server σας.",
+      "unknown_error": "Κάτι πήγε λάθος. Δες το log του Home Assistant για λεπτομέρειες.",
+      "api_key_required": "Το API key απαιτείται για το endpoint του OpenAI. Άφησέ το κενό μόνο όταν δείχνεις σε self-hosted backend που δεν το χρειάζεται."
     }
   },
   "config_subentries": {
@@ -113,19 +116,21 @@
         "already_exists": "Υπάρχει ήδη προφίλ με αυτό το όνομα",
         "pipelining_needs_no_chime": "Απενεργοποιήστε το ηχητικό σήμα για streaming. Το σήμα προσαρτάται στον ολοκληρωμένο ήχο, οπότε η ομιλία δεν μπορεί να ξεκινήσει πριν ολοκληρωθεί η απάντηση.",
         "pipelining_needs_no_normalize": "Απενεργοποιήστε την ενίσχυση έντασης για streaming. Η ενίσχυση μετρά ολόκληρο το κλιπ, οπότε η ομιλία δεν μπορεί να ξεκινήσει πριν ολοκληρωθεί η απάντηση.",
-        "pipelining_needs_joinable_format": "Επιλέξτε MP3, WAV ή PCM για streaming. Τα άλλα formats δηλώνουν εκ των προτέρων το συνολικό μήκος, οπότε θα αναπαραγόταν μόνο η πρώτη πρόταση."
+        "pipelining_needs_joinable_format": "Επιλέξτε MP3, WAV ή PCM για streaming. Τα άλλα formats δηλώνουν εκ των προτέρων το συνολικό μήκος, οπότε θα αναπαραγόταν μόνο η πρώτη πρόταση.",
+        "unknown_error": "Κάτι πήγε λάθος. Δες το log του Home Assistant για λεπτομέρειες.",
+        "profile_name_required": "Δώσε όνομα στον TTS agent."
       },
       "abort": {
         "already_configured": "Το προφίλ είναι ήδη ρυθμισμένο",
         "reconfigure_successful": "Ο TTS agent επαναρυθμίστηκε επιτυχώς",
-        "subentry_not_found": "Ο TTS agent δεν βρέθηκε"
+        "subentry_not_found": "Αυτός ο TTS agent δεν υπάρχει πλέον. Μπορεί να διαγράφηκε από άλλο παράθυρο."
       }
     }
   },
   "options": {
     "abort": {
       "no_options_available": "Αυτό το integration δεν έχει ρυθμιζόμενες επιλογές. Χρησιμοποιήστε τις υποκαταχωρήσεις για να ρυθμίσετε μεμονωμένους TTS agents.",
-      "not_supported": "Η ροή επιλογών δεν υποστηρίζεται για αυτή την καταχώρηση"
+      "not_supported": "Αυτή η καταχώρηση χρησιμοποιεί τη νεότερη ρύθμιση profiles. Χρησιμοποίησε Reconfigure ή Add TTS agent."
     },
     "step": {
       "init": {
