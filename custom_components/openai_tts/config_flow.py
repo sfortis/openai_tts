@@ -26,6 +26,7 @@ from homeassistant.helpers import aiohttp_client
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import callback
 
+from .streaming import PIPELINEABLE_FORMATS
 from .const import (
     CONF_API_KEY,
     CONF_MODEL,
@@ -62,6 +63,40 @@ from .const import (
 )
 
 SUBENTRY_TYPE_PROFILE = "profile"
+
+
+class _PipeliningConflict(Exception):
+    """Internal signal: the submitted combination cannot stream.
+
+    Raised and caught inside the same handler purely to jump out of the
+    build-and-save block without falling into its ``except Exception``,
+    which would relabel this as an unknown error.
+    """
+
+
+def _pipelining_conflict(user_input: dict[str, Any]) -> str | None:
+    """Return an error key when pipelining is on but cannot take effect.
+
+    Three settings silently defeat streaming, and until now the only
+    trace was a debug log line. That is how someone ends up believing
+    streaming is broken when their own profile turned it off: chime and
+    normalisation both need the finished audio before anything can be
+    sent, and the excluded formats cannot have two responses joined.
+
+    Refusing the save is deliberate. The alternative, quietly ignoring
+    chime because pipelining is on, would drop a setting the user
+    explicitly asked for without telling them.
+    """
+    if not user_input.get("stream_pipelining"):
+        return None
+    if user_input.get("chime"):
+        return "pipelining_needs_no_chime"
+    if user_input.get("normalize_audio"):
+        return "pipelining_needs_no_normalize"
+    audio_format = user_input.get("audio_format")
+    if audio_format and audio_format not in PIPELINEABLE_FORMATS:
+        return "pipelining_needs_joinable_format"
+    return None
 
 
 def _voice_options_from_payload(
@@ -833,11 +868,17 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     else:
                         mapped_input[mapped_key] = value
 
+                if conflict := _pipelining_conflict(user_input):
+                    errors["base"] = conflict
+                    raise _PipeliningConflict
+
                 mapped_input[UNIQUE_ID] = generate_entry_id()
                 return self.async_create_entry(
                     title=self._step1_profile_name,
                     data=mapped_input,
                 )
+            except _PipeliningConflict:
+                pass
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"
@@ -1090,6 +1131,10 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     if field not in user_input:
                         mapped_input[const] = None
 
+                if conflict := _pipelining_conflict(user_input):
+                    errors["base"] = conflict
+                    raise _PipeliningConflict
+
                 updated_data = {**existing_data, **mapped_input}
                 entry_id = getattr(subentry, "entry_id", getattr(subentry, "subentry_id", "unknown"))
                 _LOGGER.info("Updating subentry %s with data: %s", entry_id, updated_data)
@@ -1098,6 +1143,8 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     subentry,
                     data=updated_data,
                 )
+            except _PipeliningConflict:
+                pass
             except Exception:
                 _LOGGER.exception("Unexpected error")
                 errors["base"] = "unknown_error"

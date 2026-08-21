@@ -102,7 +102,10 @@
         }
       },
       "error": {
-        "already_exists": "Ein Profil mit diesem Namen existiert bereits"
+        "already_exists": "Ein Profil mit diesem Namen existiert bereits",
+        "pipelining_needs_no_chime": "Schalten Sie den Signalton aus, um zu streamen. Der Signalton wird an das fertige Audio angefügt, daher kann die Sprache nicht vor Fertigstellung der Antwort beginnen.",
+        "pipelining_needs_no_normalize": "Schalten Sie die Lautstärkenormalisierung aus, um zu streamen. Die Normalisierung vermisst den gesamten Clip, daher kann die Sprache nicht vorher beginnen.",
+        "pipelining_needs_joinable_format": "Wählen Sie MP3, WAV oder PCM, um zu streamen. Die anderen Formate geben ihre Gesamtlänge vorab an, sodass nur der erste Satz abgespielt würde."
       },
       "abort": {
         "already_configured": "Profil bereits konfiguriert",

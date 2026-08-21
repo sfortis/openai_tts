@@ -102,7 +102,10 @@
         }
       },
       "error": {
-        "already_exists": "Profil s tímto názvem již existuje"
+        "already_exists": "Profil s tímto názvem již existuje",
+        "pipelining_needs_no_chime": "Pro streamování vypněte zvukový signál. Signál se připojuje k hotovému zvuku, takže řeč nemůže začít před dokončením odpovědi.",
+        "pipelining_needs_no_normalize": "Pro streamování vypněte normalizaci hlasitosti. Normalizace měří celou nahrávku, takže řeč nemůže začít před dokončením odpovědi.",
+        "pipelining_needs_joinable_format": "Pro streamování zvolte MP3, WAV nebo PCM. Ostatní formáty uvádějí celkovou délku předem, takže by se přehrála jen první věta."
       },
       "abort": {
         "already_configured": "Profil je již nakonfigurován",

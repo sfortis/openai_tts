@@ -102,7 +102,10 @@
         }
       },
       "error": {
-        "already_exists": "A profile with this name already exists"
+        "already_exists": "A profile with this name already exists",
+        "pipelining_needs_no_chime": "Turn the chime off to stream. A chime has to be attached to the finished audio, so speech cannot start before the reply is complete.",
+        "pipelining_needs_no_normalize": "Turn loudness normalisation off to stream. Normalisation measures the whole clip, so speech cannot start before the reply is complete.",
+        "pipelining_needs_joinable_format": "Pick MP3, WAV or PCM to stream. The other formats state their total length up front, so only the first sentence would be played."
       },
       "abort": {
         "already_configured": "Profile already configured",
