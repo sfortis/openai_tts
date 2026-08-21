@@ -42,11 +42,22 @@ jobs:
         # The zip mirrors the layout HACS expects: integration files at
         # the root, so HACS can extract straight into
         # ``<config>/custom_components/openai_tts/``.
+        #
+        # Markdown is excluded. The working copy of this folder carries
+        # development notes that .gitignore keeps out of the repository
+        # but that the zip would otherwise pick up, since it is built
+        # from the folder rather than from git. No module reads any
+        # markdown at runtime, so nothing is lost.
         run: |
           cd custom_components/openai_tts
           zip -r "${{ github.workspace }}/openai_tts.zip" . \
-            -x '*.pyc' '__pycache__/*' '.DS_Store'
-          ls -la "${{ github.workspace }}/openai_tts.zip"
+            -x '*.pyc' '__pycache__/*' '.DS_Store' '*.md'
+          echo "--- shipped contents ---"
+          unzip -l "${{ github.workspace }}/openai_tts.zip"
+          if unzip -l "${{ github.workspace }}/openai_tts.zip" | grep -qiE '\.md$'; then
+            echo "::error::markdown leaked into the release zip"
+            exit 1
+          fi
 
       - name: Create release
         env:
