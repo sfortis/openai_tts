@@ -20,13 +20,16 @@ producer task that collects sentences while a consumer synthesises them,
 and synthesise the first sentence alone so the first audio arrives as
 early as possible.
 
-Two things here are deliberately unlike ElevenLabs. It concatenates
-whole MP3 responses back to back, which leaves several file headers
-inside one stream; issue #64 showed a HomePod decoder rejecting a stream
-over a single stray metadata frame, so that is a risk not worth taking.
-Instead this module follows Nabu Casa and only handles container formats
-it can join cleanly: raw PCM, which has no header at all, and WAV, whose
-header is emitted once and stripped from every later response.
+Where this differs from ElevenLabs is in how the pieces are joined.
+ElevenLabs concatenates whole MP3 responses untouched, which leaves
+several container headers inside one stream. This module follows Nabu
+Casa instead and only accepts formats it can join into something a
+decoder will read to the end: raw PCM, which has no header at all; WAV,
+whose header is rewritten once to declare an unknown length; and MP3,
+whose responses are bare MPEG frames once any metadata is stripped from
+every response after the first. Opus, FLAC and AAC are refused. The
+reasoning and the measurements behind each are recorded above
+``PIPELINEABLE_FORMATS``.
 
 The caller supplies synthesis as a callback, so this module needs to
 know nothing about the engine, options, caching or error handling.

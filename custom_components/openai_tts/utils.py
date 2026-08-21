@@ -300,10 +300,11 @@ async def process_audio(
             Falls back to magic-byte detection when omitted.
 
     Returns:
-        Tuple of (format, processed_audio, processing_time_ms). Output
-        is always re-encoded to ``mp3`` so the result mixes cleanly
-        with mp3 chimes and HA's ``preferred_format`` ffmpeg conversion
-        can re-encode it to the user-selected delivery format.
+        Tuple of (format, processed_audio, processing_time_ms). Output is
+        encoded in the format the caller asked for, via
+        ``output_format``, so a profile set to wav or opus keeps that
+        format through post-processing. HA's ``preferred_format`` ffmpeg
+        layer still sits downstream if the media_player needs another.
     """
     import time
 

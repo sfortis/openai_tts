@@ -636,7 +636,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         regardless of format - the streaming path or HA's own
         ``preferred_format`` ffmpeg layer handles delivery to the
         media_player. Only chime/normalize need the heavy local
-        transcode (and that path always outputs mp3).
+        transcode, and that path keeps the profile's own format rather
+        than forcing mp3.
         """
         chime_enable = resolved["chime_enable"]
         normalize_audio = resolved["normalize_audio"]
@@ -1011,9 +1012,10 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 
-        # Validate the raw engine response BEFORE post-processing: the
-        # validator checks magic bytes against the requested format, but
-        # post-processing always emits mp3 regardless of input.
+        # Validate the raw engine response BEFORE post-processing.
+        # Post-processing re-encodes, so a bad payload could come out the
+        # far side wearing valid magic bytes for the requested format and
+        # slip into the cache.
         if not is_valid_audio(audio_data, expected_format=audio_format):
             _LOGGER.error(
                 "Atomic TTS response failed audio validation (size=%d). "

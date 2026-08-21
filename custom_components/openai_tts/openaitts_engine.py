@@ -509,10 +509,10 @@ class OpenAITTSEngine:
         """Stream TTS audio from the OpenAI API.
 
         ``response_format`` defaults to ``mp3`` because that's what HA's
-        TTS proxy + Chromecast handle most reliably. Opus has known
-        receiver-side compatibility issues on older cast hardware,
-        which is why the entity always passes ``mp3`` explicitly - this
-        default just makes the engine safe to call directly.
+        TTS proxy and Chromecast handle most reliably; opus has known
+        receiver-side compatibility issues on older cast hardware. The
+        entity always passes the profile's configured format explicitly,
+        so this default only applies when the engine is called directly.
 
         Error responses are classified BEFORE any chunk is yielded,
         so a failed request can never leak partial bytes into the HA

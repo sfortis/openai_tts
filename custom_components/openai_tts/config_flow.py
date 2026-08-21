@@ -1002,11 +1002,13 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "sort": False,
             }
         })
-        # Sentence pipelining. Offered on every streaming-capable preset
-        # even though it needs a wav or pcm format, because the format is
-        # chosen on this same form and cannot gate a field rendered
-        # alongside it. A mismatch is handled at request time by falling
-        # back to a single request, with a debug line saying so.
+        # Sentence pipelining. Offered on every streaming-capable preset,
+        # because the format it depends on is chosen on this same form
+        # and so cannot gate a field rendered alongside it. An
+        # incompatible combination is rejected on submit by
+        # ``_pipelining_conflict`` rather than being silently accepted.
+        # The runtime fallback in ``tts.py`` still exists for profiles
+        # saved before that validation was added.
         if preset.get("supports_streaming", True):
             step2_fields[
                 vol.Optional("stream_pipelining", default=False)
