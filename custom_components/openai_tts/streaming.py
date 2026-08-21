@@ -38,6 +38,7 @@ import io
 import logging
 import wave
 from collections.abc import AsyncGenerator, AsyncIterable, Awaitable, Callable
+from typing import Any
 
 from sentence_stream import SentenceBoundaryDetector
 
@@ -240,11 +241,17 @@ class _SentenceCollector:
         self.finished = asyncio.Event()
         self.complete = False
         self.error: BaseException | None = None
+        # The text exactly as it arrived. Rejoining detected sentences
+        # would normalise whitespace, and the duration cache key is
+        # built from the original message, so only the untouched string
+        # hashes to the same value.
+        self.raw_text = ""
 
     async def run(self) -> None:
         """Collect sentences until the text stream is exhausted."""
         try:
             async for chunk in self._message_gen:
+                self.raw_text += chunk
                 # Chunks arrive on token boundaries, not sentence ones,
                 # so a chunk may hold several sentences or half of one.
                 added = False
@@ -282,6 +289,7 @@ async def pipelined_audio_stream(
     synthesize: SynthesizeFn,
     audio_format: str,
     create_task: CreateTaskFn,
+    stats: dict[str, Any] | None = None,
 ) -> AsyncGenerator[bytes, None]:
     """Yield one continuous audio stream, synthesising sentence by sentence.
 
@@ -297,6 +305,14 @@ async def pipelined_audio_stream(
 
     ``audio_format`` must be in :data:`PIPELINEABLE_FORMATS`; the caller
     checks that before choosing this path.
+
+    ``stats``, when given, is filled in as the run proceeds:
+    ``requests`` counts synthesis calls, ``single_request`` says whether
+    the whole text went out in one, and ``raw_text`` carries the text
+    exactly as it arrived in that case. Callers need those to decide
+    whether the emitted audio is a complete clip they can measure and
+    cache, or several joined pieces whose total was never known in one
+    place.
     """
     if audio_format not in PIPELINEABLE_FORMATS:
         raise ValueError(f"format {audio_format!r} cannot be pipelined")
@@ -308,6 +324,9 @@ async def pipelined_audio_stream(
     schedule = list(_SENTENCE_SCHEDULE)
     first_batch = True
     requests = 0
+    if stats is not None:
+        stats["requests"] = 0
+        stats["single_request"] = False
 
     async def _passthrough(text: str) -> AsyncGenerator[bytes, None]:
         """Forward one response untouched, as the only response.
@@ -389,6 +408,10 @@ async def pipelined_audio_stream(
                 text = " ".join(pending).strip()
                 if text:
                     requests += 1
+                    if stats is not None:
+                        stats["requests"] = requests
+                        stats["single_request"] = True
+                        stats["raw_text"] = collector.raw_text
                     _LOGGER.debug(
                         "Text was complete up front; single request for "
                         "%d sentence(s)", len(pending),
@@ -411,6 +434,9 @@ async def pipelined_audio_stream(
                 if not text:
                     continue
                 requests += 1
+                if stats is not None:
+                    stats["requests"] = requests
+                    stats["single_request"] = False
                 _LOGGER.debug(
                     "Synthesising batch of %d sentence(s) while text "
                     "continues to arrive", len(batch),

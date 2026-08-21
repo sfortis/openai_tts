@@ -477,13 +477,20 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     ) -> AsyncGenerator[bytes, None]:
         """Bridge the pipelining helper to this entity's engine.
 
-        No duration is recorded here, on purpose. ``volume_restore``
-        sizes its hold from the cached duration, and a pipelined reply
-        has no total length until its last sentence is synthesised. A
-        missing cache entry makes the restorer fall back cleanly; a
-        partial one would mis-size a hold. This path is only reached
-        from the assist pipeline, which does not use the restorer at
-        all, so nothing needs that figure.
+        Whether a duration gets recorded depends on how the run went.
+
+        When the text arrived complete and went out as one request, the
+        emitted bytes are a whole clip and its duration is recorded
+        exactly as the non-pipelined path does. That case matters more
+        than it looks: ``openai_tts.say`` always lands there, and
+        ``volume_restore`` waits up to a minute for that cache entry
+        before falling back. Skipping the write cost the service call 77
+        seconds instead of 9.
+
+        When the reply was synthesised in pieces, no duration is
+        written. The total was never known in one place, and a wrong
+        figure would mis-size a volume hold, whereas a missing one makes
+        the restorer fall back cleanly.
         """
 
         async def _synthesize(text: str) -> AsyncGenerator[bytes, None]:
@@ -511,10 +518,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         def _spawn(coro: Any, name: str) -> Any:
             return self.hass.async_create_background_task(coro, name)
 
+        stats: dict[str, Any] = {}
+        collected: list[bytes] = []
         try:
             async for chunk in pipelined_audio_stream(
-                message_gen, _synthesize, audio_format, _spawn
+                message_gen, _synthesize, audio_format, _spawn, stats
             ):
+                collected.append(chunk)
                 yield chunk
         except OpenAITTSError as err:
             await self._handle_engine_error(err)
@@ -522,6 +532,10 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         else:
             if self._health_tracker is not None:
                 self._health_tracker.record_success()
+            if stats.get("single_request") and collected:
+                await self._record_duration(
+                    stats.get("raw_text", ""), b"".join(collected), resolved
+                )
 
     def _resolve_options(self, options: dict | None) -> dict[str, Any]:
         """Merge service-call options with entity defaults."""
