@@ -1401,7 +1401,7 @@ async def _call_tts_speak(
 ) -> None:
     """Invoke HA's ``tts.speak`` exactly once.
 
-    Engine-level retries already happen inside ``async_get_tts_audio`` /
+    Engine-level retries already happen inside
     ``async_stream_tts_audio``, where they're safe (audio hasn't been
     delivered to a speaker yet). Retrying at the speak level instead can
     replay audio that already started playing on one of the targets - a

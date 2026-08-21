@@ -115,52 +115,42 @@ def is_valid_audio(
 
 
 def get_media_duration(file_path: str) -> float:
-    """
-    Get the duration of a media file in seconds.
-    First tries to read from metadata, then falls back to ffprobe.
-    
+    """Return the duration of a media file in seconds, or 0.0 on failure.
+
+    One ffprobe invocation. There used to be two: the first looked for a
+    ``tts_duration_ms`` tag this integration wrote into its own mp3
+    output, and the second asked for the real duration when no tag was
+    found. The tag was only ever written on the legacy TTS path, which
+    Home Assistant stopped reaching once the entity implemented the
+    streaming contract, so the first probe could never succeed and every
+    measurement paid for two process spawns instead of one.
+
     Args:
-        file_path: Path to the media file
-        
-    Returns:
-        Duration in seconds as float
+        file_path: Path to the media file.
     """
+    cmd = [
+        "ffprobe",
+        "-v", "error",
+        "-show_entries", "format=duration",
+        "-of", "default=noprint_wrappers=1:nokey=1",
+        file_path,
+    ]
     try:
-        # First try to get duration from metadata
-        cmd_metadata = [
-            "ffprobe",
-            "-v", "quiet",
-            "-print_format", "json",
-            "-show_format",
-            file_path
-        ]
-        result = subprocess.run(cmd_metadata, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        
-        if result.stdout:
-            import json
-            data = json.loads(result.stdout)
-            # Check for our custom metadata
-            if "format" in data and "tags" in data["format"]:
-                tags = data["format"]["tags"]
-                # Look for our duration metadata
-                for key, value in tags.items():
-                    if "tts_duration_ms" in key:
-                        _LOGGER.debug("Found duration in metadata: %s ms", value)
-                        return float(value) / 1000.0
-        
-        # Fallback to standard duration detection
-        cmd = [
-            "ffprobe",
-            "-v", "error",
-            "-show_entries", "format=duration",
-            "-of", "default=noprint_wrappers=1:nokey=1",
-            file_path,
-        ]
-        result = subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, check=True)
-        duration_str = result.stdout.strip()
-        return float(duration_str) if duration_str else 0.0
-    except Exception as e:
-        _LOGGER.error("Error getting media duration: %s", e)
+        result = subprocess.run(
+            cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            text=True, check=True,
+        )
+    except (subprocess.CalledProcessError, OSError) as err:
+        _LOGGER.error("ffprobe failed for %s: %s", file_path, err)
+        return 0.0
+    duration_str = result.stdout.strip()
+    if not duration_str:
+        _LOGGER.error("ffprobe returned no duration for %s", file_path)
+        return 0.0
+    try:
+        return float(duration_str)
+    except ValueError:
+        _LOGGER.error("ffprobe gave a non-numeric duration: %r", duration_str)
         return 0.0
 
 def build_ffmpeg_command(

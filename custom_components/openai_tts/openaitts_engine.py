@@ -3,7 +3,7 @@
 The engine provides two parallel call paths:
 
 - ``get_tts()``: blocking, called via an executor by the legacy
-  ``async_get_tts_audio()`` HA TTS contract. Always reads the full
+  HA TTS entity's blocking path. Always reads the full
   audio body inside the executor so the event loop never blocks on
   socket I/O.
 - ``async_get_tts_stream()``: native async generator used by HA 2025.7+

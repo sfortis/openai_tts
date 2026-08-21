@@ -1,17 +1,21 @@
 """TTS entity for the OpenAI TTS integration.
 
-The entity implements both the legacy ``async_get_tts_audio`` contract and
-the modern ``async_stream_tts_audio`` streaming contract introduced in
-HA 2025.7. Audio bytes are validated against magic-byte signatures before
-they are returned to Home Assistant, so a failed API call can never poison
-the HA TTS cache (issue #64).
+The entity implements the streaming ``async_stream_tts_audio`` contract
+introduced in HA 2025.7, which is the minimum version this integration
+supports. The legacy ``async_get_tts_audio`` contract is deliberately
+absent: Home Assistant only falls back to it when an entity does not
+override the streaming method, so on every supported version it was
+unreachable code.
+
+Audio bytes are validated against magic-byte signatures before they are
+returned to Home Assistant, so a failed API call can never poison the HA
+TTS cache (issue #64).
 """
 from __future__ import annotations
 
 import asyncio
 import logging
 import os
-from asyncio import CancelledError
 from datetime import datetime
 from functools import partial
 from typing import Any, AsyncGenerator, AsyncIterable
@@ -23,14 +27,13 @@ from homeassistant.components.tts import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed, MaxLengthExceeded
+from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
 
 from .api_health import OpenAITTSHealthTracker
-from .audio_metadata import embed_duration_in_audio
 from .cache import MessageDurationCache
 from .const import (
     CONF_API_KEY,
@@ -67,7 +70,7 @@ from .exceptions import (
 from .openaitts_engine import OpenAITTSEngine
 from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
 from .repairs import create_voice_deleted_issue
-from .utils import detect_audio_format, get_media_duration, is_valid_audio, process_audio
+from .utils import get_media_duration, is_valid_audio, process_audio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -429,9 +432,10 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             return False
         # Some backends (older self-hosted servers, pocket-tts variants
         # that don't speak chunked HTTP cleanly) deliver corrupted audio
-        # via the streaming path even when the atomic path works. The
-        # parent entry's preset can flip this off so HA falls back to
-        # ``async_get_tts_audio`` for those providers.
+        # via the streaming path even when a single blocking read works.
+        # The parent entry's preset can flip this off, which sends the
+        # request down the atomic branch of ``async_stream_tts_audio``:
+        # one blocking fetch, validate, then yield the whole clip.
         parent = self._parent_entry or self._config
         provider_key = (
             parent.data.get(CONF_PROVIDER) if parent is not None else None
@@ -838,89 +842,6 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 profile_name,
                 err.voice,
             )
-
-    async def async_get_tts_audio(
-        self, message: str, language: str, options: dict[str, Any] | None = None
-    ) -> tuple[str | None, bytes | None]:
-        """Legacy non-streaming TTS contract.
-
-        Returns ``(None, None)`` whenever the result must NOT be cached
-        (auth failure, quota exhausted, invalid audio, etc.). HA only caches
-        when both elements of the tuple are non-None, so this is the safe
-        signal to refuse cache entry.
-        """
-        _LOGGER.info(
-            "async_get_tts_audio for %s (msg=%r, lang=%s)",
-            self.entity_id, message[:50], language,
-        )
-
-        # Default {} so the except blocks below can pass it to _record_failure
-        # even if _resolve_options() were to raise (it currently can't, but
-        # this future-proofs against that path).
-        resolved: dict[str, Any] = {}
-
-        try:
-            resolved = self._resolve_options(options)
-            # Drop stale failure sentinel from a previous run on the
-            # same key so volume_restore doesn't trigger an immediate
-            # restore against a now-recovering call.
-            self._clear_failure_sentinel(message, resolved)
-
-            try:
-                audio_data = await self._engine_get_blocking(message, resolved)
-            except asyncio.TimeoutError as err:
-                _LOGGER.error("TTS generation timed out after 30 seconds")
-                self._record_failure(message, err, resolved)
-                return (None, None)
-
-            requested_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
-            if not is_valid_audio(audio_data, expected_format=requested_format):
-                _LOGGER.error(
-                    "TTS response failed audio validation (size=%d). "
-                    "Refusing cache to prevent corruption (issue #64).",
-                    len(audio_data) if audio_data else 0,
-                )
-                err = OpenAIInvalidResponseError(
-                    f"Invalid audio response (size={len(audio_data) if audio_data else 0})"
-                )
-                self._record_failure(message, err, resolved)
-                return (None, None)
-
-            await self._record_duration(message, audio_data, resolved)
-
-            audio_data = await self._maybe_post_process(audio_data, resolved)
-
-            # Recalculate after post-processing changes the bytes.
-            if resolved["chime_enable"] or resolved["normalize_audio"] or (
-                detect_audio_format(audio_data) == "wav"
-            ):
-                await self._record_duration(message, audio_data, resolved)
-
-            audio_with_metadata = await self.hass.async_add_executor_job(
-                embed_duration_in_audio, audio_data, self._last_duration_ms or 0
-            )
-            actual_format = detect_audio_format(audio_data)
-            return (actual_format, audio_with_metadata)
-
-        except MaxLengthExceeded as err:
-            _LOGGER.error("Maximum message length exceeded: %s", err)
-            self._record_failure(message, err, resolved)
-            raise
-        except CancelledError:
-            _LOGGER.debug("TTS generation was cancelled")
-            raise
-        except OpenAITTSError as err:
-            # Mark the cache BEFORE _handle_engine_error: that helper
-            # raises ConfigEntryAuthFailed on auth errors and would
-            # otherwise skip the post-call mark_failed, leaving
-            # volume_restore without its immediate-restore signal.
-            self._mark_failed_with_resolved(message, resolved)
-            await self._handle_engine_error(err)
-            return (None, None)
-        except Exception as err:
-            _LOGGER.error("Error generating TTS: %s", err, exc_info=True)
-            self._record_failure(message, err, resolved)
-            return (None, None)
 
     async def async_stream_tts_audio(
         self, request: TTSAudioRequest
