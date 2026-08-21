@@ -75,7 +75,7 @@
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)",
-            "stream_pipelining": "Start speaking before the reply is complete (needs WAV or PCM; voice assistant only)"
+            "stream_pipelining": "Start speaking before the reply is complete (MP3, WAV or PCM; voice assistant only)"
           }
         },
         "reconfigure": {
@@ -97,7 +97,7 @@
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)",
-            "stream_pipelining": "Start speaking before the reply is complete (needs WAV or PCM; voice assistant only)"
+            "stream_pipelining": "Start speaking before the reply is complete (MP3, WAV or PCM; voice assistant only)"
           }
         }
       },

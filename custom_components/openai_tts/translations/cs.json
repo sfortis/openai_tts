@@ -75,7 +75,7 @@
             "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Audio format (mp3 je bezpečný default, změňte pouze pokud váš backend potřebuje jiný)",
-            "stream_pipelining": "Začít mluvit před dokončením odpovědi (vyžaduje WAV nebo PCM; pouze hlasový asistent)"
+            "stream_pipelining": "Začít mluvit před dokončením odpovědi (MP3, WAV nebo PCM; pouze hlasový asistent)"
           }
         },
         "reconfigure": {
@@ -97,7 +97,7 @@
             "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Audio format (mp3 je bezpečný default, změňte pouze pokud váš backend potřebuje jiný)",
-            "stream_pipelining": "Začít mluvit před dokončením odpovědi (vyžaduje WAV nebo PCM; pouze hlasový asistent)"
+            "stream_pipelining": "Začít mluvit před dokončením odpovědi (MP3, WAV nebo PCM; pouze hlasový asistent)"
           }
         }
       },

@@ -46,13 +46,23 @@ _LOGGER = logging.getLogger(__name__)
 # Audio formats this module can join into one continuous stream.
 #
 # ``pcm`` is raw signed 16-bit samples with no container, so responses
-# concatenate as-is. ``wav`` carries a 44-byte RIFF header that must
-# appear exactly once, which is what ``_split_wav_header`` handles.
+# concatenate as-is.
 #
-# Everything else (mp3, opus, aac, flac) would need either a container
-# remux or naive concatenation, and the caller falls back to a single
-# request for those.
-PIPELINEABLE_FORMATS: frozenset[str] = frozenset({"pcm", "wav"})
+# ``wav`` carries a RIFF header stating the frame count, and decoders
+# honour it, so the header is rewritten once to say "length unknown".
+# See ``_split_wav_header``.
+#
+# ``mp3`` is a bare sequence of MPEG frames, which is why appending one
+# response to another works: measured on three real OpenAI responses,
+# the joined file reads as exactly the sum of its parts. Metadata is the
+# only hazard, and ``_strip_mp3_metadata`` removes it from every
+# response after the first.
+#
+# ``opus`` and ``flac`` declare their total sample count up front and
+# stop there, so a second response is silently ignored. ``aac`` loses
+# samples at the seam. Those three are excluded, and the caller falls
+# back to a single request for them.
+PIPELINEABLE_FORMATS: frozenset[str] = frozenset({"pcm", "wav", "mp3"})
 
 # How many sentences to put in each successive request.
 #
@@ -82,6 +92,101 @@ SynthesizeFn = Callable[[str], AsyncGenerator[bytes, None]]
 # Somewhere to park the producer task. Passing the scheduler in keeps
 # this module free of any Home Assistant import.
 CreateTaskFn = Callable[[Awaitable[None], str], object]
+
+
+_MP3_BITRATES_V1_L3 = (
+    0, 32, 40, 48, 56, 64, 80, 96, 112, 128, 160, 192, 224, 256, 320, 0,
+)
+_MP3_BITRATES_V2_L3 = (
+    0, 8, 16, 24, 32, 40, 48, 56, 64, 80, 96, 112, 128, 144, 160, 0,
+)
+_MP3_SAMPLE_RATES = {
+    3: (44100, 48000, 32000),   # MPEG 1
+    2: (22050, 24000, 16000),   # MPEG 2
+    0: (11025, 12000, 8000),    # MPEG 2.5
+}
+
+
+def _mpeg_frame_length(header: bytes) -> int | None:
+    """Byte length of the MPEG Layer III frame starting at ``header``.
+
+    Returns None when the four bytes are not a usable frame header. Only
+    Layer III is handled, which is the only layer any TTS backend emits.
+    """
+    if len(header) < 4:
+        return None
+    if header[0] != 0xFF or (header[1] & 0xE0) != 0xE0:
+        return None  # missing frame sync
+
+    version_bits = (header[1] >> 3) & 0x03
+    layer_bits = (header[1] >> 1) & 0x03
+    if layer_bits != 0x01:
+        return None  # not Layer III
+
+    bitrate_index = (header[2] >> 4) & 0x0F
+    rate_index = (header[2] >> 2) & 0x03
+    padding = (header[2] >> 1) & 0x01
+
+    rates = _MP3_SAMPLE_RATES.get(version_bits)
+    if rates is None or rate_index > 2:
+        return None
+    sample_rate = rates[rate_index]
+
+    table = _MP3_BITRATES_V1_L3 if version_bits == 3 else _MP3_BITRATES_V2_L3
+    bitrate = table[bitrate_index] * 1000
+    if not bitrate or not sample_rate:
+        return None  # free-format or reserved
+
+    # MPEG 1 fits 1152 samples per frame, MPEG 2 and 2.5 fit 576.
+    coefficient = 144 if version_bits == 3 else 72
+    return (coefficient * bitrate // sample_rate) + padding
+
+
+def _strip_mp3_metadata(data: bytes) -> bytes:
+    """Remove container metadata so ``data`` is pure audio frames.
+
+    Appending whole MP3 responses works because the format is just a run
+    of frames, but each response may be wrapped in metadata that has no
+    business appearing mid-stream:
+
+    * An ID3v2 tag at the front. ffmpeg writes one, so any backend that
+      re-encodes through ffmpeg produces them.
+    * A Xing or Info frame as the first frame, holding the duration and
+      seek table for the response it came with. Left in place it
+      describes the wrong audio, and it was a stray frame of exactly
+      this kind that broke decoding on a HomePod in issue #64.
+    * An ID3v1 trailer in the last 128 bytes.
+
+    OpenAI's own responses carry none of these, verified by inspection:
+    they start directly with a frame sync. This is here for the
+    self-hosted backends where that is not true.
+    """
+    start = 0
+    end = len(data)
+
+    if data[:3] == b"ID3" and len(data) >= 10:
+        # Syncsafe integer: seven bits per byte.
+        size = (
+            ((data[6] & 0x7F) << 21)
+            | ((data[7] & 0x7F) << 14)
+            | ((data[8] & 0x7F) << 7)
+            | (data[9] & 0x7F)
+        )
+        start = min(size + 10, end)
+
+    if end - start >= 128 and data[end - 128:end - 125] == b"TAG":
+        end -= 128
+
+    # A Xing/Info marker lives inside the first frame, a little past its
+    # header. Skip the whole frame when one is there.
+    first = data[start:start + 4]
+    frame_len = _mpeg_frame_length(first)
+    if frame_len and start + frame_len <= end:
+        frame = data[start:start + frame_len]
+        if b"Xing" in frame[:64] or b"Info" in frame[:64]:
+            start += frame_len
+
+    return data[start:end]
 
 
 def _make_wav_header(rate: int, width: int, channels: int) -> bytes:
@@ -207,12 +312,16 @@ async def pipelined_audio_stream(
     async def _passthrough(text: str) -> AsyncGenerator[bytes, None]:
         """Forward one response untouched, as the only response.
 
-        Safe only when nothing follows. A WAV header states the frame
-        count, and decoders honour it: ffmpeg given a header claiming one
-        second stops after one second and ignores whatever was appended.
-        That is why joined output needs a rewritten header, and why a
-        lone response must NOT get one, so it keeps arriving chunk by
-        chunk instead of being buffered for no reason.
+        Safe only when nothing follows, and worth it because it keeps the
+        response arriving chunk by chunk instead of being buffered.
+
+        Buffering is what the joined path has to do, for two different
+        reasons. A WAV header states the frame count and decoders honour
+        it, so ffmpeg given a header claiming one second stops after one
+        second and ignores whatever was appended; the header has to be
+        rewritten, which needs the whole response. An MP3 response may
+        be wrapped in metadata that has to be found and removed. Neither
+        applies when there is only one response.
         """
         nonlocal wav_header_sent
         wav_header_sent = True
@@ -222,6 +331,13 @@ async def pipelined_audio_stream(
     async def _emit_joined(text: str) -> AsyncGenerator[bytes, None]:
         """Run one synthesis request and yield audio that can be joined."""
         nonlocal wav_header_sent
+        if audio_format == "mp3":
+            # Frames append cleanly, but any container metadata around
+            # them must not land mid-stream, and finding it needs the
+            # whole response. Bounded by one sentence.
+            parts = [chunk async for chunk in synthesize(text)]
+            yield _strip_mp3_metadata(b"".join(parts))
+            return
         if audio_format == "wav":
             # The frame count has to be rewritten to "unknown", which
             # means parsing the header, which means having the whole

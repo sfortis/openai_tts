@@ -555,8 +555,10 @@ DEFAULT_ANNOUNCE_MODE = True
 # prosody across requests (no equivalent of ElevenLabs'
 # ``previous_request_ids``), so the tone can shift mid-reply.
 #
-# Restricted at runtime to the audio formats that can be joined without
-# leaving several container headers inside one stream. See
+# Restricted at runtime to the audio formats whose responses can be
+# joined into one stream: mp3, wav and pcm. opus and flac declare their
+# total length up front and would cut everything after the first
+# sentence, and aac loses samples at the seam. See
 # ``streaming.PIPELINEABLE_FORMATS``.
 CONF_STREAM_PIPELINING = "stream_pipelining"
 
