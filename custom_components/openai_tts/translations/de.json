@@ -74,8 +74,12 @@
             "normalize_audio": "Audiolautstärke normalisieren",
             "instructions": "Sprachanweisungen",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
-            "audio_format": "Audio format (mp3 ist das sichere default, nur ändern wenn Ihr backend ein anderes benötigt)",
-            "stream_pipelining": "Mit dem Sprechen beginnen, bevor die Antwort vollständig ist (MP3, WAV oder PCM; nur Sprachassistent)"
+            "audio_format": "Audioformat",
+            "stream_pipelining": "Satzweises Streaming"
+          },
+          "data_description": {
+            "stream_pipelining": "Beginnt zu sprechen, sobald der erste Satz fertig ist, statt auf die vollständige Antwort zu warten. Betrifft nur den Sprachassistenten und erfordert MP3, WAV oder PCM.",
+            "audio_format": "MP3 ist die sichere Voreinstellung. Ändern Sie es nur, wenn Ihr Backend ein anderes Format benötigt."
           }
         },
         "reconfigure": {
@@ -96,8 +100,12 @@
             "normalize_audio": "Audiolautstärke normalisieren",
             "instructions": "Sprachanweisungen",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
-            "audio_format": "Audio format (mp3 ist das sichere default, nur ändern wenn Ihr backend ein anderes benötigt)",
-            "stream_pipelining": "Mit dem Sprechen beginnen, bevor die Antwort vollständig ist (MP3, WAV oder PCM; nur Sprachassistent)"
+            "audio_format": "Audioformat",
+            "stream_pipelining": "Satzweises Streaming"
+          },
+          "data_description": {
+            "stream_pipelining": "Beginnt zu sprechen, sobald der erste Satz fertig ist, statt auf die vollständige Antwort zu warten. Betrifft nur den Sprachassistenten und erfordert MP3, WAV oder PCM.",
+            "audio_format": "MP3 ist die sichere Voreinstellung. Ändern Sie es nur, wenn Ihr Backend ein anderes Format benötigt."
           }
         }
       },

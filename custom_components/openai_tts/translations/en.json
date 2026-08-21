@@ -74,8 +74,12 @@
             "normalize_audio": "Normalize audio volume",
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
-            "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)",
-            "stream_pipelining": "Start speaking before the reply is complete (MP3, WAV or PCM; voice assistant only)"
+            "audio_format": "Audio format",
+            "stream_pipelining": "Sentence streaming"
+          },
+          "data_description": {
+            "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3, WAV or PCM.",
+            "audio_format": "MP3 is the safe default. Change it only if your backend requires another format."
           }
         },
         "reconfigure": {
@@ -96,8 +100,12 @@
             "normalize_audio": "Normalize audio volume",
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
-            "audio_format": "Audio format (mp3 is the safe default; switch only if your backend needs another)",
-            "stream_pipelining": "Start speaking before the reply is complete (MP3, WAV or PCM; voice assistant only)"
+            "audio_format": "Audio format",
+            "stream_pipelining": "Sentence streaming"
+          },
+          "data_description": {
+            "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3, WAV or PCM.",
+            "audio_format": "MP3 is the safe default. Change it only if your backend requires another format."
           }
         }
       },

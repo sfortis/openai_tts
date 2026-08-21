@@ -74,8 +74,12 @@
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
-            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)",
-            "stream_pipelining": "Έναρξη ομιλίας πριν ολοκληρωθεί η απάντηση (MP3, WAV ή PCM, μόνο για φωνητικό βοηθό)"
+            "audio_format": "Μορφή ήχου",
+            "stream_pipelining": "Streaming ανά πρόταση"
+          },
+          "data_description": {
+            "stream_pipelining": "Αρχίζει να μιλά μόλις είναι έτοιμη η πρώτη πρόταση, αντί να περιμένει να γραφτεί όλη η απάντηση. Επηρεάζει μόνο τον φωνητικό βοηθό και απαιτεί MP3, WAV ή PCM.",
+            "audio_format": "Το MP3 είναι η ασφαλής προεπιλογή. Άλλαξέ το μόνο αν το backend σου απαιτεί άλλη μορφή."
           }
         },
         "reconfigure": {
@@ -96,8 +100,12 @@
             "normalize_audio": "Κανονικοποίηση έντασης ήχου",
             "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
-            "audio_format": "Audio format (το mp3 είναι το ασφαλές default, αλλάξτε μόνο αν το backend σας χρειάζεται άλλο)",
-            "stream_pipelining": "Έναρξη ομιλίας πριν ολοκληρωθεί η απάντηση (MP3, WAV ή PCM, μόνο για φωνητικό βοηθό)"
+            "audio_format": "Μορφή ήχου",
+            "stream_pipelining": "Streaming ανά πρόταση"
+          },
+          "data_description": {
+            "stream_pipelining": "Αρχίζει να μιλά μόλις είναι έτοιμη η πρώτη πρόταση, αντί να περιμένει να γραφτεί όλη η απάντηση. Επηρεάζει μόνο τον φωνητικό βοηθό και απαιτεί MP3, WAV ή PCM.",
+            "audio_format": "Το MP3 είναι η ασφαλής προεπιλογή. Άλλαξέ το μόνο αν το backend σου απαιτεί άλλη μορφή."
           }
         }
       },
