@@ -81,6 +81,39 @@ _BUFFERING_SETTLE_POLL_S = 0.1
 # disruptive than the couple of seconds it would recover.
 _RESUME_SEEK_MIN_POSITION_S = 5.0
 
+# Entities currently inside an announcement, counted because two
+# announcements can overlap on one speaker.
+#
+# The auto-resume watcher needs this. It fires on any transition into
+# ``playing`` on a target that was idle beforehand, and it cannot tell a
+# platform's unwanted queue restore from a second announcement someone
+# sent a moment later. Checking the proxy URL is not enough on its own:
+# this module's own notes record that Music Assistant and Sonos do not
+# surface it while announcing.
+_ANNOUNCING: Dict[str, int] = {}
+
+
+def _mark_announcing(entity_ids: List[str]) -> None:
+    """Note that these entities are inside an announcement."""
+    for eid in entity_ids:
+        _ANNOUNCING[eid] = _ANNOUNCING.get(eid, 0) + 1
+
+
+def _clear_announcing(entity_ids: List[str]) -> None:
+    """Release entities once their announcement is finished."""
+    for eid in entity_ids:
+        remaining = _ANNOUNCING.get(eid, 0) - 1
+        if remaining > 0:
+            _ANNOUNCING[eid] = remaining
+        else:
+            _ANNOUNCING.pop(eid, None)
+
+
+def _is_announcing(entity_id: str) -> bool:
+    """True while any announcement holds this entity."""
+    return _ANNOUNCING.get(entity_id, 0) > 0
+
+
 # How long to keep watching for a platform-driven auto-resume after the
 # announcement. Music Assistant's resume lands 1-3 s late, so the window
 # has to outlast that; it runs on a timer rather than blocking the
@@ -471,6 +504,15 @@ class _VolumeRestorer:
                     turn_on_tasks.append(
                         call_media_player_service(self.hass, "turn_on", entity_id)
                     )
+                # Record inactive native-announce targets before skipping
+                # the rest. These are exactly the ones the auto-resume
+                # watcher covers: the platform's own announcement layer
+                # restores their queue when the clip ends. Recording it
+                # after the ``continue`` below is what silently disabled
+                # ``_stop_unintended_playback`` entirely, since it also
+                # requires membership of ``_native_announce_skipped``.
+                if state in (STATE_IDLE, STATE_OFF, STATE_STANDBY):
+                    self._was_inactive.add(entity_id)
                 continue
 
             volume = attrs.get(ATTR_MEDIA_VOLUME_LEVEL)
@@ -820,8 +862,18 @@ class _VolumeRestorer:
             # tool and keeps position too.
             return "media_stop" if _is_ma_platform(self.hass, eid) else SERVICE_MEDIA_PAUSE
 
-        def _is_our_announcement(state: Any) -> bool:
-            """True while the entity is still rendering our TTS clip."""
+        def _is_announcement_playing(eid: str, state: Any) -> bool:
+            """True when this playback is an announcement, not a stray resume.
+
+            Two independent signals, because neither covers every
+            platform. The proxy URL appears in ``media_content_id`` on
+            Cast but not on Sonos or Music Assistant, which announce
+            below the level Home Assistant reports. The registry covers
+            those: if any announcement still holds this entity, whatever
+            is playing belongs to it.
+            """
+            if _is_announcing(eid):
+                return True
             if state is None:
                 return False
             content_id = state.attributes.get("media_content_id") or ""
@@ -836,9 +888,9 @@ class _VolumeRestorer:
             state = self.hass.states.get(eid)
             if state is None or state.state not in (STATE_PLAYING, _BUFFERING_STATE):
                 continue
-            if _is_our_announcement(state):
+            if _is_announcement_playing(eid, state):
                 _LOGGER.debug(
-                    "%s is still playing the announcement, not pausing", eid,
+                    "%s is playing an announcement, not pausing", eid,
                 )
                 continue
             action = _stop_action(eid)
@@ -881,7 +933,7 @@ class _VolumeRestorer:
                 return
             if new_state.state not in (STATE_PLAYING, _BUFFERING_STATE):
                 return
-            if _is_our_announcement(new_state):
+            if _is_announcement_playing(eid, new_state):
                 return
             handled.add(eid)
             action = _stop_action(eid)
@@ -1118,6 +1170,11 @@ async def announce(
         _VolumeRestorer(hass, available_players) if needs_restorer else None
     )
 
+    # Claim the targets for the duration of this announcement, so a
+    # concurrent one is not mistaken for an unwanted auto-resume. Released
+    # in the finally below, after the hold has run.
+    _mark_announcing(available_players)
+
     if restorer is not None:
         await restorer.prepare(
             target_volume=tts_volume if restore_enabled else None,
@@ -1276,6 +1333,13 @@ async def announce(
     finally:
         if watcher is not None:
             watcher.stop()
+        # Release the claim BEFORE restoring. The restore runs the
+        # auto-resume watcher, which must see a zero count for these
+        # targets or it would skip its own work. With two overlapping
+        # announcements the count is still positive here, which is
+        # exactly right: the other one is still playing and must not be
+        # cut off.
+        _clear_announcing(available_players)
 
     await restorer.restore_after_playback(
         duration_ms,
