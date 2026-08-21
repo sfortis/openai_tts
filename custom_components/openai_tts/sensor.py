@@ -85,8 +85,6 @@ class OpenAITTSAPIStatusSensor(
     _attr_options = list(ALL_STATUSES)
     _attr_translation_key = "api_status"
     _attr_entity_category = EntityCategory.DIAGNOSTIC
-    _attr_icon = "mdi:cloud-check"
-
     def __init__(
         self,
         tracker: OpenAITTSHealthTracker,

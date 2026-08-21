@@ -756,18 +756,6 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
 
         return _voice_options_from_payload(payload, voices_url)
 
-    async def async_step_init(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
-        """Handle initialization with data (for migration)."""
-        # This is called when flow is initiated with data directly
-        if user_input is not None:
-            # Direct creation from migration
-            return self.async_create_subentry(
-                data=user_input,
-                title=user_input.get(CONF_PROFILE_NAME, "Default")
-            )
-        # Otherwise proceed to user step
-        return await self.async_step_user()
-    
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Step 1 of profile creation: profile name + model.
 

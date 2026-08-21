@@ -18,6 +18,8 @@ from homeassistant.components.media_player import (
     DOMAIN as MP_DOMAIN,
 )
 
+from .const import AUDIO_FORMAT_ENCODER
+
 _LOGGER = logging.getLogger(__name__)
 
 
@@ -157,8 +159,6 @@ def build_ffmpeg_command(
     output_path: str,
     input_paths: List[str],
     normalize_audio: bool = False,
-    is_concat: bool = False,
-    concat_list_path: Optional[str] = None,
     tts_input_format: Optional[str] = None,
     output_format: str = "mp3",
 ) -> List[str]:
@@ -169,8 +169,6 @@ def build_ffmpeg_command(
         output_path: Path to output file
         input_paths: List of input file paths
         normalize_audio: Whether to apply audio normalization
-        is_concat: Whether to use concat demuxer
-        concat_list_path: Path to concat list file (only used if is_concat=True)
         tts_input_format: Explicit format hint for the LAST input path (the
             TTS audio). Only meaningful for headerless formats like ``pcm``;
             for everything else ffmpeg auto-detects from the file header
@@ -178,26 +176,22 @@ def build_ffmpeg_command(
             ffmpeg the layout matches OpenAI's documented raw output
             (24kHz signed 16-bit little-endian mono).
     """
-    from .const import AUDIO_FORMAT_ENCODER
 
     cmd = ["ffmpeg", "-y"]
 
     # Add inputs
-    if is_concat and concat_list_path:
-        cmd.extend(["-f", "concat", "-safe", "0", "-i", concat_list_path])
-    else:
-        last_idx = len(input_paths) - 1
-        for idx, input_path in enumerate(input_paths):
-            if idx == last_idx and tts_input_format == "pcm":
-                cmd.extend([
-                    "-f", "s16le", "-ar", "24000", "-ac", "1",
-                ])
-            cmd.extend(["-i", input_path])
+    last_idx = len(input_paths) - 1
+    for idx, input_path in enumerate(input_paths):
+        if idx == last_idx and tts_input_format == "pcm":
+            cmd.extend([
+                "-f", "s16le", "-ar", "24000", "-ac", "1",
+            ])
+        cmd.extend(["-i", input_path])
     
     # Filter graph for chime+TTS mixing or single-input normalization.
     # Both streams are forced to a common PCM layout before concat so
     # the operation is codec-agnostic.
-    if len(input_paths) > 1 and not is_concat:
+    if len(input_paths) > 1:
         norm_step = ",loudnorm=I=-16:TP=-1:LRA=5" if normalize_audio else ""
         common = "aresample=24000:async=1,aformat=sample_fmts=fltp:channel_layouts=mono"
         cmd.extend([
@@ -212,19 +206,14 @@ def build_ffmpeg_command(
     elif normalize_audio:
         cmd.extend(["-af", "loudnorm=I=-16:TP=-1:LRA=5"])
 
-    # Output side: pick codec / muxer for the requested format. The
-    # ``is_concat`` branch is the chime-only fast path (concat demuxer):
-    # we use ``-c copy`` so the TTS payload is remuxed without a decode
-    # /encode roundtrip, since the chime was pre-converted to match the
-    # TTS codec via ``ensure_chime_in_format``.
+    # Output side: pick codec and muxer for the requested format. Always a
+    # real re-encode. There used to be a ``-c copy`` remux path here for a
+    # concat-demuxer input, but nothing has passed that input since the
+    # chime pre-conversion it depended on was removed.
     encoder = AUDIO_FORMAT_ENCODER.get(output_format, AUDIO_FORMAT_ENCODER["mp3"])
-    if is_concat:
-        cmd.extend(["-c", "copy"])
-        cmd.extend(encoder["container_args"])
-    else:
-        cmd.extend(["-ac", "1", "-ar", "24000"])
-        cmd.extend(encoder["codec_args"])
-        cmd.extend(encoder["container_args"])
+    cmd.extend(["-ac", "1", "-ar", "24000"])
+    cmd.extend(encoder["codec_args"])
+    cmd.extend(encoder["container_args"])
     cmd.append(output_path)
 
     return cmd
@@ -232,7 +221,6 @@ def build_ffmpeg_command(
 async def process_audio(
     hass: HomeAssistant,
     audio_content: bytes,
-    output_path: Optional[str] = None,
     chime_enabled: bool = False,
     chime_path: Optional[str] = None,
     normalize_audio: bool = False,
@@ -244,7 +232,6 @@ async def process_audio(
     Args:
         hass: HomeAssistant instance
         audio_content: Raw audio content bytes
-        output_path: Optional output path
         chime_enabled: Whether to add chime
         chime_path: Path to chime file (MP3)
         normalize_audio: Whether to normalize audio
@@ -287,21 +274,15 @@ async def process_audio(
     tts_path = await hass.async_add_executor_job(write_temp_file)
     
     try:
-        # Determine final output path. ``caller_owns_output`` tracks whether
-        # the path came from the caller; if so, we must NOT delete it during
-        # cleanup (the caller is responsible for its own file).
-        # Output path keeps the requested format extension so ffmpeg
-        # picks the matching muxer automatically. PCM has no container,
-        # so we still use ``.pcm`` and rely on the explicit ``-f s16le``
-        # in the encoder's container_args.
-        out_suffix = f".{audio_format}"
-        final_output_path = output_path
-        caller_owns_output = output_path is not None
-        if not final_output_path:
-            def create_temp_output():
-                with tempfile.NamedTemporaryFile(suffix=out_suffix, delete=False) as out_file:
-                    return out_file.name
-            final_output_path = await hass.async_add_executor_job(create_temp_output)
+        # Always a temp file: no caller passes an output path, so this
+        # function owns the file it creates and removes it below.
+        def create_temp_output() -> str:
+            with tempfile.NamedTemporaryFile(
+                suffix=f".{audio_format}", delete=False
+            ) as tmp:
+                return tmp.name
+
+        final_output_path = await hass.async_add_executor_job(create_temp_output)
 
         # Decide which ffmpeg pipeline to run:
         #   chime (any)  → filter_complex re-encode of both streams. The
@@ -363,14 +344,13 @@ async def process_audio(
         final_audio = await hass.async_add_executor_job(read_file)
         
         # Final clean up of temporary files. We only own the output file
-        # when the caller did not provide ``output_path``; otherwise the
+        # Remove the temp file we created; the
         # caller is responsible for it (issue: previous code unconditionally
         # deleted it, which silently broke any caller that passed a path).
         def cleanup_files():
             try:
                 os.remove(tts_path)
-                if not caller_owns_output:
-                    os.remove(final_output_path)
+                os.remove(final_output_path)
             except Exception as e:
                 _LOGGER.debug("Error cleaning up temporary files: %s", e)
 
@@ -384,7 +364,7 @@ async def process_audio(
         def error_cleanup():
             try:
                 os.remove(tts_path)
-                if 'final_output_path' in locals() and not caller_owns_output:
+                if 'final_output_path' in locals():
                     os.remove(final_output_path)
             except OSError:
                 pass

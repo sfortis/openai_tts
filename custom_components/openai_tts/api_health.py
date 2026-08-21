@@ -125,11 +125,6 @@ class OpenAITTSHealthTracker(DataUpdateCoordinator[dict[str, Any]]):
     def status(self) -> str:
         return self.data.get("status", API_STATUS_OK)
 
-    @property
-    def is_problem(self) -> bool:
-        """True when the sensor should report an active problem."""
-        return self.status != API_STATUS_OK
-
     def blocks_requests(
         self, retry_after_s: float = BLOCKING_RETRY_AFTER_S
     ) -> bool:

@@ -15,11 +15,11 @@ DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 # Provider presets shown in the parent-entry config flow as a single
 # dropdown so a user picks "OpenAI" / "Mistral" / "Custom" instead of
 # typing the right URL, voice-field name, and audio_format defaults
-# from memory. Each entry is a self-contained recipe consumed both by
-# the config flow (URL / extra_payload defaults, voice catalog) and by
-# the engine (voice field name, JSON envelope handling already lives
-# in openaitts_engine.py and is provider-agnostic). Add new providers
-# by extending this dict; nothing else in the codebase should need a
+# from memory. Each entry is a recipe read by the config flow: the
+# endpoint URL, the voice and model catalogues, the audio formats the
+# backend accepts, and which fields to render. The engine reads none of
+# it; request shaping there is provider-agnostic. Add new providers by
+# extending this dict; nothing else in the codebase should need a
 # branch on the provider key.
 PROVIDER_OPENAI = "openai"
 PROVIDER_MISTRAL = "mistral"
@@ -33,7 +33,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     PROVIDER_OPENAI: {
         "label": "OpenAI",
         "url": DEFAULT_URL,
-        "voice_field": "voice",
         "default_model": "gpt-4o-mini-tts",
         "default_format": "mp3",
         # voice catalog stays in VOICES below; OpenAI is the source of truth
@@ -42,7 +41,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # OpenAI list). Other presets set their own catalogue so a
         # Mistral subentry doesn't show ``tts-1`` in the dropdown.
         "model_catalog": None,
-        "extra_payload_default": None,
         "requires_api_key": True,
         # OpenAI supports every container we know about and chunked
         # streaming on all of them.
@@ -59,7 +57,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     PROVIDER_MISTRAL: {
         "label": "Mistral Voxtral",
         "url": "https://api.mistral.ai/v1/audio/speech",
-        "voice_field": "voice",
         "default_model": "voxtral-mini-tts-latest",
         "model_catalog": ["voxtral-mini-tts-latest"],
         "default_format": "mp3",
@@ -70,7 +67,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # fall back to free-text when the call fails or the account
         # has no cloned voices yet.
         "voice_catalog": None,
-        "extra_payload_default": None,
         "requires_api_key": True,
         # Voxtral accepts the same MP3/Opus/WAV/PCM/FLAC family OpenAI
         # does. Length cap left open: Mistral's documented max bounces
@@ -104,7 +100,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # custom-voice free-text field.
         "label": "Groq (Orpheus TTS)",
         "url": "https://api.groq.com/openai/v1/audio/speech",
-        "voice_field": "voice",
         "default_model": "canopylabs/orpheus-v1-english",
         "model_catalog": [
             "canopylabs/orpheus-v1-english",
@@ -122,7 +117,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
             "daniel",
             "troy",
         ],
-        "extra_payload_default": None,
         "requires_api_key": True,
         # Orpheus only emits WAV today (response_format=wav). Picking
         # mp3/opus/etc. on the dropdown produced an opaque 400 from the
@@ -152,7 +146,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # the full id via the custom-value path on the voice picker.
         "label": "Lemonfox.ai (Kokoro TTS)",
         "url": "https://api.lemonfox.ai/v1/audio/speech",
-        "voice_field": "voice",
         # Lemonfox runs a single underlying model; ``tts-1`` is the
         # OpenAI-compatible alias they accept and the value is
         # otherwise ignored. Custom_value stays on so users on a
@@ -171,7 +164,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
             "alice", "emma", "isabella", "lily",
             "daniel", "fable", "george", "lewis",
         ],
-        "extra_payload_default": None,
         "requires_api_key": True,
         # Lemonfox supports the same MP3/Opus/AAC/FLAC/WAV/PCM family
         # OpenAI does. Length cap left open: docs quote a per-request
@@ -194,7 +186,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # this preset is the zero-config path that closes that loop.
         "label": "Kokoro-FastAPI (self-hosted Kokoro)",
         "url": "http://localhost:8880/v1/audio/speech",
-        "voice_field": "voice",
         # Kokoro-FastAPI maps ``tts-1`` / ``tts-1-hd`` / ``kokoro`` to
         # the same underlying model in ``openai_mappings.json``. We
         # default to ``kokoro`` as the canonical native name so the
@@ -210,7 +201,6 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # the user never has to type a slug like ``af_bella``
         # themselves.
         "voice_catalog": None,
-        "extra_payload_default": None,
         # Default Kokoro-FastAPI docker compose runs without auth, so
         # the API key field stays optional. Users behind a reverse
         # proxy that adds Bearer auth can still fill it in.
@@ -239,12 +229,10 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # gate the endpoint, while hosted proxies usually do.
         "label": "Custom / Self-hosted (any OpenAI-compatible endpoint)",
         "url": "",  # user enters
-        "voice_field": "voice",
         "default_model": None,
         "model_catalog": None,
         "default_format": "mp3",
         "voice_catalog": None,
-        "extra_payload_default": None,
         "requires_api_key": False,
         # Backend capabilities are deployment-specific, so leave
         # every dial open and let the operator constrain via
@@ -481,7 +469,6 @@ CONF_INSTRUCTIONS = "instructions"
 CONF_EXTRA_PAYLOAD = "extra_payload"  # JSON string for custom TTS backend parameters
 CONF_AUDIO_FORMAT = "audio_format"   # mp3 (default) / wav / opus, for custom backends
 
-AUDIO_FORMATS = ["mp3", "opus", "aac", "flac", "wav", "pcm"]
 AUDIO_FORMAT_LABELS: list[dict[str, str]] = [
     {"value": "mp3", "label": "MP3 (default, broad compatibility)"},
     {"value": "opus", "label": "Opus (low-latency streaming)"},

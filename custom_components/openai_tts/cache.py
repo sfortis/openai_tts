@@ -160,29 +160,6 @@ class MessageDurationCache:
         self._evict_local()
         self._publish_shared(msg_hash, duration_ms)
 
-    def get_duration(
-        self,
-        message: str,
-        *,
-        voice: str | None = None,
-        model: str | None = None,
-        speed: float | None = None,
-        instructions: str | None = None,
-        chime: bool | None = None,
-        chime_sound: str | None = None,
-        extra_payload: str | None = None,
-    ) -> int | None:
-        """Return cached duration for the request, or None if absent.
-
-        Returns ``DURATION_FAILED_SENTINEL`` (0) when the last attempt
-        failed; callers should treat that as "skip the playback wait".
-        """
-        msg_hash = self._hash(
-            message, voice, model, speed, instructions,
-            chime, chime_sound, extra_payload,
-        )
-        return self._local.get(msg_hash)
-
     def clear_failure(self, message: str, **render_args) -> None:
         """Drop a failure sentinel after a successful run.
 
