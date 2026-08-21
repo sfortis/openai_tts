@@ -7,7 +7,7 @@ import logging
 import os
 import subprocess
 import tempfile
-from typing import Any, Callable, Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
@@ -114,8 +114,6 @@ def is_valid_audio(
     return True
 
 
-
-
 def get_media_duration(file_path: str) -> float:
     """
     Get the duration of a media file in seconds.
@@ -164,41 +162,6 @@ def get_media_duration(file_path: str) -> float:
     except Exception as e:
         _LOGGER.error("Error getting media duration: %s", e)
         return 0.0
-
-async def safe_execute(func: Callable, *args, log_prefix: str = "", **kwargs) -> Any:
-    """
-    Execute a function safely with standardized error handling.
-    
-    Args:
-        func: Function to execute
-        log_prefix: Prefix for error log messages
-        *args: Arguments to pass to function
-        **kwargs: Keyword arguments to pass to function
-        
-    Returns:
-        Result of the function
-        
-    Raises:
-        HomeAssistantError: On any error to standardize exception handling
-    """
-    try:
-        return await func(*args, **kwargs) if asyncio_function(func) else func(*args, **kwargs)
-    except Exception as err:
-        error_msg = f"{log_prefix} error: {err}"
-        _LOGGER.error(error_msg)
-        raise HomeAssistantError(error_msg) from err
-
-def asyncio_function(func: Callable) -> bool:
-    """
-    Check if a function is a coroutine function.
-    
-    Args:
-        func: Function to check
-        
-    Returns:
-        True if coroutine function, False otherwise
-    """
-    return hasattr(func, "__await__") or hasattr(func, "__aenter__")
 
 def build_ffmpeg_command(
     output_path: str,
@@ -441,24 +404,6 @@ async def process_audio(
         _LOGGER.error("Error processing audio: %s", e)
         raise HomeAssistantError(f"Error processing audio: {e}") from e
 
-def check_ffmpeg_installed() -> bool:
-    """
-    Check if ffmpeg is installed and available.
-    
-    Returns:
-        True if ffmpeg is available, False otherwise
-    """
-    try:
-        subprocess.run(
-            ["ffmpeg", "-version"], 
-            stdout=subprocess.PIPE, 
-            stderr=subprocess.PIPE, 
-            check=True
-        )
-        return True
-    except (subprocess.SubprocessError, FileNotFoundError):
-        return False
-
 def normalize_entity_ids(entity_ids: Union[str, List[str]]) -> List[str]:
     """
     Normalize entity IDs to always be a list.
@@ -495,28 +440,6 @@ async def get_media_player_state(
     if state is None or state.state in [STATE_UNAVAILABLE, STATE_UNKNOWN]:
         return None, None
     return state.state, state.attributes
-
-def get_speaker_status(state: Optional[str]) -> str:
-    """
-    Get speaker status based on state.
-    
-    Args:
-        state: Speaker state
-        
-    Returns:
-        "inactive" if state is "off" or "idle" or "paused", "active" otherwise
-    """
-    # Hardcode state values instead of importing constants to avoid import issues
-    if not state:
-        return "inactive"
-    
-    state_lower = state.lower()
-    
-    # Check for the three inactive states
-    if state_lower == "idle" or state_lower == "off" or state_lower == "paused":
-        return "inactive"
-        
-    return "active"
 
 async def set_media_player_volume(
     hass: HomeAssistant,
@@ -574,35 +497,6 @@ async def set_media_player_volume(
     except Exception as err:
         _LOGGER.error("Failed to set volume for %s: %s", entity_id, err)
         return False
-
-def get_cascaded_config_value(
-    options: Dict[str, Any], 
-    data: Dict[str, Any], 
-    service_data: Dict[str, Any],
-    key: str, 
-    default: Any = None
-) -> Any:
-    """
-    Get a configuration value with proper cascade priority:
-    service_data > options > data > default
-    
-    Args:
-        options: Component options
-        data: Component data
-        service_data: Service call data
-        key: Key to retrieve
-        default: Default value if not found
-        
-    Returns:
-        The value with proper priority
-    """
-    return service_data.get(
-        key, 
-        options.get(
-            key, 
-            data.get(key, default)
-        )
-    )
 
 async def call_media_player_service(
     hass: HomeAssistant,
