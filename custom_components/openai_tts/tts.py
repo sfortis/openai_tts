@@ -57,7 +57,6 @@ from .const import (
     DOMAIN,
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
-    VOICES,
     preset_for,
     is_openai_endpoint,
     voices_for_model,
@@ -186,6 +185,29 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     _attr_has_entity_name = True
     _attr_should_poll = False
+
+    # Attributes the recorder should not keep. The voice catalogue and
+    # the ``current_*`` fields describe configuration, not history: the
+    # catalogue is answered properly by ``async_get_supported_voices``,
+    # and the ``current_*`` fields exist only so ``volume_restore`` can
+    # rebuild a cache key from the live state machine, which never reads
+    # history. ``failure_cache_size`` is a counter that changes with
+    # almost every announcement, and it is that churn which made each
+    # new attribute set carry another copy of everything else.
+    #
+    # ``media_duration`` is deliberately still recorded: the measured
+    # length of what was spoken is the one value here worth charting.
+    _unrecorded_attributes = frozenset({
+        "available_voices",
+        "failure_cache_size",
+        "current_voice",
+        "current_model",
+        "current_speed",
+        "current_instructions",
+        "current_chime_enable",
+        "current_chime_sound",
+        "current_extra_payload",
+    })
 
     def __init__(
         self,
@@ -420,7 +442,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         return {
             "media_duration": self._last_duration_ms,
             "failure_cache_size": self._duration_cache.size,
-            "available_voices": VOICES,
+            "available_voices": self._available_voice_ids(),
             "current_voice": self._get_config_value(CONF_VOICE) or self._engine._voice,
             "current_model": self._get_config_value(CONF_MODEL) or self._engine._model,
             "current_speed": self._get_config_value(CONF_SPEED) or self._engine._speed,
@@ -437,6 +459,18 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     @property
     def supported_languages(self) -> list[str]:
         return SUPPORTED_LANGUAGES
+
+    def _available_voice_ids(self) -> list[str]:
+        """Voice names for the attribute, matching what the entity offers.
+
+        The same answer ``async_get_supported_voices`` gives, reduced to
+        plain ids. It used to be the whole static table regardless of
+        provider or model, so a profile on a self-hosted backend
+        advertised thirteen OpenAI voices it could not speak, and a
+        profile on ``tts-1`` advertised four its model rejects.
+        """
+        voices = self.async_get_supported_voices(self.default_language)
+        return [voice.voice_id for voice in voices or []]
 
     @callback
     def async_get_supported_voices(self, language: str) -> list[Voice] | None:
