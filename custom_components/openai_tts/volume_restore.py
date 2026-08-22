@@ -32,6 +32,7 @@ from homeassistant.components.media_player import (
     STATE_PLAYING,
 )
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
+from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_SUPPORTED_FEATURES,
     STATE_IDLE,
@@ -244,6 +245,17 @@ async def _await_buffering_settle(
 # ---------------------------------------------------------------------------
 
 
+def _resolve_config_entry(
+    hass: HomeAssistant, tts_entity: str
+) -> ConfigEntry | None:
+    """Return the config entry that owns ``tts_entity``, if any."""
+    er = entity_registry.async_get(hass)
+    registry_entry = er.async_get(tts_entity)
+    if registry_entry is None or registry_entry.config_entry_id is None:
+        return None
+    return hass.config_entries.async_get_entry(registry_entry.config_entry_id)
+
+
 def _resolve_profile_flag(
     hass: HomeAssistant, tts_entity: str, key: str, default: Any
 ) -> Any:
@@ -262,14 +274,13 @@ def _resolve_profile_flag(
     dict, so every profile silently fell through to the default no
     matter what the user had configured.
     """
+    parent = _resolve_config_entry(hass, tts_entity)
+    if parent is None:
+        return default
+
     er = entity_registry.async_get(hass)
     registry_entry = er.async_get(tts_entity)
-    if registry_entry is None or registry_entry.config_entry_id is None:
-        return default
-    parent = hass.config_entries.async_get_entry(
-        registry_entry.config_entry_id
-    )
-    if parent is None:
+    if registry_entry is None:
         return default
 
     subentry_id = getattr(registry_entry, "config_subentry_id", None)
@@ -343,9 +354,20 @@ class _VolumeRestorer:
     path skips the wait entirely and rolls volumes back immediately.
     """
 
-    def __init__(self, hass: HomeAssistant, entity_ids: List[str]) -> None:
+    def __init__(
+        self,
+        hass: HomeAssistant,
+        entity_ids: List[str],
+        entry: ConfigEntry | None = None,
+    ) -> None:
         self.hass = hass
         self.entity_ids = entity_ids
+        # The config entry that owns the TTS profile behind this
+        # announcement. Background work is registered against it so
+        # Home Assistant cancels anything still running when the entry
+        # unloads, rather than letting a stray task call volume_set for
+        # an entry that no longer exists.
+        self._entry = entry
         self._original_volumes: Dict[str, float] = {}
         self._paused_media: Set[str] = set()
         # Cast Default Receiver leaks ~150-400ms of the previous URL
@@ -368,6 +390,20 @@ class _VolumeRestorer:
         # ``_set_announcement_volume`` and ``restore`` know to leave
         # them alone. Populated by ``prepare()`` when announce_mode is on.
         self._native_announce_skipped: Set[str] = set()
+
+    def _spawn(self, coro: Any, name: str) -> None:
+        """Run ``coro`` in the background, tied to the config entry.
+
+        Falls back to an entry-less task only when the owning entry
+        could not be resolved, which happens for a TTS entity that is
+        not in the registry. Those tasks are the ones Home Assistant
+        cannot cancel on unload, so the fallback exists to keep the
+        announcement working rather than because it is preferable.
+        """
+        if self._entry is not None:
+            self._entry.async_create_background_task(self.hass, coro, name)
+            return
+        self.hass.async_create_task(coro, name)
 
     async def prepare(
         self,
@@ -901,7 +937,9 @@ class _VolumeRestorer:
                 eid, action, state.state,
             )
             handled.add(eid)
-            self.hass.async_create_task(_pause_now(eid, action))
+            self._spawn(
+                _pause_now(eid, action), f"openai_tts pause auto-resume {eid}"
+            )
 
         # Late-resume watch: MA's auto-resume can fire 1-3s after the
         # announcement ends, which can be AFTER the immediate check
@@ -943,7 +981,10 @@ class _VolumeRestorer:
                 "(preserves queue position)",
                 eid, action,
             )
-            self.hass.async_create_task(_pause_now(eid, action))
+            self._spawn(
+                _pause_now(eid, action),
+                f"openai_tts pause late auto-resume {eid}",
+            )
             if handled >= remaining:
                 _teardown()
 
@@ -956,7 +997,13 @@ class _VolumeRestorer:
         def _on_timeout(_now: Any) -> None:
             _teardown()
 
-        async_call_later(self.hass, _LATE_RESUME_WATCH_S, _on_timeout)
+        # The unsub goes into the same list as the state listeners, so
+        # a watch that finishes early also cancels its own timer
+        # instead of leaving it pending. Cancelling a timer that has
+        # already fired is a no-op.
+        disposers.append(
+            async_call_later(self.hass, _LATE_RESUME_WATCH_S, _on_timeout)
+        )
 
     async def _wait_for_announce_done(
         self,
@@ -1098,6 +1145,8 @@ async def announce(
 
     _abort_if_persistent_failure(hass, tts_entity)
 
+    owning_entry = _resolve_config_entry(hass, tts_entity)
+
     restore_enabled = (
         tts_volume is not None
         or bool(
@@ -1168,7 +1217,9 @@ async def announce(
     )
     needs_restorer = restore_enabled or pause_for_manual or force_manual
     restorer = (
-        _VolumeRestorer(hass, available_players) if needs_restorer else None
+        _VolumeRestorer(hass, available_players, owning_entry)
+        if needs_restorer
+        else None
     )
 
     # Claim the targets for the duration of this announcement, so a
