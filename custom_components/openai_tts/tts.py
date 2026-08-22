@@ -70,7 +70,7 @@ from .exceptions import (
 from .openaitts_engine import OpenAITTSEngine
 from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
 from .repairs import create_voice_deleted_issue
-from .utils import get_media_duration, is_valid_audio, process_audio
+from .utils import is_valid_audio, measure_audio_duration, process_audio
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -410,22 +410,16 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     # --- TTS generation ----------------------------------------------------
 
     async def _get_audio_duration(self, audio_data: bytes) -> int:
-        """Return audio duration in milliseconds via ffprobe."""
-        import tempfile
-        with tempfile.NamedTemporaryFile(suffix=".mp3", delete=False) as tmp_file:
-            tmp_file.write(audio_data)
-            tmp_path = tmp_file.name
-        try:
-            loop = asyncio.get_running_loop()
-            duration_seconds = await loop.run_in_executor(
-                None, get_media_duration, tmp_path
-            )
-            return int(duration_seconds * 1000)
-        finally:
-            try:
-                os.unlink(tmp_path)
-            except OSError:
-                pass
+        """Return audio duration in milliseconds via ffprobe.
+
+        The temporary file that ffprobe needs is written and deleted
+        inside the executor along with the probe itself, so none of the
+        three blocking steps runs on the event loop.
+        """
+        duration_seconds = await self.hass.async_add_executor_job(
+            measure_audio_duration, audio_data
+        )
+        return int(duration_seconds * 1000)
 
     def _can_use_streaming(self, text: str, options: dict) -> bool:
         if options.get(CONF_CHIME_ENABLE) or options.get(CONF_NORMALIZE_AUDIO):

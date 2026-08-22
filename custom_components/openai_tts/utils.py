@@ -155,6 +155,48 @@ def get_media_duration(file_path: str) -> float:
         _LOGGER.error("ffprobe gave a non-numeric duration: %r", duration_str)
         return 0.0
 
+
+def measure_audio_duration(audio_data: bytes, suffix: str = ".mp3") -> float:
+    """Return the duration of an in-memory clip in seconds, or 0.0.
+
+    ffprobe needs a seekable input to read a container's real duration,
+    so the bytes go to a temporary file first. Writing that file,
+    probing it and deleting it are all blocking, which is why they live
+    together in one synchronous function: the caller hands the whole
+    sequence to an executor with a single call instead of leaving the
+    write and the unlink on the event loop.
+
+    Args:
+        audio_data: The encoded clip.
+        suffix: Extension for the temporary file. ffprobe identifies the
+            format by probing the content, so this only affects the file
+            name.
+    """
+    tmp_path: str | None = None
+    try:
+        with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
+            tmp_file.write(audio_data)
+            tmp_path = tmp_file.name
+    except OSError as err:
+        _LOGGER.error("Cannot write temporary file for duration probe: %s", err)
+        if tmp_path is not None:
+            _remove_quietly(tmp_path)
+        return 0.0
+
+    try:
+        return get_media_duration(tmp_path)
+    finally:
+        _remove_quietly(tmp_path)
+
+
+def _remove_quietly(path: str) -> None:
+    """Delete a path, ignoring the case where it is already gone."""
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
+
+
 def build_ffmpeg_command(
     output_path: str,
     input_paths: List[str],
