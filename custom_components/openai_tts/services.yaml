@@ -1,14 +1,13 @@
+# Structure only. Every piece of prose (the action name, the field names
+# and descriptions, and the voice labels) lives in strings.json so it can
+# be translated; Home Assistant matches it up by key.
 say:
-  name: OpenAI TTS Speak
-  description: Use the OpenAI TTS engine to speak a message with optional features.
   target:
     entity:
       domain: media_player
   fields:
     # Core Settings
     tts_entity:
-      name: TTS Entity
-      description: The TTS entity to use for text-to-speech.
       required: true
       example: "tts.openai_tts_tts_1"
       selector:
@@ -16,8 +15,6 @@ say:
           domain: tts
           integration: openai_tts
     message:
-      name: Message
-      description: The text to be spoken.
       required: true
       example: "Hello, this is a test message."
       selector:
@@ -25,46 +22,26 @@ say:
 
     # Voice Settings
     voice:
-      name: Voice
-      description: >-
-        Voice to use for speech generation (overrides entity default).
-        Voices marked with · gpt-4o-mini-tts only are exclusive to the gpt-4o-mini-tts model
-        and will be rejected by tts-1 / tts-1-hd. For custom TTS backends,
-        you can type any voice name.
       required: false
       selector:
         select:
           custom_value: true
+          translation_key: voice
           options:
-            - label: Alloy (Neutral)
-              value: alloy
-            - label: Ash (Calm)
-              value: ash
-            - label: Ballad (Warm) · gpt-4o-mini-tts only
-              value: ballad
-            - label: Cedar (Recommended) · gpt-4o-mini-tts only
-              value: cedar
-            - label: Coral (Friendly)
-              value: coral
-            - label: Echo (Smooth)
-              value: echo
-            - label: Fable (Expressive)
-              value: fable
-            - label: Marin (Recommended) · gpt-4o-mini-tts only
-              value: marin
-            - label: Nova (Energetic)
-              value: nova
-            - label: Onyx (Authoritative)
-              value: onyx
-            - label: Sage (Thoughtful)
-              value: sage
-            - label: Shimmer (Gentle)
-              value: shimmer
-            - label: Verse (Versatile) · gpt-4o-mini-tts only
-              value: verse
+            - alloy
+            - ash
+            - ballad
+            - cedar
+            - coral
+            - echo
+            - fable
+            - marin
+            - nova
+            - onyx
+            - sage
+            - shimmer
+            - verse
     speed:
-      name: Speed
-      description: Speed of the speech (0.25-4.0). 1.0 is normal speed.
       required: false
       example: 1.0
       selector:
@@ -74,26 +51,18 @@ say:
           step: 0.05
           mode: slider
     instructions:
-      name: Instructions
-      description: Speaking style instructions for OpenAI gpt-4o-mini-tts model (e.g., "speak like a pirate"). May not be supported by custom backends.
       required: false
       example: "Speak with enthusiasm"
       selector:
         text:
           multiline: true
     extra_payload:
-      name: Extra Payload
-      description: >-
-        Additional JSON payload to merge with the API request. Useful for custom
-        TTS backends that need extra parameters.
       required: false
       example: '{"temperature": 0.7}'
       selector:
         text:
           multiline: true
     language:
-      name: Language
-      description: Language code for the speech.
       required: false
       default: "en"
       example: "en"
@@ -109,35 +78,21 @@ say:
     # settings. Leaving these unset means an omitted field stays
     # omitted, which is what we want.
     chime:
-      name: Play Chime
-      description: >-
-        * Disables streaming (post-processing required).
-        Play a chime sound before speaking. Falls back to the profile setting when omitted.
       required: false
       selector:
         boolean:
     chime_sound:
-      name: Chime Sound
-      description: >-
-        * Disables streaming (post-processing required).
-        Filename of the chime sound to play.
       required: false
       example: "threetone.mp3"
       selector:
         text:
     normalize_audio:
-      name: Normalize Audio
-      description: >-
-        * Disables streaming (post-processing required).
-        Apply loudness normalization. Falls back to the profile setting when omitted.
       required: false
       selector:
         boolean:
 
     # Playback Control
     volume:
-      name: Volume
-      description: Override speaker volume for this announcement (0.0-1.0).
       required: false
       selector:
         number:
@@ -146,16 +101,6 @@ say:
           step: 0.05
           mode: slider
     announce:
-      name: Announcement mode
-      description: >-
-        On (default): each speaker decides. Targets that advertise the
-        MEDIA_ANNOUNCE feature, plus Sonos and Music Assistant, use
-        their native announcement layer, so the music ducks and
-        resumes on the device. Targets without that capability are
-        paused before the speak and resumed after, so nothing is
-        lost. Off: fire-and-forget; the speaker does whatever it
-        does for an incoming media (Cast replaces the track, Sonos
-        still ducks at firmware level, Bluetooth overlays).
       required: false
       selector:
         boolean:

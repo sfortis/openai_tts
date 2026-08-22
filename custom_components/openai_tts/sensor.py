@@ -120,15 +120,6 @@ class OpenAITTSAPIStatusSensor(
         return self.coordinator.data.get("status", API_STATUS_OK)
 
     @property
-    def icon(self) -> str:
-        """Cloud-check when healthy; cloud-alert otherwise."""
-        return (
-            "mdi:cloud-check"
-            if self.coordinator.data.get("status") == API_STATUS_OK
-            else "mdi:cloud-alert"
-        )
-
-    @property
     def extra_state_attributes(self) -> dict[str, Any]:
         status = self.coordinator.data.get("status", API_STATUS_OK)
         return {

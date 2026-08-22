@@ -3,12 +3,22 @@ Constants for OpenAI TTS custom component
 """
 from typing import Any
 
+# Two of these live in Home Assistant's own const module with exactly
+# the same values, so they are re-exported rather than redefined. Every
+# reader keeps importing them from here.
+#
+# ``CONF_MODEL`` stays local on purpose. It is a much later addition to
+# core than the other two, and the value is what gets persisted in
+# config entry data, so an import that is missing on the oldest
+# supported Home Assistant would be a hard failure at load time for a
+# purely cosmetic gain.
+from homeassistant.const import CONF_API_KEY as CONF_API_KEY
+from homeassistant.const import CONF_URL as CONF_URL
+
 DOMAIN = "openai_tts"
-CONF_API_KEY = "api_key"
 CONF_MODEL = "model"
 CONF_VOICE = "voice"
 CONF_SPEED = "speed"
-CONF_URL = "url"
 CONF_PROVIDER = "provider"  # provider preset key, e.g. "openai", "mistral", "custom"
 DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 

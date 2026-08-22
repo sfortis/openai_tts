@@ -173,5 +173,80 @@
       "title": "TTS voice was deleted upstream",
       "description": "The voice `{voice}` used by TTS agent `{profile}` no longer exists on the provider. Open the agent's Reconfigure dialog and pick a current voice."
     }
+  },
+  "services": {
+    "say": {
+      "name": "OpenAI TTS Speak",
+      "description": "Uses the OpenAI TTS engine to speak a message, with optional chime, normalisation and volume control.",
+      "fields": {
+        "tts_entity": {
+          "name": "TTS entity",
+          "description": "The TTS entity to speak with."
+        },
+        "message": {
+          "name": "Message",
+          "description": "The text to be spoken."
+        },
+        "voice": {
+          "name": "Voice",
+          "description": "Voice to use instead of the one the profile is configured with. Voices marked as gpt-4o-mini-tts only are rejected by tts-1 and tts-1-hd. Any name can be typed for a custom backend."
+        },
+        "speed": {
+          "name": "Speed",
+          "description": "Speed of the speech, from 0.25 to 4.0, where 1.0 is normal."
+        },
+        "instructions": {
+          "name": "Instructions",
+          "description": "Speaking style for the gpt-4o-mini-tts model, for example \"speak like a pirate\". Custom backends may ignore it."
+        },
+        "extra_payload": {
+          "name": "Extra payload",
+          "description": "Additional JSON merged into the API request, for custom backends that take extra parameters."
+        },
+        "language": {
+          "name": "Language",
+          "description": "Language code for the speech."
+        },
+        "chime": {
+          "name": "Play chime",
+          "description": "Plays a chime before the message. Falls back to the profile setting when omitted. Turns streaming off, because the chime has to be joined to the audio first."
+        },
+        "chime_sound": {
+          "name": "Chime sound",
+          "description": "Filename of the chime to play. Turns streaming off, as above."
+        },
+        "normalize_audio": {
+          "name": "Normalise audio",
+          "description": "Applies loudness normalisation. Falls back to the profile setting when omitted. Turns streaming off, as above."
+        },
+        "volume": {
+          "name": "Volume",
+          "description": "Speaker volume for this announcement only, from 0.0 to 1.0. The previous volume is restored afterwards."
+        },
+        "announce": {
+          "name": "Announcement mode",
+          "description": "On, the default, lets each speaker decide: targets that advertise the announcement feature, along with Sonos and Music Assistant, use their own announcement layer, so the music ducks and resumes on the device, while targets without it are paused before the message and resumed after. Off is fire and forget, and the speaker does whatever it normally does with incoming media."
+        }
+      }
+    }
+  },
+  "selector": {
+    "voice": {
+      "options": {
+        "alloy": "Alloy (neutral)",
+        "ash": "Ash (calm)",
+        "ballad": "Ballad (warm), gpt-4o-mini-tts only",
+        "cedar": "Cedar (recommended), gpt-4o-mini-tts only",
+        "coral": "Coral (friendly)",
+        "echo": "Echo (smooth)",
+        "fable": "Fable (expressive)",
+        "marin": "Marin (recommended), gpt-4o-mini-tts only",
+        "nova": "Nova (energetic)",
+        "onyx": "Onyx (authoritative)",
+        "sage": "Sage (thoughtful)",
+        "shimmer": "Shimmer (gentle)",
+        "verse": "Verse (versatile), gpt-4o-mini-tts only"
+      }
+    }
   }
 }

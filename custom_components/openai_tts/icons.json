@@ -1,0 +1,12 @@
+{
+  "entity": {
+    "sensor": {
+      "api_status": {
+        "default": "mdi:cloud-alert",
+        "state": {
+          "ok": "mdi:cloud-check"
+        }
+      }
+    }
+  }
+}
