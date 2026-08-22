@@ -63,6 +63,14 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # type things the API would reject anyway.
         "supports_speed": True,
         "supports_extra_payload": False,
+        # The only provider that cannot be asked for its voices. Three
+        # plausible paths were tried against the real API on 2026-08-22,
+        # ``/v1/audio/voices``, ``/v1/voices`` and
+        # ``/v1/audio/speech/voices``, and all three answered 404. The
+        # catalogue is documentation only, which is why the static
+        # tables above exist. Every other provider defaults to being
+        # asked, because a fetch that fails degrades to a typed name.
+        "supports_voice_listing": False,
     },
     PROVIDER_MISTRAL: {
         "label": "Mistral Voxtral",

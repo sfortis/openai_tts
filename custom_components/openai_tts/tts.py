@@ -24,9 +24,10 @@ from homeassistant.components.tts import (
     TextToSpeechEntity,
     TTSAudioRequest,
     TTSAudioResponse,
+    Voice,
 )
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import (
     AddConfigEntryEntitiesCallback,
@@ -59,6 +60,7 @@ from .const import (
     VOICES,
     preset_for,
     is_openai_endpoint,
+    voices_for_model,
 )
 from .entity_helpers import is_subentry, sanitize_profile_name
 from .exceptions import (
@@ -72,6 +74,7 @@ from .exceptions import (
 from .openaitts_engine import OpenAITTSEngine
 from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
 from .repairs import create_voice_deleted_issue
+from .voice_listing import CATALOGUE_TTL_S, async_fetch_voice_options
 from .utils import (
     is_valid_audio,
     measure_audio_duration,
@@ -233,6 +236,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # same reason.
         self._duration_cache = MessageDurationCache(hass, self._attr_unique_id)
 
+        # Voices reported by the backend, for providers that can list
+        # them. ``None`` means nothing has been fetched yet, which is
+        # different from an empty list.
+        self._voice_catalogue: list[dict[str, str]] | None = None
+        self._voice_catalogue_at: float = 0.0
+        self._voice_refresh_running = False
+
         # The health tracker lives on the parent entry. Subentries inherit it
         # via parent_entry; legacy entries are their own parent.
         parent_entry_id = (
@@ -323,6 +333,10 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     async def async_added_to_hass(self) -> None:
         await super().async_added_to_hass()
         await self._restore_persisted_state()
+        if self._supports_voice_listing():
+            # In the background: a backend that takes the whole timeout
+            # would otherwise hold up setup for every profile.
+            self._schedule_voice_refresh()
         if self._health_tracker is not None:
             # Availability is derived from the tracker, so the entity has
             # to re-render when the tracker changes. Without this the
@@ -423,6 +437,115 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     @property
     def supported_languages(self) -> list[str]:
         return SUPPORTED_LANGUAGES
+
+    @callback
+    def async_get_supported_voices(self, language: str) -> list[Voice] | None:
+        """Return the voices to offer for this entity.
+
+        This fills the voice dropdown Home Assistant shows for a TTS
+        engine, on the voice assistant screens and in the developer
+        tools. Home Assistant calls it synchronously, so it can only
+        read what has already been fetched; the fetch runs in the
+        background from ``async_added_to_hass`` and is refreshed from
+        here once it has gone stale.
+
+        Which answer is right depends on the provider. OpenAI publishes
+        no voices endpoint, so its catalogue is the static table, and it
+        is filtered by the profile's model because ``tts-1`` and
+        ``tts-1-hd`` reject the newer voices. Everything else is asked
+        directly, since a Mistral account's voices are cloned by its
+        owner and a Kokoro server's are whatever is installed there.
+        """
+        if not self._supports_voice_listing():
+            model = self._get_config_value(CONF_MODEL) or self._engine._model
+            return [
+                Voice(voice_id=name, name=name.capitalize())
+                for name in voices_for_model(model)
+            ]
+
+        if self._voice_catalogue is None:
+            # Nothing fetched yet. Offering the configured voice alone
+            # beats an empty dropdown, and the background refresh will
+            # fill it in.
+            current = self._get_config_value(CONF_VOICE) or self._engine._voice
+            return [Voice(voice_id=current, name=current)] if current else None
+
+        if self.hass.loop.time() - self._voice_catalogue_at > CATALOGUE_TTL_S:
+            self._schedule_voice_refresh()
+
+        return [
+            Voice(voice_id=option["value"], name=option["label"])
+            for option in self._voice_catalogue
+        ] or None
+
+    def _supports_voice_listing(self) -> bool:
+        """True when this profile's provider can be asked for its voices.
+
+        Asking is the default. Only OpenAI opts out, and it does so
+        because it demonstrably has no such endpoint.
+        """
+        parent = self._parent_entry or self._config
+        provider = parent.data.get(CONF_PROVIDER) if parent is not None else None
+        if provider:
+            return (
+                preset_for(provider).get("supports_voice_listing", True) is not False
+            )
+        # No provider recorded, which is every entry created before the
+        # presets existed. ``preset_for(None)`` answers OpenAI, so asking
+        # it here would silence discovery for exactly the self-hosted
+        # entries that need it. Decide by the endpoint instead, the same
+        # way the config flow does when the key is missing.
+        return not is_openai_endpoint(self._speech_url())
+
+    def _speech_url(self) -> str | None:
+        """The configured speech endpoint, from wherever it is stored."""
+        parent = self._parent_entry or self._config
+        return self._config.data.get(CONF_URL) or (
+            parent.data.get(CONF_URL) if parent is not None else None
+        )
+
+    @callback
+    def _schedule_voice_refresh(self) -> None:
+        """Fetch the catalogue in the background, one fetch at a time."""
+        if self._voice_refresh_running:
+            return
+        entry = self._parent_entry or self._config
+        creator = getattr(entry, "async_create_background_task", None)
+        if creator is None:
+            return
+        self._voice_refresh_running = True
+        creator(
+            self.hass,
+            self._async_refresh_voice_catalogue(),
+            f"openai_tts voice catalogue {self.entity_id}",
+        )
+
+    async def _async_refresh_voice_catalogue(self) -> None:
+        """Ask the backend for its voices and remember the answer."""
+        try:
+            speech_url = self._speech_url()
+            if not speech_url:
+                return
+            parent = self._parent_entry or self._config
+            api_key = parent.data.get(CONF_API_KEY) if parent is not None else None
+            options = await async_fetch_voice_options(
+                self.hass, speech_url, api_key
+            )
+            if options is None:
+                # Keep whatever was there. A backend that is briefly
+                # unreachable should not empty the dropdown.
+                _LOGGER.debug(
+                    "No voice catalogue from %s; keeping the %d cached",
+                    speech_url, len(self._voice_catalogue or []),
+                )
+                return
+            self._voice_catalogue = options
+            self._voice_catalogue_at = self.hass.loop.time()
+            _LOGGER.debug(
+                "Voice catalogue for %s: %d voices", self.entity_id, len(options)
+            )
+        finally:
+            self._voice_refresh_running = False
 
     @property
     def supported_options(self) -> list[str]:

@@ -4,7 +4,6 @@ Config flow for OpenAI TTS.
 """
 from __future__ import annotations
 from typing import Any
-import asyncio
 import os
 import voluptuous as vol
 import logging
@@ -22,11 +21,11 @@ from homeassistant.config_entries import (
     SubentryFlowResult,
 )
 from homeassistant.helpers.selector import selector, TemplateSelector
-from homeassistant.helpers import aiohttp_client
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import callback
 
 from .streaming import PIPELINEABLE_FORMATS
+from .voice_listing import async_fetch_voice_options
 from .const import (
     CONF_API_KEY,
     CONF_MODEL,
@@ -99,69 +98,6 @@ def _pipelining_conflict(user_input: dict[str, Any]) -> str | None:
     return None
 
 
-def _voice_options_from_payload(
-    payload: Any, source_url: str = ""
-) -> list[dict[str, str]] | None:
-    """Turn a voice-listing response into selector options.
-
-    Returns options of the form ``[{"value": <id>, "label": <name>},
-    ...]`` or ``None`` when the payload holds nothing usable. Never
-    raises: a backend we have never seen must degrade to the free-text
-    voice field, not break the config flow.
-
-    Response shapes seen in the wild:
-
-    * Mistral:        ``{"items": [{"id": uuid, "name": "..."}], "total": N}``
-    * OpenAI-style:   ``{"data":  [{"id": str,  "name": "..."}]}``
-    * Kokoro-FastAPI: ``{"voices": ["af_bella", "am_adam", ...]}``
-    * bare list:      ``["af_bella", ...]`` or ``[{"id": ...}, ...]``
-
-    The bare-list shapes matter because several OpenAI-compatible
-    self-hosted servers answer ``GET /v1/audio/voices`` with a
-    top-level JSON array. Calling ``.get()`` on that raised
-    ``AttributeError`` out of the config flow before this helper
-    existed.
-    """
-    if isinstance(payload, list):
-        items: Any = payload
-    elif isinstance(payload, dict):
-        items = (
-            payload.get("items")
-            or payload.get("data")
-            or payload.get("voices")
-            or []
-        )
-    else:
-        _LOGGER.debug(
-            "Voice listing at %s returned an unsupported top-level type: %s",
-            source_url, type(payload).__name__,
-        )
-        return None
-
-    if not isinstance(items, list):
-        _LOGGER.debug(
-            "Voice listing at %s held a non-list voice collection: %s",
-            source_url, type(items).__name__,
-        )
-        return None
-
-    options: list[dict[str, str]] = []
-    for v in items:
-        if isinstance(v, str):
-            # Plain string voice name (Kokoro-FastAPI). value == label
-            # is fine because the slug is what the user reads in the
-            # UI ("af_bella") and what the request needs.
-            if v:
-                options.append({"value": v, "label": v})
-            continue
-        if not isinstance(v, dict):
-            continue
-        voice_id = v.get("id") or v.get("voice_id") or v.get("value")
-        if not voice_id:
-            continue
-        label = v.get("name") or v.get("label") or voice_id
-        options.append({"value": str(voice_id), "label": str(label)})
-    return options or None
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -724,8 +660,13 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         back to a free-text input so the flow never gets stuck on a
         Mistral account that hasn't cloned any voices yet.
         """
+        # Default is to try. A backend that has no listing endpoint
+        # answers 404 and the caller falls back to a typed voice name,
+        # which is a better trade than never asking the self-hosted
+        # servers that most need asking. Only OpenAI opts out, because
+        # it is known to have no such endpoint.
         preset = self._parent_preset()
-        if not preset.get("supports_voice_listing"):
+        if preset.get("supports_voice_listing", True) is False:
             return None
 
         parent_entry = self._get_entry()
@@ -734,46 +675,9 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         speech_url = parent_entry.data.get(CONF_URL)
         if not speech_url:
             return None
-        # ``/audio/speech`` -> ``/audio/voices`` regardless of the
-        # base path the user configured (api.mistral.ai/v1/... or a
-        # self-hosted equivalent).
-        voices_url = speech_url.rsplit("/", 1)[0] + "/voices"
-
-        headers = {"User-Agent": "HomeAssistant-OpenAI-TTS"}
-        api_key = parent_entry.data.get(CONF_API_KEY)
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
-
-        try:
-            session = aiohttp_client.async_get_clientsession(self.hass)
-            timeout = aiohttp.ClientTimeout(total=8)
-            async with session.get(
-                voices_url, headers=headers, timeout=timeout
-            ) as resp:
-                if resp.status != 200:
-                    _LOGGER.debug(
-                        "Voice listing returned HTTP %s for %s",
-                        resp.status, voices_url,
-                    )
-                    return None
-                # ``content_type=None`` disables aiohttp's strict
-                # application/json check: several self-hosted backends
-                # serve the voice list as text/plain and would
-                # otherwise raise ContentTypeError on a perfectly
-                # valid JSON body.
-                payload = await resp.json(content_type=None)
-        except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
-            _LOGGER.debug(
-                "Voice listing fetch failed for %s: %s", voices_url, err
-            )
-            return None
-        except Exception:  # pragma: no cover - defensive
-            _LOGGER.debug(
-                "Voice listing fetch raised for %s", voices_url, exc_info=True
-            )
-            return None
-
-        return _voice_options_from_payload(payload, voices_url)
+        return await async_fetch_voice_options(
+            self.hass, speech_url, parent_entry.data.get(CONF_API_KEY)
+        )
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Step 1 of profile creation: profile name + model.
