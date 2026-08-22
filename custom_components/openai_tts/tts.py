@@ -28,7 +28,9 @@ from homeassistant.components.tts import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import entity_registry as er
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddConfigEntryEntitiesCallback,
+)
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
@@ -70,11 +72,21 @@ from .exceptions import (
 from .openaitts_engine import OpenAITTSEngine
 from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
 from .repairs import create_voice_deleted_issue
-from .utils import is_valid_audio, measure_audio_duration, process_audio
+from .utils import (
+    is_valid_audio,
+    measure_audio_duration,
+    process_audio,
+    resolve_ffmpeg_paths,
+)
 
 _LOGGER = logging.getLogger(__name__)
 
 SUBENTRY_TYPE_PROFILE = "profile"
+# Entities here never poll: the TTS entity is driven by service calls
+# and the health tracker pushes its own updates. Declaring this keeps
+# Home Assistant from serialising entity updates it does not need to.
+PARALLEL_UPDATES = 0
+
 STORAGE_VERSION = 1
 STORAGE_KEY = "openai_tts_state"
 
@@ -101,7 +113,7 @@ def _resolve_health_tracker(
 async def async_setup_entry(
     hass: HomeAssistant,
     config_entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Set up OpenAI TTS entities for a config entry."""
     _LOGGER.debug("Setting up OpenAI TTS for config entry %s", config_entry.entry_id)
@@ -514,8 +526,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         inside the executor along with the probe itself, so none of the
         three blocking steps runs on the event loop.
         """
+        _, ffprobe = resolve_ffmpeg_paths(self.hass)
         duration_seconds = await self.hass.async_add_executor_job(
-            measure_audio_duration, audio_data
+            partial(measure_audio_duration, audio_data, ffprobe=ffprobe)
         )
         return int(duration_seconds * 1000)
 
@@ -703,9 +716,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         longer offers a lazy variant), so the event loop never blocks
         on socket I/O.
         """
-        loop = asyncio.get_running_loop()
-        audio_task = loop.run_in_executor(
-            None,
+        audio_task = self.hass.async_add_executor_job(
             partial(
                 self._engine.get_tts,
                 text,
@@ -715,7 +726,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 instructions=resolved["instructions"],
                 extra_payload=resolved["extra_payload"],
                 response_format=resolved.get("audio_format", DEFAULT_AUDIO_FORMAT),
-            ),
+            )
         )
         audio_response = await asyncio.wait_for(audio_task, timeout=30.0)
 

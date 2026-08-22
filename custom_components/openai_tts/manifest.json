@@ -5,12 +5,17 @@
     "@sfortis"
   ],
   "config_flow": true,
-  "dependencies": [],
+  "dependencies": [
+    "ffmpeg"
+  ],
   "documentation": "https://github.com/sfortis/openai_tts/",
+  "integration_type": "service",
   "iot_class": "cloud_polling",
   "issue_tracker": "https://github.com/sfortis/openai_tts/issues",
+  "loggers": [
+    "sentence_stream"
+  ],
   "requirements": [
-    "aiohttp>=3.9.0",
     "sentence-stream==1.3.0"
   ],
   "version": "3.8.1b5"

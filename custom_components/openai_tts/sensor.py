@@ -35,7 +35,9 @@ from homeassistant.components.sensor import (
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import EntityCategory
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers.entity_platform import AddEntitiesCallback
+from homeassistant.helpers.entity_platform import (
+    AddConfigEntryEntitiesCallback,
+)
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api_health import (
@@ -49,12 +51,15 @@ from .const import CONF_PROVIDER, DOMAIN, preset_for
 
 _LOGGER = logging.getLogger(__name__)
 
+# The sensor is push-driven by the health tracker and never polls.
+PARALLEL_UPDATES = 0
+
 
 
 async def async_setup_entry(
     hass: HomeAssistant,
     entry: ConfigEntry,
-    async_add_entities: AddEntitiesCallback,
+    async_add_entities: AddConfigEntryEntitiesCallback,
 ) -> None:
     """Create the API status sensor for ``entry``.
 

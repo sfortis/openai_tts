@@ -23,6 +23,41 @@ from .const import AUDIO_FORMAT_ENCODER
 _LOGGER = logging.getLogger(__name__)
 
 
+def resolve_ffmpeg_paths(hass: HomeAssistant) -> Tuple[str, str]:
+    """Return the ffmpeg and ffprobe commands to use.
+
+    Home Assistant lets the user configure where ffmpeg lives, through
+    the ``ffmpeg`` integration, and installations that keep it outside
+    the search path rely on that. Calling the bare names, as this module
+    used to, ignored the setting.
+
+    ffprobe has no equivalent setting, so it is taken from the same
+    directory as ffmpeg. A bare ``ffmpeg`` means the search path is in
+    use, so ``ffprobe`` is left bare too.
+    """
+    binary = "ffmpeg"
+    try:
+        from homeassistant.components.ffmpeg import get_ffmpeg_manager
+
+        binary = get_ffmpeg_manager(hass).binary or "ffmpeg"
+    except (ImportError, KeyError, RuntimeError, ValueError) as err:
+        # ValueError is what get_ffmpeg_manager raises when the ffmpeg
+        # integration has not been set up. The manifest declares it as a
+        # dependency, so that should not happen, but a helper that
+        # decides where a binary lives has no business raising.
+        _LOGGER.debug("Falling back to ffmpeg on the search path: %s", err)
+
+    directory = os.path.dirname(binary)
+    if not directory:
+        return binary, "ffprobe"
+    # Same directory, plain name. Deriving the name from ffmpeg's own
+    # would turn "ffmpeg-static" into "ffprobe-static", which is a
+    # guess about someone else's file naming; "ffprobe" beside it is the
+    # convention every distribution and static build follows.
+    suffix = ".exe" if binary.lower().endswith(".exe") else ""
+    return binary, os.path.join(directory, f"ffprobe{suffix}")
+
+
 def detect_audio_format(audio_data: bytes) -> str:
     """Detect audio format from magic bytes.
 
@@ -116,7 +151,7 @@ def is_valid_audio(
     return True
 
 
-def get_media_duration(file_path: str) -> float:
+def get_media_duration(file_path: str, ffprobe: str = "ffprobe") -> float:
     """Return the duration of a media file in seconds, or 0.0 on failure.
 
     One ffprobe invocation. There used to be two: the first looked for a
@@ -129,9 +164,10 @@ def get_media_duration(file_path: str) -> float:
 
     Args:
         file_path: Path to the media file.
+        ffprobe: The ffprobe command, from ``resolve_ffmpeg_paths``.
     """
     cmd = [
-        "ffprobe",
+        ffprobe,
         "-v", "error",
         "-show_entries", "format=duration",
         "-of", "default=noprint_wrappers=1:nokey=1",
@@ -156,7 +192,9 @@ def get_media_duration(file_path: str) -> float:
         return 0.0
 
 
-def measure_audio_duration(audio_data: bytes, suffix: str = ".mp3") -> float:
+def measure_audio_duration(
+    audio_data: bytes, suffix: str = ".mp3", ffprobe: str = "ffprobe"
+) -> float:
     """Return the duration of an in-memory clip in seconds, or 0.0.
 
     ffprobe needs a seekable input to read a container's real duration,
@@ -171,6 +209,7 @@ def measure_audio_duration(audio_data: bytes, suffix: str = ".mp3") -> float:
         suffix: Extension for the temporary file. ffprobe identifies the
             format by probing the content, so this only affects the file
             name.
+        ffprobe: The ffprobe command, from ``resolve_ffmpeg_paths``.
     """
     tmp_path: str | None = None
     try:
@@ -184,7 +223,7 @@ def measure_audio_duration(audio_data: bytes, suffix: str = ".mp3") -> float:
         return 0.0
 
     try:
-        return get_media_duration(tmp_path)
+        return get_media_duration(tmp_path, ffprobe)
     finally:
         _remove_quietly(tmp_path)
 
@@ -203,6 +242,7 @@ def build_ffmpeg_command(
     normalize_audio: bool = False,
     tts_input_format: Optional[str] = None,
     output_format: str = "mp3",
+    ffmpeg: str = "ffmpeg",
 ) -> List[str]:
     """
     Build ffmpeg command for audio processing.
@@ -219,7 +259,7 @@ def build_ffmpeg_command(
             (24kHz signed 16-bit little-endian mono).
     """
 
-    cmd = ["ffmpeg", "-y"]
+    cmd = [ffmpeg, "-y"]
 
     # Add inputs
     last_idx = len(input_paths) - 1
@@ -291,6 +331,7 @@ async def process_audio(
     import time
 
     start_time = time.monotonic()
+    ffmpeg, _ = resolve_ffmpeg_paths(hass)
 
     # Trust the caller's hint when given, fall back to magic-byte detection
     audio_format = input_format or detect_audio_format(audio_content)
@@ -344,6 +385,7 @@ async def process_audio(
                 normalize_audio=normalize_audio,
                 tts_input_format=audio_format,
                 output_format=audio_format,
+                ffmpeg=ffmpeg,
             )
         elif normalize_audio:
             cmd = build_ffmpeg_command(
@@ -352,6 +394,7 @@ async def process_audio(
                 normalize_audio=True,
                 tts_input_format=audio_format,
                 output_format=audio_format,
+                ffmpeg=ffmpeg,
             )
         else:
             # Caller invoked us with neither chime nor normalize; just

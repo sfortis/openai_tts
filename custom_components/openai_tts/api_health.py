@@ -108,6 +108,10 @@ class OpenAITTSHealthTracker(DataUpdateCoordinator[dict[str, Any]]):
             _LOGGER,
             name=f"{DOMAIN}_health_{entry.entry_id}",
             update_interval=None,
+            # Passed explicitly rather than left to the ContextVar the
+            # base class falls back on, which only works while the
+            # coordinator is built inside the entry's own setup.
+            config_entry=entry,
         )
         self._entry = entry
         self.data = {

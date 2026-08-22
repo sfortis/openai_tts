@@ -265,8 +265,7 @@ def get_chime_options() -> list[dict[str, str]]:
 
 async def async_get_chime_options(hass) -> list[dict[str, str]]:
     """Scan chime folder and return dropdown options (async version)."""
-    loop = hass.loop
-    return await loop.run_in_executor(None, get_chime_options)
+    return await hass.async_add_executor_job(get_chime_options)
 
 class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI TTS."""
