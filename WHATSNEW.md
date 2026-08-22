@@ -2,10 +2,10 @@
 
 ### New
 
-- **Providers are picked from a list**. Setting up an entry starts by choosing OpenAI, Mistral, Groq, Lemonfox, Kokoro or a custom endpoint, and the choice fills in the endpoint, the models and voices on offer, and the audio formats the provider accepts.
-- **Voices come from the provider**. Backends that publish their voices are asked for them, both when creating a profile and for the voice dropdown Home Assistant shows for a TTS engine. OpenAI has no such endpoint, so its catalogue stays built in and is filtered by the model the profile uses.
-- **Speech can start before the reply is finished**. A per-profile option synthesises sentence by sentence as a voice assistant produces them instead of waiting for the whole answer. Works on mp3, wav and pcm output with chime and normalisation off; a profile that combines it with settings it cannot work under is refused when saved, with the reason.
-- **Announcement mode**. Speakers that advertise the announcement feature, along with Sonos and Music Assistant, use their own announcement layer, so music ducks and comes back on the device. Speakers without it are paused and resumed instead, so nothing is lost.
+- **Providers are picked from a list**: OpenAI, Mistral, Groq, Lemonfox, Kokoro or a custom endpoint. The choice fills in the endpoint, the models and voices on offer, and the audio formats accepted.
+- **Voices come from the provider**. Backends that publish a voice list are asked for it, both when creating a profile and in the voice dropdown Home Assistant shows. OpenAI publishes none, so its catalogue stays built in.
+- **Speech can start before the reply is finished**. A per-profile option synthesises sentence by sentence as a voice assistant produces the answer. It needs mp3, wav or pcm output with chime and normalisation off. A profile that cannot meet that is refused when saved.
+- **Announcement mode**. Speakers that advertise the announcement feature, along with Sonos and Music Assistant, use their own announcement layer, so music ducks and comes back on the device. Speakers without it are paused and resumed instead.
 - **A repair when a voice disappears**. A voice removed at the provider raises a repair naming the profile, rather than failing quietly on every call.
 - **A prompt to reauthenticate**. A rejected API key asks for a new one instead of raising the same error on every announcement.
 - **`openai_tts.say` supports `response_variable`**. Automations and scripts can capture a `{success, error}` dict and branch on a failed announcement (e.g. send a phone notification when TTS playback errors out). Existing fire-and-forget callers are unchanged.
@@ -20,8 +20,9 @@
 - **Music a speaker resumes on its own after an announcement is stopped again**, without cutting the announcement short.
 - **The `say` action stays available while an entry reloads**. Automations firing in that window were told the action did not exist.
 - **Deleting an entry or a profile removes what it stored.**
-- **A blocked API recovers on its own**. After a rejected key or an exhausted quota, calls resume once the block ages out rather than waiting for a reload, and the engine reports itself unavailable while it is refusing them.
-- **The status sensor's name follows the interface language**, the sensor is named after its provider, and the action's fields are translatable.
+- **A blocked API recovers on its own**. After a rejected key or an exhausted quota, calls resume once the block ages out rather than waiting for a reload. The engine reports itself unavailable while it is refusing them.
+- **The status sensor is named after its provider**, and its name follows the interface language.
+- **The fields of `openai_tts.say` are translatable.**
 - **ffmpeg comes from the path configured for Home Assistant** rather than being assumed to be on the search path.
 - **Generating speech no longer blocks Home Assistant** while the clip length is measured.
 - **History no longer stores the voice catalogue** with every state change.
