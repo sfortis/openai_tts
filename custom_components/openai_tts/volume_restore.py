@@ -224,6 +224,12 @@ HEALTH_TRACKER_KEY_SUFFIX = "_health_tracker"
 # cold-cast peer. Capped to keep one stuck device from pinning the
 # whole call.
 SPEAKER_READY_TIMEOUT_S = 5.0
+
+# A speaker that was powered off reports no volume until it has woken
+# up, and leaving ``off`` does not mean its attributes have arrived. We
+# wait a little longer for the level itself, because a level we never
+# read is a level we cannot put back.
+VOLUME_ATTRIBUTE_TIMEOUT_S = 3.0
 NOT_READY_STATES = frozenset({STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN})
 
 
@@ -284,6 +290,43 @@ async def _wait_until_speakers_ready(
                 d()
             except Exception as exc:  # pragma: no cover - defensive
                 _LOGGER.debug("Listener dispose failed: %s", exc)
+
+
+async def _wait_for_volume_level(
+    hass: HomeAssistant,
+    entity_id: str,
+    *,
+    timeout_s: float = VOLUME_ATTRIBUTE_TIMEOUT_S,
+    poll_interval_s: float = 0.1,
+) -> Optional[float]:
+    """Wait for a woken speaker to report its volume, or give up.
+
+    ``_wait_until_speakers_ready`` returns as soon as the state leaves
+    ``off``, which says nothing about whether the attributes have caught
+    up. Reading the level once at that moment often found nothing, and a
+    speaker whose level was never recorded was then left at announcement
+    volume for good, because both restore paths only walk the levels
+    that were recorded.
+
+    Returns the level, or ``None`` if it never appeared.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        state = hass.states.get(entity_id)
+        if state is not None and state.state not in (
+            STATE_UNAVAILABLE, STATE_UNKNOWN
+        ):
+            raw = state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
+            if raw is not None:
+                try:
+                    return float(raw)
+                except (TypeError, ValueError):
+                    _LOGGER.debug(
+                        "%s reported a non-numeric volume %r", entity_id, raw,
+                    )
+        if asyncio.get_running_loop().time() >= deadline:
+            return None
+        await asyncio.sleep(poll_interval_s)
 
 
 async def _await_buffering_settle(
@@ -760,11 +803,19 @@ class _VolumeRestorer:
         await _wait_until_speakers_ready(self.hass, self.entity_ids)
         if capture_after_on:
             for entity_id in capture_after_on:
-                state, attrs = await get_media_player_state(self.hass, entity_id)
-                if state and attrs:
-                    actual = attrs.get(ATTR_MEDIA_VOLUME_LEVEL)
-                    if actual is not None:
-                        self._original_volumes[entity_id] = float(actual)
+                actual = await _wait_for_volume_level(self.hass, entity_id)
+                if actual is not None:
+                    self._original_volumes[entity_id] = actual
+                    _LOGGER.debug(
+                        "prepare(): %s woke up reporting vol=%.2f",
+                        entity_id, actual,
+                    )
+                else:
+                    _LOGGER.warning(
+                        "%s never reported its volume after waking, so this "
+                        "announcement leaves its level alone",
+                        entity_id,
+                    )
 
         if pause_tasks:
             _LOGGER.debug(
@@ -836,7 +887,20 @@ class _VolumeRestorer:
                 continue
 
             current = self._original_volumes.get(entity_id)
-            if current is None or abs(current - target) > 0.01:
+            if current is None:
+                # No recorded level, so there is nothing to put back
+                # afterwards. Changing it here is how a speaker ended up
+                # stuck at announcement volume: the restore paths walk
+                # the recorded levels only, so this one would never be
+                # visited. Leaving it as it is costs the announcement its
+                # volume override and nothing else.
+                _LOGGER.warning(
+                    "Not changing the volume of %s: it never reported a "
+                    "level, so it could not be restored afterwards",
+                    entity_id,
+                )
+                continue
+            if abs(current - target) > 0.01:
                 _LOGGER.info(
                     "Setting volume for %s -> %.2f", entity_id, target
                 )
