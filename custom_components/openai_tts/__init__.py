@@ -229,10 +229,16 @@ def _seed_announce_mode_option(hass: HomeAssistant, entry: ConfigEntry) -> None:
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
-    """Set up OpenAI TTS and register the openai_tts.say service."""
+    """Set up one config entry.
+
+    Per-entry runtime state lives on the entry itself. Two things stay in
+    ``hass.data``: the shared duration cache, which ``volume_restore``
+    reads without holding an entry, and the migration flag, which is set
+    before the entry is set up and therefore before it could carry
+    anything.
+    """
     _LOGGER.debug("async_setup_entry called for %s (version %s.%s)",
                  entry.entry_id, entry.version, entry.minor_version)
-    # Store entry for reference
     hass.data.setdefault(DOMAIN, {})
 
     _seed_announce_mode_option(hass, entry)
