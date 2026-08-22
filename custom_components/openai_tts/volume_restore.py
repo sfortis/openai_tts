@@ -116,6 +116,91 @@ def _is_announcing(entity_id: str) -> bool:
     return _ANNOUNCING.get(entity_id, 0) > 0
 
 
+# One lock per speaker, so announcements aimed at the same device run
+# one after the other instead of on top of each other. Overlapping runs
+# used to corrupt the volume snapshot: the first call lowered the
+# speaker, the second read that lowered level as the original, and after
+# both restored the speaker stayed quiet for good. Serialising also
+# stops one announcement from cutting another off part-way through.
+#
+# Locks are created on demand and kept. An installation has a bounded
+# number of media players, so the dict does not grow without limit, and
+# keeping the lock means a queue that forms across several announcements
+# stays in one place.
+_SPEAKER_GATES: Dict[str, asyncio.Lock] = {}
+
+# How long to wait for a speaker to come free. It has to outlast the
+# longest legitimate announcement, which is bounded by the duration
+# lookup (up to 60 s when our cache misses and Home Assistant's hits)
+# plus the hold for the clip itself.
+_ANNOUNCE_GATE_TIMEOUT_S = 90.0
+
+
+async def _acquire_speaker_gate(entity_ids: List[str]) -> List[str]:
+    """Take the announcement lock for each speaker, in a fixed order.
+
+    Sorting the ids matters: two announcements covering the same pair of
+    speakers in opposite orders would otherwise each hold what the other
+    needs and neither could continue.
+
+    A speaker that does not come free within the timeout is used
+    anyway, with a warning. Waiting forever would mean losing the
+    announcement entirely, and a message the user never hears is worse
+    than a volume level that may need correcting afterwards.
+
+    Returns the ids actually locked, to hand to ``_release_speaker_gate``.
+    """
+    loop = asyncio.get_running_loop()
+    deadline = loop.time() + _ANNOUNCE_GATE_TIMEOUT_S
+    acquired: List[str] = []
+    try:
+        for entity_id in sorted(entity_ids):
+            lock = _SPEAKER_GATES.setdefault(entity_id, asyncio.Lock())
+            if not lock.locked():
+                await lock.acquire()
+                acquired.append(entity_id)
+                continue
+
+            remaining = deadline - loop.time()
+            _LOGGER.debug(
+                "%s is busy with another announcement, waiting up to %.1fs",
+                entity_id, max(0.0, remaining),
+            )
+            if remaining <= 0:
+                _LOGGER.warning(
+                    "Gave up waiting for %s to finish its previous "
+                    "announcement; announcing anyway, so its volume may "
+                    "not restore correctly",
+                    entity_id,
+                )
+                continue
+            try:
+                await asyncio.wait_for(lock.acquire(), remaining)
+            except TimeoutError:
+                _LOGGER.warning(
+                    "%s did not finish its previous announcement within "
+                    "%.0fs; announcing anyway, so its volume may not "
+                    "restore correctly",
+                    entity_id, _ANNOUNCE_GATE_TIMEOUT_S,
+                )
+                continue
+            acquired.append(entity_id)
+    except BaseException:
+        # Cancelled while queueing. Whatever was already locked has to
+        # go back, or the speakers stay blocked for every later call.
+        _release_speaker_gate(acquired)
+        raise
+    return acquired
+
+
+def _release_speaker_gate(entity_ids: List[str]) -> None:
+    """Hand the speakers back. Safe to call with an empty list."""
+    for entity_id in entity_ids:
+        lock = _SPEAKER_GATES.get(entity_id)
+        if lock is not None and lock.locked():
+            lock.release()
+
+
 # How long to keep watching for a platform-driven auto-resume after the
 # announcement. Music Assistant's resume lands 1-3 s late, so the window
 # has to outlast that; it runs on a timer rather than blocking the
@@ -1222,6 +1307,11 @@ async def announce(
         else None
     )
 
+    # Wait for any announcement already running on these speakers to
+    # finish, so this one starts from the speaker's real volume rather
+    # than from a level the previous announcement had lowered.
+    gated_players = await _acquire_speaker_gate(available_players)
+
     # Claim the targets for the duration of this announcement, so a
     # concurrent one is not mistaken for an unwanted auto-resume.
     _mark_announcing(available_players)
@@ -1248,9 +1338,10 @@ async def announce(
             watcher.stop()
         # Release BEFORE restoring. The restore runs the auto-resume
         # watcher, which must see a zero count for these targets or it
-        # would skip its own work. With two overlapping announcements the
-        # count is still positive here, which is exactly right: the other
-        # one is still playing and must not be cut off.
+        # would skip its own work. If the count is still positive here
+        # another announcement holds the speaker and must not be cut off.
+        # The speaker gate above normally prevents that overlap; it can
+        # still happen when the gate timed out and let this call through.
         _clear_announcing(available_players)
 
     # Subscribe to the speakers' state bus BEFORE the speak call. On
@@ -1417,16 +1508,23 @@ async def announce(
         restored = True
     finally:
         _release_claim()
-        if restorer is not None and not restored:
-            # Undo whatever prepare() changed. Shielded because we may be
-            # here precisely because this coroutine was cancelled: the
-            # shield keeps the unwind running even though awaiting it
-            # raises again, so volumes and paused media still recover.
-            unwind = asyncio.shield(
-                restorer.restore_immediate(restore_volumes=restore_enabled)
-            )
-            with contextlib.suppress(asyncio.CancelledError):
-                await unwind
+        try:
+            if restorer is not None and not restored:
+                # Undo whatever prepare() changed. Shielded because we
+                # may be here precisely because this coroutine was
+                # cancelled: the shield keeps the unwind running even
+                # though awaiting it raises again, so volumes and paused
+                # media still recover.
+                unwind = asyncio.shield(
+                    restorer.restore_immediate(restore_volumes=restore_enabled)
+                )
+                with contextlib.suppress(asyncio.CancelledError):
+                    await unwind
+        finally:
+            # Last, and after the unwind on purpose: the announcement
+            # waiting behind this one must find the speaker back at its
+            # own volume, not at the level this one set.
+            _release_speaker_gate(gated_players)
 
 
 # ---------------------------------------------------------------------------
