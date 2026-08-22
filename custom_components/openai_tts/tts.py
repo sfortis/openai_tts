@@ -32,7 +32,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
 
-from .api_health import OpenAITTSHealthTracker
+from .api_health import OpenAITTSHealthTracker, health_tracker_for
 from .cache import MessageDurationCache
 from .const import (
     CONF_API_KEY,
@@ -76,7 +76,6 @@ _LOGGER = logging.getLogger(__name__)
 SUBENTRY_TYPE_PROFILE = "profile"
 STORAGE_VERSION = 1
 STORAGE_KEY = "openai_tts_state"
-HEALTH_TRACKER_KEY = "_health_tracker"
 
 # Stream as soon as we have anything to say. The previous 60-char floor
 # was meant to avoid streaming overhead for trivially short clips, but in
@@ -90,11 +89,11 @@ MIN_STREAMING_TEXT_LENGTH = 1
 def _resolve_health_tracker(
     hass: HomeAssistant, parent_entry_id: str | None
 ) -> OpenAITTSHealthTracker | None:
-    """Look up the parent entry's health tracker, if registered."""
+    """Look up the parent entry's health tracker, if it has one."""
     if not parent_entry_id:
         return None
-    return hass.data.get(DOMAIN, {}).get(
-        f"{parent_entry_id}{HEALTH_TRACKER_KEY}"
+    return health_tracker_for(
+        hass.config_entries.async_get_entry(parent_entry_id)
     )
 
 

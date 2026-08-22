@@ -49,14 +49,13 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 
-from .api_health import OpenAITTSHealthTracker
+from .api_health import OpenAITTSHealthTracker, health_tracker_for
 from .cache import DURATION_FAILED_SENTINEL, clear_stale_failure, lookup_duration
 from .const import (
     CONF_ANNOUNCE_MODE,
     CONF_PAUSE_PLAYBACK,
     CONF_VOLUME_RESTORE,
     DEFAULT_ANNOUNCE_MODE,
-    DOMAIN,
 )
 from .utils import (
     call_media_player_service,
@@ -215,7 +214,6 @@ _LATE_RESUME_WATCH_S = 5.0
 # error is recorded as soon as the response arrives.
 _FAILURE_SETTLE_TIMEOUT_S = 3.0
 
-HEALTH_TRACKER_KEY_SUFFIX = "_health_tracker"
 
 # Pre-speak readiness window. We block ``tts.speak`` until every
 # target speaker has woken up out of ``off`` state, so they all
@@ -428,13 +426,7 @@ def _resolve_health_tracker(
     hass: HomeAssistant, tts_entity: str
 ) -> OpenAITTSHealthTracker | None:
     """Find the health tracker that owns ``tts_entity``."""
-    er = entity_registry.async_get(hass)
-    entry = er.async_get(tts_entity)
-    if entry is None or entry.config_entry_id is None:
-        return None
-    return hass.data.get(DOMAIN, {}).get(
-        f"{entry.config_entry_id}{HEALTH_TRACKER_KEY_SUFFIX}"
-    )
+    return health_tracker_for(_resolve_config_entry(hass, tts_entity))
 
 
 def _is_cast_platform(hass: HomeAssistant, entity_id: str) -> bool:

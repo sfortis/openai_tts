@@ -39,6 +39,7 @@ from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api_health import (
+    health_tracker_for,
     ALL_STATUSES,
     API_STATUS_OK,
     OpenAITTSHealthTracker,
@@ -48,7 +49,6 @@ from .const import CONF_PROVIDER, DOMAIN, preset_for
 
 _LOGGER = logging.getLogger(__name__)
 
-HEALTH_TRACKER_KEY = "_health_tracker"
 
 
 async def async_setup_entry(
@@ -62,8 +62,7 @@ async def async_setup_entry(
     parent's health state since the API key (billing scope) lives on the
     parent.
     """
-    domain_data = hass.data.get(DOMAIN, {})
-    tracker = domain_data.get(f"{entry.entry_id}{HEALTH_TRACKER_KEY}")
+    tracker = health_tracker_for(entry)
     if tracker is None:
         _LOGGER.debug(
             "No health tracker for %s; skipping API status sensor",

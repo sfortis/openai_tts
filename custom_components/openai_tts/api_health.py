@@ -187,3 +187,26 @@ class OpenAITTSHealthTracker(DataUpdateCoordinator[dict[str, Any]]):
             new_status, self.data["last_error_message"],
         )
         self.async_set_updated_data(self.data)
+
+
+# Each parent config entry carries its own tracker as runtime data. The
+# tracker used to live in ``hass.data`` under a key built from the entry
+# id, alongside a single ``main_entry`` slot that every parent entry
+# overwrote, so with two providers configured that slot named whichever
+# one was set up last.
+type OpenAITTSConfigEntry = ConfigEntry[OpenAITTSHealthTracker]
+
+
+def health_tracker_for(
+    entry: ConfigEntry | None,
+) -> Optional[OpenAITTSHealthTracker]:
+    """Return the tracker an entry carries, or None.
+
+    ``runtime_data`` is unset until the entry finishes setting up, and
+    subentries never carry one, so callers that reach an entry through
+    the registry need this rather than a bare attribute read.
+    """
+    if entry is None:
+        return None
+    tracker = getattr(entry, "runtime_data", None)
+    return tracker if isinstance(tracker, OpenAITTSHealthTracker) else None

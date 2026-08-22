@@ -36,7 +36,6 @@ _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[str] = [Platform.TTS, Platform.SENSOR]
 SUBENTRY_TYPE_PROFILE = "profile"
-HEALTH_TRACKER_KEY = "_health_tracker"
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register the ``say`` action, once, independently of any entry.
@@ -286,14 +285,11 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     if has_subentries:
         _LOGGER.debug("Entry has %d subentries", len(entry.subentries))
     
-    # Store entry reference
-    hass.data[DOMAIN][entry.entry_id] = entry
-
-    # Each parent entry owns one health tracker that the binary sensor and the
-    # TTS engine share. Subentries inherit their parent's tracker.
+    # Each parent entry owns one health tracker that the sensor and the
+    # TTS entity share, carried on the entry itself. Subentries inherit
+    # their parent's tracker and carry nothing of their own.
     if not is_subentry:
-        tracker = OpenAITTSHealthTracker(hass, entry)
-        hass.data[DOMAIN][f"{entry.entry_id}{HEALTH_TRACKER_KEY}"] = tracker
+        entry.runtime_data = OpenAITTSHealthTracker(hass, entry)
 
     # Forward to platforms based on entry type
     if is_subentry:
@@ -307,8 +303,6 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
         
         if is_modern_parent:
-            # Store as main entry for subentries to find
-            hass.data[DOMAIN]["main_entry"] = entry
             _LOGGER.info("Modern parent entry forwarded to platforms (will process subentries)")
     
     # Setup update listener following official Home Assistant patterns
@@ -356,16 +350,10 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     elif entry.data.get(CONF_PROFILE_NAME) is not None:
         is_subentry = True
     
-    # Check if this entry has subentries (making it a parent)
-    has_subentries = hasattr(entry, 'subentries') and entry.subentries
-    
-    # Check if this is a legacy entry (has voice/model config but not a subentry AND no subentries AND version < 2.1)
-    is_legacy_entry = False
-    if (not is_subentry and not has_subentries and 
-        (entry.data.get(CONF_MODEL) or entry.data.get(CONF_VOICE)) and
-        (entry.version < 2 or (entry.version == 2 and entry.minor_version < 1))):
-        is_legacy_entry = True
-    
+    # Whether the entry is legacy or a modern parent no longer changes
+    # anything here: both unload the same platforms, and neither leaves
+    # anything behind to clean up.
+
     # Unload platforms first
     unload_ok = True
     if not is_subentry:
@@ -377,16 +365,9 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     # entry withdrew the action for the length of the reload and an
     # automation firing in that window was told it did not exist.
 
-    # Remove stored entry
-    if DOMAIN in hass.data and entry.entry_id in hass.data[DOMAIN]:
-        hass.data[DOMAIN].pop(entry.entry_id)
-
-    # Drop the per-entry health tracker
-    if DOMAIN in hass.data:
-        hass.data[DOMAIN].pop(f"{entry.entry_id}{HEALTH_TRACKER_KEY}", None)
-
-    # If this is the main entry, check if we need to clean up
-    if not is_subentry and not is_legacy_entry and DOMAIN in hass.data and "main_entry" in hass.data[DOMAIN]:
-        hass.data[DOMAIN].pop("main_entry", None)
+    # Nothing to clear here any more. The health tracker lives on the
+    # entry, which Home Assistant discards with it, and the shared
+    # duration cache in ``hass.data`` is deliberately domain-wide:
+    # ``volume_restore`` reads it without holding an entry.
 
     return unload_ok
