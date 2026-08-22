@@ -31,6 +31,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
+from homeassistant.util import slugify
 
 from .api_health import OpenAITTSHealthTracker, health_tracker_for
 from .cache import MessageDurationCache
@@ -205,7 +206,13 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # timing (volume_restore drives off speaker state events) but
         # kept as an extra_state_attribute for UI/debug visibility.
         self._last_duration_ms: int | None = None
-        self._store = Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{self.entity_id}")
+        # Keyed on the unique id, not the entity id. The entity id here
+        # is only this class's suggestion, which drifts from the
+        # registered one and is not unique: two profiles whose names
+        # reduce to the same fragment shared a single state file.
+        self._store = Store(
+            hass, STORAGE_VERSION, f"{STORAGE_KEY}_{self._attr_unique_id}"
+        )
         self._stored_data: dict = {}
         # Key the duration cache on ``unique_id`` (stable across user-initiated
         # entity renames), NOT ``entity_id`` (which is whatever the user has
@@ -228,22 +235,60 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         )
 
     def _configure_entity_id_and_name(self) -> None:
+        """Suggest the entity id and set the display name.
+
+        Every branch produces a valid entity id. Home Assistant only
+        takes the id as a suggestion, and it keeps whatever is already
+        registered against this unique id, so the ids below are what a
+        newly created entity gets, not a rename of an existing one.
+        """
         if is_subentry(self._config):
             profile_name = self._config.data.get(CONF_PROFILE_NAME, "profile")
             safe = sanitize_profile_name(profile_name)
-            self.entity_id = f"tts.openai_tts_{safe}"
+            self.entity_id = f"tts.openai_tts_{safe}" if safe else "tts.openai_tts"
             self._attr_name = f"OpenAI TTS {profile_name}"
             return
 
         model = self._config.data.get(CONF_MODEL)
         if model:
-            model_suffix = model.replace("-", "_").replace(".", "_")
-            self.entity_id = f"tts.openai_tts_{model_suffix}"
+            # Model names are free text for self-hosted backends, so they
+            # arrive with capitals and slashes in them ("XTTS-v2",
+            # "Kokoro/v1.0"). Slugify for the same reason as the profile
+            # name: the id Home Assistant derives is unchanged, the
+            # invalid suggestion is not made.
+            model_suffix = slugify(model.replace("-", "_").replace(".", "_"))
+            self.entity_id = (
+                f"tts.openai_tts_{model_suffix}" if model_suffix
+                else "tts.openai_tts"
+            )
             self._attr_name = f"OpenAI TTS ({model})"
             return
 
         self.entity_id = "tts.openai_tts"
         self._attr_name = "OpenAI TTS"
+
+    def _legacy_store_key(self) -> str:
+        """Reproduce the storage key this entity used before 3.8.2.
+
+        The per-entity store was keyed on the entity id this class
+        computed, which the two changes above alter for names that were
+        not already valid. Migration reads this key once so a profile
+        called "Living Room - Main" keeps the durations it had measured.
+        Deliberately duplicates the old string building rather than
+        calling the shared helpers, which no longer produce it.
+        """
+        if is_subentry(self._config):
+            name = self._config.data.get(CONF_PROFILE_NAME, "profile")
+            lowered = name.lower().replace(" ", "_").replace("-", "_")
+            safe = "".join(c for c in lowered if c.isalnum() or c == "_")
+            old_entity_id = f"tts.openai_tts_{safe}"
+        else:
+            model = self._config.data.get(CONF_MODEL)
+            old_entity_id = (
+                f"tts.openai_tts_{model.replace('-', '_').replace('.', '_')}"
+                if model else "tts.openai_tts"
+            )
+        return f"{STORAGE_KEY}_{old_entity_id}"
 
     # --- Persistent state --------------------------------------------------
 
@@ -261,6 +306,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         try:
             stored = await self._store.async_load()
             if not stored:
+                stored = await self._adopt_legacy_store()
+            if not stored:
                 return
             self._stored_data = stored
             if "last_duration_ms" in stored:
@@ -270,6 +317,36 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 self._duration_cache.restore(stored["message_duration_cache"])
         except Exception as e:
             _LOGGER.error("Failed to restore persisted state: %s", e)
+
+    async def _adopt_legacy_store(self) -> dict | None:
+        """Move state written under the old entity-id key, once.
+
+        Runs only when the unique-id key holds nothing, which is true on
+        the first start after the upgrade and on a genuinely new entity.
+        The old file is removed after a successful copy so it does not
+        sit in ``.storage`` forever.
+        """
+        legacy_key = self._legacy_store_key()
+        if legacy_key == f"{STORAGE_KEY}_{self._attr_unique_id}":
+            return None
+        legacy_store = Store(self.hass, STORAGE_VERSION, legacy_key)
+        try:
+            stored = await legacy_store.async_load()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug("Could not read %s: %s", legacy_key, err)
+            return None
+        if not stored:
+            return None
+        _LOGGER.info(
+            "Migrating stored state for %s from %s to the unique-id key",
+            self.entity_id, legacy_key,
+        )
+        await self._store.async_save(stored)
+        try:
+            await legacy_store.async_remove()
+        except Exception as err:  # pragma: no cover - defensive
+            _LOGGER.debug("Could not remove %s: %s", legacy_key, err)
+        return stored
 
     async def _save_persisted_state(self) -> None:
         try:

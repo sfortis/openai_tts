@@ -15,6 +15,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from homeassistant.util import slugify
+
 from .const import CONF_PROFILE_NAME
 
 SUBENTRY_TYPE_PROFILE = "profile"
@@ -39,6 +41,31 @@ def is_subentry(config: Any) -> bool:
 
 
 def sanitize_profile_name(profile_name: str) -> str:
-    """Return a profile name lowered/underscored and stripped of unsafe chars."""
+    """Return the entity-id fragment for a profile name, or "" if there is none.
+
+    Two passes, and the first one has to stay. It lowercases, maps spaces
+    and hyphens to underscores and drops everything else, which can leave
+    runs of underscores or non-ASCII letters: "Living Room - Main" came
+    out as "living_room___main". Home Assistant treats an entity id set
+    by an integration as a suggestion and slugifies it before use, so the
+    entity really was called ``tts.openai_tts_living_room_main`` all
+    along, but suggesting the invalid form logs a deprecation that
+    becomes an error in Home Assistant 2027.2.
+
+    Slugifying the first pass's output yields exactly the string Home
+    Assistant was deriving anyway, so no entity id changes. Slugifying
+    the raw name instead would not: slugify turns punctuation into a
+    separator where the first pass drops it, so "A+B" would move from
+    ``ab`` to ``a_b``.
+
+    The empty return matters. A name with nothing alphanumeric in it,
+    "!!!" or a run of spaces, leaves no fragment, and slugify answers
+    "unknown" for the second of those. Callers use the empty string to
+    fall back to the bare ``tts.openai_tts``, which is what Home
+    Assistant produces for those names today.
+    """
     safe = profile_name.lower().replace(" ", "_").replace("-", "_")
-    return "".join(c for c in safe if c.isalnum() or c == "_")
+    stripped = "".join(c for c in safe if c.isalnum() or c == "_")
+    if not any(c.isalnum() for c in stripped):
+        return ""
+    return slugify(stripped)
