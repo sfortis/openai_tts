@@ -79,7 +79,10 @@ class OpenAITTSAPIStatusSensor(
 
     _attr_has_entity_name = True
     _attr_should_poll = False
-    _attr_name = "Status"
+    # No ``_attr_name``. ``Entity._name_internal`` returns it before it
+    # ever consults the translation key, so setting it here made the
+    # entity.sensor.api_status.name strings in cs, de and el dead
+    # weight: every installation saw the English "Status".
     _attr_device_class = SensorDeviceClass.ENUM
     _attr_options = list(ALL_STATUSES)
     _attr_translation_key = "api_status"
