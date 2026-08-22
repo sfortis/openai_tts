@@ -27,7 +27,6 @@ from homeassistant.components.tts import (
 )
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
-from homeassistant.exceptions import ConfigEntryAuthFailed
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.entity_platform import AddEntitiesCallback
 from homeassistant.helpers.restore_state import RestoreEntity
@@ -747,10 +746,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._health_tracker.record_error(err)
         if isinstance(err, OpenAIAuthError):
             _LOGGER.error(
-                "OpenAI TTS auth failed for %s, raising reauth: %s",
+                "OpenAI TTS auth failed for %s, asking the user to "
+                "reauthenticate: %s",
                 self.entity_id, err,
             )
-            raise ConfigEntryAuthFailed(str(err)) from err
+            self._start_reauth()
+            return
         if isinstance(err, OpenAIVoiceDeletedError):
             self._raise_voice_deleted_repair(err)
             return
@@ -769,6 +770,35 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         if isinstance(err, OpenAITTSError):
             _LOGGER.error("OpenAI TTS error for %s: %s", self.entity_id, err)
             return
+
+    def _start_reauth(self) -> None:
+        """Ask Home Assistant to show the reauthentication card.
+
+        This used to raise ``ConfigEntryAuthFailed`` instead. Home
+        Assistant only turns that exception into a reauth flow when it
+        comes out of entry setup or a coordinator refresh, never from an
+        entity method, so on a revoked key the user saw a raw exception
+        out of ``tts.speak`` and the whole reauth step in the config flow
+        was unreachable.
+
+        The flow is started on the entry that actually holds the
+        credentials. For a profile that is a subentry, that is its
+        parent. Starting a flow while one is already in progress is a
+        no-op in Home Assistant, so a burst of failed announcements
+        produces a single card.
+        """
+        entry = self._parent_entry or self._config
+        starter = getattr(entry, "async_start_reauth", None)
+        if starter is None:
+            # A subentry with no parent recorded. Nothing here can carry
+            # a reauth flow, so the error has already been logged and
+            # the health tracker has it.
+            _LOGGER.debug(
+                "No config entry available to start reauth for %s",
+                self.entity_id,
+            )
+            return
+        starter(self.hass)
 
     def _raise_voice_deleted_repair(self, err: "OpenAIVoiceDeletedError") -> None:
         """Surface a Repairs panel issue for an upstream-deleted voice.
@@ -1016,11 +1046,10 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 yield chunk
 
         except OpenAITTSError as err:
-            # Mark the cache BEFORE delegating to _handle_engine_error
-            # because that helper raises ConfigEntryAuthFailed on auth
-            # errors, which would skip the post-call mark_failed and
-            # leave volume_restore polling for 60s without the
-            # immediate-restore signal.
+            # Mark the cache BEFORE delegating to _handle_engine_error.
+            # The sentinel is what tells volume_restore that no audio is
+            # coming; writing it first means the signal is already in
+            # place whatever that helper decides to do with the error.
             self._mark_failed_with_resolved(text, resolved)
             await self._handle_engine_error(err)
             raise
