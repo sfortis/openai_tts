@@ -3,12 +3,20 @@
 from __future__ import annotations
 
 import logging
+import os
 import uuid
+from typing import Any
 
-from homeassistant.config_entries import ConfigEntry, ConfigSubentry
+from homeassistant.config_entries import (
+    ConfigEntry,
+    ConfigEntryState,
+    ConfigSubentry,
+)
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers.start import async_at_started
+from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .api_health import OpenAITTSHealthTracker
@@ -31,11 +39,75 @@ from .const import (
 )
 from .repairs import clear_repairs_for_entry
 from .services import async_setup_services
+from .tts import STORAGE_KEY, STORAGE_VERSION
 
 _LOGGER = logging.getLogger(__name__)
 
 PLATFORMS: list[str] = [Platform.TTS, Platform.SENSOR]
 SUBENTRY_TYPE_PROFILE = "profile"
+
+async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
+    """Delete the state files this entry's entities wrote.
+
+    Each TTS entity keeps a ``Store`` of measured durations keyed on its
+    unique id. Nothing removed those, so uninstalling the integration
+    left one file per profile in ``.storage`` for good.
+
+    Home Assistant calls this before it clears the registries, so the
+    entities are still there to enumerate.
+    """
+    registry = er.async_get(hass)
+    unique_ids = [
+        e.unique_id
+        for e in er.async_entries_for_config_entry(registry, entry.entry_id)
+        if e.domain == Platform.TTS and e.unique_id
+    ]
+    for unique_id in unique_ids:
+        _LOGGER.info("Removing stored state for %s", unique_id)
+        await Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{unique_id}").async_remove()
+
+
+async def _async_prune_orphaned_state_files(hass: HomeAssistant) -> None:
+    """Delete state files that belong to no entity any more.
+
+    Deleting a single profile removes a subentry, and Home Assistant
+    offers integrations no hook for that, so the file that profile wrote
+    would stay behind. This also clears files left under the old
+    entity-id key by profiles deleted before the key moved to the unique
+    id.
+
+    Guarded twice. It only runs once Home Assistant has finished
+    starting, so every entity has been added and had its state
+    migrated, and it does nothing unless every entry of this integration
+    loaded, because an entry that failed to load would make its own
+    files look orphaned.
+    """
+    entries = hass.config_entries.async_entries(DOMAIN)
+    if not entries or any(e.state is not ConfigEntryState.LOADED for e in entries):
+        _LOGGER.debug("Not pruning state files: not every entry is loaded")
+        return
+
+    registry = er.async_get(hass)
+    live = {
+        e.unique_id for e in registry.entities.values()
+        if e.platform == DOMAIN and e.unique_id
+    }
+    storage_dir = hass.config.path(".storage")
+    prefix = f"{STORAGE_KEY}_"
+
+    def _list_state_files() -> list[str]:
+        try:
+            return [n for n in os.listdir(storage_dir) if n.startswith(prefix)]
+        except OSError as err:  # pragma: no cover - defensive
+            _LOGGER.debug("Cannot list %s: %s", storage_dir, err)
+            return []
+
+    for name in await hass.async_add_executor_job(_list_state_files):
+        if name[len(prefix):] in live:
+            continue
+        _LOGGER.info("Removing orphaned state file %s", name)
+        await Store(hass, STORAGE_VERSION, name).async_remove()
+
 
 async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     """Register the ``say`` action, once, independently of any entry.
@@ -46,6 +118,11 @@ async def async_setup(hass: HomeAssistant, config: ConfigType) -> bool:
     the registries, so it does not belong to a particular entry.
     """
     async_setup_services(hass)
+
+    async def _prune(_event: Any) -> None:
+        await _async_prune_orphaned_state_files(hass)
+
+    async_at_started(hass, _prune)
     return True
 
 
