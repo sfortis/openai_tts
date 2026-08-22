@@ -120,13 +120,15 @@ class MessageDurationCache:
             return
         self._local = {k: int(v) for k, v in stored.items()
                        if isinstance(v, (int, float))}
-        shared = self._ensure_shared_dict()
+        # Publish through the same path a fresh measurement takes, which
+        # stamps a real timestamp and applies the shared-dict limit.
+        # Writing ``timestamp: 0`` directly, as this used to, made every
+        # restored entry the oldest thing in the dict, so the first new
+        # announcement after a restart evicted the whole restored set and
+        # persisting durations across restarts achieved nothing. Skipping
+        # the limit also let the dict grow past it until the next write.
         for msg_hash, dur in self._local.items():
-            shared[msg_hash] = {
-                "duration_ms": dur,
-                "timestamp": 0,
-                "entity_id": self._entity_id,
-            }
+            self._publish_shared(msg_hash, dur)
         if self._local:
             _LOGGER.info(
                 "Restored %d cached entries (durations + sentinels)",

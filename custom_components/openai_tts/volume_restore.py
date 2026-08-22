@@ -1390,7 +1390,7 @@ async def announce(
         is short because a failure is recorded as soon as the provider
         answers.
         """
-        cached = await _wait_for_cached_duration(
+        cached = await _wait_for_duration_ms(
             hass, tts_entity, message, options,
             timeout_s=_FAILURE_SETTLE_TIMEOUT_S,
         )
@@ -1431,10 +1431,14 @@ async def announce(
                 )
             return
 
-        cached = await _wait_for_cached_duration(
-            hass, tts_entity, message, options, timeout_s=60.0
+        # Named for what it is rather than where it came from: this may
+        # be the engine's measurement out of the cache or a length the
+        # speakers reported themselves.
+        resolved_ms = await _wait_for_duration_ms(
+            hass, tts_entity, message, options,
+            media_players=available_players, timeout_s=60.0,
         )
-        if cached == DURATION_FAILED_SENTINEL:
+        if resolved_ms == DURATION_FAILED_SENTINEL:
             # Written by this attempt, since the pre-speak clear removed
             # anything older. No audio played, so roll the volumes back
             # now instead of holding for a clip that does not exist, and
@@ -1450,9 +1454,7 @@ async def announce(
                 "the provider error."
             )
 
-        duration_ms = cached
-        if duration_ms is None or duration_ms <= 0:
-            duration_ms = _media_player_duration_ms(hass, available_players)
+        duration_ms = resolved_ms
         if duration_ms is None or duration_ms <= 0:
             duration_ms = _DEFAULT_FALLBACK_DURATION_MS
             _LOGGER.warning(
@@ -1684,36 +1686,61 @@ def _lookup_audio_duration(
     )
 
 
-async def _wait_for_cached_duration(
+async def _wait_for_duration_ms(
     hass: HomeAssistant,
     tts_entity: str,
     message: str,
     options: Dict[str, Any],
     *,
+    media_players: Optional[List[str]] = None,
     timeout_s: float = 4.0,
     poll_interval_s: float = 0.1,
 ) -> Optional[int]:
-    """Poll the cache briefly so streaming mode can populate it.
+    """Poll for the length of the clip that is about to play.
 
-    In streaming mode the engine writes the measured duration AFTER
-    the final chunk completes - which can be a few seconds after
-    ``tts.speak`` returns. We poll on a short cadence until either:
+    Two sources are checked on every pass rather than one after the
+    other. The cache goes first because it is the only one that can
+    report a failure, and because the engine's own measurement is
+    exact. The speakers are asked next: a target that surfaced the TTS
+    proxy URL reports the length itself, and reading it costs a state
+    lookup.
 
-    * The cache hits a real duration (positive int) -> return it
-    * The cache hits the failure sentinel (0) -> return it (caller
-      treats as immediate-restore signal)
-    * ``timeout_s`` elapses -> return whatever we have (None on
-      first-ever call, prior cached value otherwise) and let the
-      caller fall back to media_player.media_duration / static.
+    Checking the speakers inside the loop is what keeps an announcement
+    served from Home Assistant's own TTS cache from stalling. On such a
+    call our engine never runs, so nothing ever writes to the cache, and
+    polling the cache alone burned the full timeout with the volume down
+    and the music paused before anything else was tried.
 
-    Returns immediately when a value is already present.
+    Returns as soon as either source answers:
+
+    * a positive duration in milliseconds, from either source
+    * ``DURATION_FAILED_SENTINEL`` (0) from the cache, which tells the
+      caller no audio is coming
+    * ``None`` when the timeout expires with neither source answering
+
+    The timeout stays long on purpose. With no length to work from, the
+    caller falls back to a fixed ten seconds, and restoring the volume
+    that early cuts a longer announcement off part-way through, which on
+    Sonos leaves the user hearing only the leading chime. Waiting too
+    long holds the volume down; giving up too early loses the message.
+
+    In streaming mode the engine writes its measurement after the final
+    chunk, which can land a few seconds after ``tts.speak`` returns, so
+    a single read would miss it.
     """
     deadline = asyncio.get_running_loop().time() + timeout_s
-    last: Optional[int] = None
     while True:
-        last = _lookup_audio_duration(hass, tts_entity, message, options)
-        if last is not None:
-            return last
+        cached = _lookup_audio_duration(hass, tts_entity, message, options)
+        if cached is not None:
+            return cached
+        if media_players:
+            from_speakers = _media_player_duration_ms(hass, media_players)
+            if from_speakers:
+                _LOGGER.debug(
+                    "Duration not in cache; the speakers report %d ms",
+                    from_speakers,
+                )
+                return from_speakers
         if asyncio.get_running_loop().time() >= deadline:
             return None
         await asyncio.sleep(poll_interval_s)
