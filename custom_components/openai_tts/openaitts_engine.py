@@ -504,8 +504,6 @@ class OpenAITTSEngine:
 
                 audio_chunks_received = 0
                 total_audio_bytes = 0
-                initial_buffer: list[bytes] = []
-                initial_buffer_size = 0
 
                 try:
                     async for audio_chunk in self._iter_sse_audio(response):
@@ -513,30 +511,7 @@ class OpenAITTSEngine:
                             continue
                         audio_chunks_received += 1
                         total_audio_bytes += len(audio_chunk)
-
-                        if initial_buffer_size < INITIAL_BUFFER_BYTES:
-                            initial_buffer.append(audio_chunk)
-                            initial_buffer_size += len(audio_chunk)
-
-                            if initial_buffer_size >= INITIAL_BUFFER_BYTES:
-                                first_audio = b"".join(initial_buffer)
-                                yield first_audio
-                                initial_buffer = []
-                        else:
-                            if audio_chunks_received % 50 == 0:
-                                _LOGGER.debug(
-                                    "Streaming progress: %d audio chunks, %d bytes",
-                                    audio_chunks_received,
-                                    total_audio_bytes,
-                                )
-
-                            yield audio_chunk
-
-                    # Flush any leftover initial buffer. This can happen
-                    # when the complete audio is smaller than
-                    # INITIAL_BUFFER_BYTES.
-                    if initial_buffer:
-                        yield b"".join(initial_buffer)
+                        yield audio_chunk
 
                 except asyncio.CancelledError:
                     _LOGGER.warning(
