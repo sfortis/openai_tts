@@ -713,6 +713,7 @@ class _VolumeRestorer:
             if (
                 state in (STATE_IDLE, STATE_STANDBY)
                 and attrs.get("media_content_id")
+                and _supports_media_stop(self.hass, entity_id)
             ):
                 _LOGGER.info(
                     "prepare(): %s idle with queued media - "
@@ -726,7 +727,21 @@ class _VolumeRestorer:
                 )
 
             if pause_playback and state == STATE_PLAYING:
-                if _is_cast_platform(self.hass, entity_id):
+                # A speaker that cannot be paused or stopped is left
+                # playing. Asking anyway logs an error, wastes the
+                # settle, and used to record the target as paused, so
+                # the restore sent a ``media_play`` to something that
+                # was never interrupted. A Nest Hub showing a dashboard
+                # is the case that surfaced this.
+                can_pause = _supports_media_pause(self.hass, entity_id)
+                can_stop = _supports_media_stop(self.hass, entity_id)
+                if not can_pause and not can_stop:
+                    _LOGGER.debug(
+                        "prepare(): %s supports neither pause nor stop, "
+                        "leaving it playing",
+                        entity_id,
+                    )
+                elif _is_cast_platform(self.hass, entity_id):
                     # Cast: media_stop + snapshot URL for replay. See
                     # ``_stopped_media`` rationale on __init__.
                     #
@@ -735,7 +750,7 @@ class _VolumeRestorer:
                     # reports an id ``play_media`` cannot resolve, so
                     # stopping it would lose the music permanently.
                     content_id = attrs.get("media_content_id") or ""
-                    if _is_replayable_media_id(content_id):
+                    if _is_replayable_media_id(content_id) and can_stop:
                         self._stopped_media[entity_id] = {
                             "media_content_id": content_id,
                             "media_content_type": (
@@ -752,9 +767,10 @@ class _VolumeRestorer:
                             )
                         )
                     else:
-                        # Nothing we can replay - fall back to pause so
-                        # the session survives, even if the Cast
-                        # handover blip may still occur.
+                        # Nothing we can replay, or nothing we can
+                        # stop. Fall back to pause so the session
+                        # survives, even if the Cast handover blip may
+                        # still occur.
                         _LOGGER.debug(
                             "prepare(): %s content_id %r is not replayable, "
                             "pausing instead of stopping",
@@ -773,18 +789,16 @@ class _VolumeRestorer:
                     # the queue position so a later ``media_play`` (in
                     # ``_resume_paused_media``) resumes from the same
                     # spot.
+                    action = "media_stop" if can_stop else SERVICE_MEDIA_PAUSE
                     self._paused_media.add(entity_id)
                     pause_tasks.append(
-                        call_media_player_service(
-                            self.hass, "media_stop", entity_id
-                        )
+                        call_media_player_service(self.hass, action, entity_id)
                     )
                 else:
+                    action = SERVICE_MEDIA_PAUSE if can_pause else "media_stop"
                     self._paused_media.add(entity_id)
                     pause_tasks.append(
-                        call_media_player_service(
-                            self.hass, SERVICE_MEDIA_PAUSE, entity_id
-                        )
+                        call_media_player_service(self.hass, action, entity_id)
                     )
 
         if turn_on_tasks:
@@ -1032,13 +1046,24 @@ class _VolumeRestorer:
 
         handled: Set[str] = set()
 
+        def _can_interrupt(eid: str) -> bool:
+            """Whether this speaker can be silenced at all."""
+            return (
+                _supports_media_pause(self.hass, eid)
+                or _supports_media_stop(self.hass, eid)
+            )
+
         def _stop_action(eid: str) -> str:
             # MA's media_pause auto-resumes within ~300ms on DLNA
             # backends; media_stop sticks and still preserves the queue
             # position (a later media_play continues from the saved
             # offset). For non-MA platforms, media_pause is the right
             # tool and keeps position too.
-            return "media_stop" if _is_ma_platform(self.hass, eid) else SERVICE_MEDIA_PAUSE
+            if _is_ma_platform(self.hass, eid) and _supports_media_stop(self.hass, eid):
+                return "media_stop"
+            if _supports_media_pause(self.hass, eid):
+                return SERVICE_MEDIA_PAUSE
+            return "media_stop"
 
         def _is_announcement_playing(eid: str, state: Any) -> bool:
             """True when this playback is an announcement, not a stray resume.
@@ -1069,6 +1094,12 @@ class _VolumeRestorer:
             if _is_announcement_playing(eid, state):
                 _LOGGER.debug(
                     "%s is playing an announcement, not pausing", eid,
+                )
+                continue
+            if not _can_interrupt(eid):
+                _LOGGER.debug(
+                    "%s resumed on its own but cannot be paused or "
+                    "stopped, leaving it", eid,
                 )
                 continue
             action = _stop_action(eid)
@@ -1114,6 +1145,8 @@ class _VolumeRestorer:
             if new_state.state not in (STATE_PLAYING, _BUFFERING_STATE):
                 return
             if _is_announcement_playing(eid, new_state):
+                return
+            if not _can_interrupt(eid):
                 return
             handled.add(eid)
             action = _stop_action(eid)
@@ -1866,8 +1899,16 @@ def _is_replayable_media_id(content_id: str | None) -> bool:
     return content_id.startswith(("http://", "https://"))
 
 
-def _supports_media_seek(hass: HomeAssistant, entity_id: str) -> bool:
-    """True when the entity accepts ``media_seek``."""
+def _has_feature(
+    hass: HomeAssistant, entity_id: str, feature: MediaPlayerEntityFeature
+) -> bool:
+    """True when the entity advertises ``feature`` right now.
+
+    Read from the live state rather than the entity registry, because
+    ``supported_features`` is a runtime property: a Cast device shows a
+    different set idle than it does while an app is running. A target
+    that is unavailable reports nothing and answers False.
+    """
     state = hass.states.get(entity_id)
     if state is None:
         return False
@@ -1875,7 +1916,29 @@ def _supports_media_seek(hass: HomeAssistant, entity_id: str) -> bool:
         features = int(state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0)
     except (TypeError, ValueError):
         return False
-    return bool(features & MediaPlayerEntityFeature.SEEK)
+    return bool(features & feature)
+
+
+def _supports_media_seek(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when the entity accepts ``media_seek``."""
+    return _has_feature(hass, entity_id, MediaPlayerEntityFeature.SEEK)
+
+
+def _supports_media_pause(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when the entity accepts ``media_pause``.
+
+    Worth checking before calling. A Nest Hub showing a dashboard
+    reports no pause feature, and asking it anyway logs an error, waits
+    out the pause settle for nothing, and, worse, used to leave the
+    entity recorded as paused so the restore sent it a ``media_play``
+    it never needed.
+    """
+    return _has_feature(hass, entity_id, MediaPlayerEntityFeature.PAUSE)
+
+
+def _supports_media_stop(hass: HomeAssistant, entity_id: str) -> bool:
+    """True when the entity accepts ``media_stop``."""
+    return _has_feature(hass, entity_id, MediaPlayerEntityFeature.STOP)
 
 
 def _supports_media_announce(hass: HomeAssistant, entity_id: str) -> bool:
@@ -1888,19 +1951,12 @@ def _supports_media_announce(hass: HomeAssistant, entity_id: str) -> bool:
     pause / volume_set / resume sequence is not just redundant, it
     fights the device.
 
-    Read from the live state attributes rather than the entity
-    registry, because ``supported_features`` is a runtime property. A
-    target that is unavailable reports nothing, in which case we fall
-    back on the platform allowlist in the caller.
+    A target that is unavailable reports nothing, in which case the
+    caller falls back on the platform allowlist.
     """
-    state = hass.states.get(entity_id)
-    if state is None:
-        return False
-    try:
-        features = int(state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0)
-    except (TypeError, ValueError):
-        return False
-    return bool(features & MediaPlayerEntityFeature.MEDIA_ANNOUNCE)
+    return _has_feature(
+        hass, entity_id, MediaPlayerEntityFeature.MEDIA_ANNOUNCE
+    )
 
 
 def _native_announce_targets(
