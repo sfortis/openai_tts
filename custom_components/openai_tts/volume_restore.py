@@ -510,6 +510,13 @@ class _VolumeRestorer:
         # ``_set_announcement_volume`` and ``restore`` know to leave
         # them alone. Populated by ``prepare()`` when announce_mode is on.
         self._native_announce_skipped: Set[str] = set()
+        # Targets whose volume this announcement actually changed. The
+        # restore reads this rather than comparing against reported
+        # state, because reported state is not always current: a DLNA
+        # renderer whose event subscription never reached Home
+        # Assistant still said 0.27 while the speaker itself was at
+        # 0.30, so the comparison decided there was nothing to undo.
+        self._volume_changed: Set[str] = set()
 
     def _spawn(self, coro: Any, name: str) -> None:
         """Run ``coro`` in the background, tied to the config entry.
@@ -910,6 +917,7 @@ class _VolumeRestorer:
                 _LOGGER.info(
                     "Setting volume for %s -> %.2f", entity_id, target
                 )
+                self._volume_changed.add(entity_id)
                 tasks.append(set_media_player_volume(self.hass, entity_id, target))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
@@ -990,7 +998,26 @@ class _VolumeRestorer:
         self._stop_unintended_playback()
 
     async def _restore_one(self, entity_id: str, original_volume: float) -> bool:
+        """Put one speaker back to the level it had before the announcement.
+
+        A target this announcement actually changed is always sent the
+        old level, without consulting reported state first. That check
+        used to decide the outcome, and it got it wrong twice over: a
+        speaker that reports no volume was never restored at all, and
+        one whose reported level had not caught up looked as if it were
+        already correct. Both left the speaker where the announcement
+        put it.
+
+        Targets that were only snapshotted, never changed, still go
+        through the comparison, so an announcement that touched nothing
+        does not issue pointless service calls.
+        """
         try:
+            if entity_id in self._volume_changed:
+                await set_media_player_volume(
+                    self.hass, entity_id, original_volume, force=True
+                )
+                return True
             state, attrs = await get_media_player_state(self.hass, entity_id)
             if state is None or attrs is None:
                 return False
@@ -1567,13 +1594,27 @@ async def announce(
         # If neither signal applies (e.g. cache miss in flight, or an
         # integration that exposes neither the URL nor a synchronous
         # speak), we fall back to the duration-based timer.
-        if watcher.any_seen_tts():
-            # Cast-style targets surface the TTS proxy URL on the
-            # speaker; wait for them to roll off it before restoring.
+        # Whether to wait for the drain is decided from what the
+        # targets are, not from what they have managed to do so far.
+        # Sampling ``any_seen_tts()`` here was a race: on a short clip
+        # our generator finishes before the speaker has even loaded the
+        # URL, so the check said no, and the announcement was held for
+        # its full duration on a device that could have told us exactly
+        # when it stopped. Cast surfaces the URL, so ask Cast to prove
+        # it; anything already observed on the URL qualifies too.
+        expect_drain = watcher.any_seen_tts() or any(
+            _is_cast_platform(hass, eid) for eid in available_players
+        )
+        if expect_drain:
             drain_timeout_s = max(30.0, (duration_ms + 5000) / 1000.0)
-            await watcher.wait_for_drain(timeout_s=drain_timeout_s)
+            drained = await watcher.wait_for_drain(timeout_s=drain_timeout_s)
             await asyncio.sleep(0.3)  # settle so the unmute doesn't clip
-            elapsed_ms = duration_ms
+            # A wait that timed out is not a wait that succeeded. The
+            # result used to be discarded, which meant a speaker that
+            # never rolled off the URL was treated as having played the
+            # whole clip, and the hold collapsed underneath audio that
+            # may still have been going.
+            elapsed_ms = duration_ms if drained else 0
         elif _all_targets_sync_speak(hass, available_players):
             # Music Assistant: speak's blocking already covered the
             # entire announcement, audio is already done. Collapse the

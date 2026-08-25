@@ -500,6 +500,7 @@ async def set_media_player_volume(
     hass: HomeAssistant,
     entity_id: str,
     volume_level: float,
+    force: bool = False,
 ) -> bool:
     """Fire-and-forget volume change.
 
@@ -514,6 +515,15 @@ async def set_media_player_volume(
     know HA dispatched it) and return immediately. ``announce()``
     already includes a brief settle window before ``tts.speak`` runs,
     which is plenty for the device to apply the change.
+
+    ``force`` skips the "already at target" shortcut. That shortcut
+    trusts the reported level, and reported levels are not always
+    current: a DLNA renderer whose event subscription never reached
+    Home Assistant kept reporting the level it had before the
+    announcement while the speaker itself sat at the announcement
+    volume, so the restore decided there was nothing to do and left it
+    there. A caller that knows it changed the volume passes ``force``
+    and the shortcut is not consulted.
     """
     state, attributes = await get_media_player_state(hass, entity_id)
     if state is None or attributes is None:
@@ -522,7 +532,8 @@ async def set_media_player_volume(
 
     current_volume = attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
     if (
-        current_volume is not None
+        not force
+        and current_volume is not None
         and abs(float(current_volume) - volume_level) < 0.01
     ):
         return True  # already at target
