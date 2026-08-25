@@ -489,7 +489,21 @@ class _VolumeRestorer:
         # an entry that no longer exists.
         self._entry = entry
         self._original_volumes: Dict[str, float] = {}
-        self._paused_media: Set[str] = set()
+        # Targets we paused, mapped to a snapshot of what they were
+        # playing at that moment. The snapshot lets the resume step
+        # notice when ``tts.speak`` replaced the transport item on a
+        # renderer shared with another controller (a DLNA speaker that
+        # Music Assistant streams to, for example) - a plain
+        # ``media_play`` there would replay the announcement clip
+        # instead of the music.
+        self._paused_media: Dict[str, Dict[str, Any]] = {}
+        # Playing targets we could not pause or stop (a DLNA renderer
+        # mid live-stream advertises neither action). The announcement
+        # may still replace their transport item, killing the session
+        # with nothing recorded to bring it back. Snapshot them here;
+        # the resume step replays the original URL only when the
+        # current item is provably our announcement clip.
+        self._left_playing: Dict[str, Dict[str, Any]] = {}
         # Cast Default Receiver leaks ~150-400ms of the previous URL
         # right when ``play_media announce=True`` arrives over a paused
         # session - the receiver firmware briefly resumes the held
@@ -748,6 +762,7 @@ class _VolumeRestorer:
                         "leaving it playing",
                         entity_id,
                     )
+                    self._left_playing[entity_id] = _pause_snapshot(attrs)
                 elif _is_cast_platform(self.hass, entity_id):
                     # Cast: media_stop + snapshot URL for replay. See
                     # ``_stopped_media`` rationale on __init__.
@@ -783,7 +798,7 @@ class _VolumeRestorer:
                             "pausing instead of stopping",
                             entity_id, content_id,
                         )
-                        self._paused_media.add(entity_id)
+                        self._paused_media[entity_id] = _pause_snapshot(attrs)
                         pause_tasks.append(
                             call_media_player_service(
                                 self.hass, SERVICE_MEDIA_PAUSE, entity_id
@@ -797,13 +812,13 @@ class _VolumeRestorer:
                     # ``_resume_paused_media``) resumes from the same
                     # spot.
                     action = "media_stop" if can_stop else SERVICE_MEDIA_PAUSE
-                    self._paused_media.add(entity_id)
+                    self._paused_media[entity_id] = _pause_snapshot(attrs)
                     pause_tasks.append(
                         call_media_player_service(self.hass, action, entity_id)
                     )
                 else:
                     action = SERVICE_MEDIA_PAUSE if can_pause else "media_stop"
-                    self._paused_media.add(entity_id)
+                    self._paused_media[entity_id] = _pause_snapshot(attrs)
                     pause_tasks.append(
                         call_media_player_service(self.hass, action, entity_id)
                     )
@@ -1242,12 +1257,53 @@ class _VolumeRestorer:
         )
 
     async def _resume_paused_media(self) -> None:
-        async def _resume_one(eid: str) -> None:
+        async def _resume_one(eid: str, snapshot: Dict[str, Any]) -> None:
             # Music Assistant ignores queue commands while its
             # announcement is still in progress. Wait for the
             # announcement to release the player before sending play.
             if _is_ma_platform(self.hass, eid):
                 await self._wait_for_announce_done(eid)
+            # On a player without ``MEDIA_ANNOUNCE`` the speak call
+            # replaced the transport item with the announcement clip -
+            # always, by DLNA semantics, regardless of what the entity
+            # currently reports (dlna_dmr polls every 10s, so its view
+            # of ``media_content_id`` is routinely stale here; trusting
+            # it replayed the announcement instead of the music). Never
+            # blind-``media_play`` these: rebuild the paused session
+            # from the snapshot, or leave the player stopped.
+            paused_id = snapshot.get("media_content_id")
+            if not _supports_media_announce(self.hass, eid):
+                if _is_replayable_media_id(paused_id):
+                    _LOGGER.debug(
+                        "_resume_paused_media: %s has no announce "
+                        "support, the clip replaced its stream - "
+                        "replaying the original URL",
+                        eid,
+                    )
+                    await _replay_one(eid, snapshot)
+                else:
+                    _LOGGER.info(
+                        "_resume_paused_media: announcement replaced "
+                        "the stream on %s and %r cannot be replayed, "
+                        "leaving it stopped",
+                        eid, paused_id,
+                    )
+                return
+            # Announce-capable player: its announce layer restored the
+            # original item, so ``media_play`` resumes the music. Keep
+            # a positive-evidence check for the odd case where the clip
+            # is still the current item.
+            _, attrs = await get_media_player_state(self.hass, eid)
+            current_id = (attrs or {}).get("media_content_id") or ""
+            if _TTS_PROXY_MARKER in current_id:
+                if _is_replayable_media_id(paused_id):
+                    _LOGGER.debug(
+                        "_resume_paused_media: %s still holds the clip, "
+                        "replaying the original instead of media_play",
+                        eid,
+                    )
+                    await _replay_one(eid, snapshot)
+                return
             await call_media_player_service(
                 self.hass, SERVICE_MEDIA_PLAY, eid
             )
@@ -1292,7 +1348,35 @@ class _VolumeRestorer:
                     position, eid, err,
                 )
 
-        resume_tasks = [_resume_one(eid) for eid in self._paused_media]
+        async def _rebuild_one(eid: str, snapshot: Dict[str, Any]) -> None:
+            # A target we left playing because it could not be paused.
+            # Replay only on positive evidence that the announcement
+            # took over its transport: the current item is our TTS
+            # clip. Anything else (still on its own stream, cleared,
+            # unreadable) is left alone.
+            paused_id = snapshot.get("media_content_id")
+            if not _is_replayable_media_id(paused_id):
+                return
+            _, attrs = await get_media_player_state(self.hass, eid)
+            current_id = (attrs or {}).get("media_content_id") or ""
+            if _TTS_PROXY_MARKER not in current_id:
+                return
+            _LOGGER.info(
+                "_resume_paused_media: the announcement replaced the "
+                "stream on %s (could not be paused first), replaying "
+                "the original URL",
+                eid,
+            )
+            await _replay_one(eid, snapshot)
+
+        resume_tasks = [
+            _resume_one(eid, snapshot)
+            for eid, snapshot in self._paused_media.items()
+        ]
+        resume_tasks.extend(
+            _rebuild_one(eid, snapshot)
+            for eid, snapshot in self._left_playing.items()
+        )
         resume_tasks.extend(
             _replay_one(eid, snapshot)
             for eid, snapshot in self._stopped_media.items()
@@ -1922,6 +2006,19 @@ _NATIVE_ANNOUNCE_PLATFORMS: frozenset[str] = frozenset({
     # working.
     "music_assistant",
 })
+
+
+def _pause_snapshot(attrs: Dict[str, Any]) -> Dict[str, Any]:
+    """Capture what a target was playing at pause time.
+
+    Mirrors the ``_stopped_media`` snapshot shape so ``_replay_one``
+    can rebuild the session when the announcement replaced it.
+    """
+    return {
+        "media_content_id": attrs.get("media_content_id"),
+        "media_content_type": attrs.get("media_content_type") or "music",
+        "media_position": attrs.get("media_position") or 0,
+    }
 
 
 def _is_replayable_media_id(content_id: str | None) -> bool:
