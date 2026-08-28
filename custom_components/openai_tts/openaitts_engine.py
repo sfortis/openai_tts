@@ -19,6 +19,8 @@ from __future__ import annotations
 import asyncio
 import json
 import logging
+import binascii
+import base64
 import time
 from asyncio import CancelledError
 from typing import AsyncGenerator, Optional
@@ -105,6 +107,7 @@ class _RequestBuilder:
         speed: Optional[float] = None,
         instructions: Optional[str] = None,
         extra_payload: Optional[str] = None,
+        stream: bool = False,
     ) -> tuple[dict[str, str], dict[str, object]]:
         """Return (headers, payload) for an OpenAI TTS request."""
         headers: dict[str, str] = {
@@ -123,6 +126,10 @@ class _RequestBuilder:
         }
         if instructions is not None:
             payload["instructions"] = instructions
+            
+        if stream:
+            payload["stream_format"] = "sse"
+            headers["Accept"] = "text/event-stream"
 
         if extra_payload:
             try:
@@ -183,6 +190,147 @@ class OpenAITTSEngine:
         self._url = url
         self._hass = hass
         self._builder = _RequestBuilder(api_key, voice, model, speed)
+
+    async def _iter_sse_audio(
+        self,
+        response: aiohttp.ClientResponse,
+    ) -> AsyncGenerator[bytes, None]:
+        """Parse an OpenAI SSE speech stream and yield decoded audio bytes.
+
+        HTTP chunk boundaries are deliberately ignored. aiohttp may return
+        arbitrary fragments of an SSE event, so this method buffers until a
+        complete SSE event is received.
+
+        Expected events:
+
+            data: {"type":"speech.audio.delta","audio":"<base64>"}
+
+            data: {"type":"speech.audio.done",...}
+
+            data: [DONE]
+
+        Only ``speech.audio.delta`` events produce output bytes.
+        ``[DONE]`` terminates the stream.
+        """
+
+        buffer = bytearray()
+        saw_done = False
+
+        async for raw_chunk in response.content.iter_any():
+            if not raw_chunk:
+                continue
+
+            buffer.extend(raw_chunk)
+
+            while True:
+                # SSE permits CRLF or LF line endings. Look for either
+                # representation of the blank line separating events.
+                separator = buffer.find(b"\r\n\r\n")
+
+                if separator >= 0:
+                    event_bytes = bytes(buffer[:separator])
+                    del buffer[:separator + 4]
+                else:
+                    separator = buffer.find(b"\n\n")
+
+                    if separator < 0:
+                        break
+
+                    event_bytes = bytes(buffer[:separator])
+                    del buffer[:separator + 2]
+
+                # Normalize CRLF so the event parser only needs to deal
+                # with one line-ending convention.
+                event_bytes = event_bytes.replace(b"\r\n", b"\n")
+
+                data_lines: list[bytes] = []
+
+                for line in event_bytes.split(b"\n"):
+                    # Ignore SSE comments / empty lines.
+                    if not line or line.startswith(b":"):
+                        continue
+
+                    if line.startswith(b"data:"):
+                        data_lines.append(line[5:].lstrip())
+
+                if not data_lines:
+                    continue
+
+                # SSE allows multiple data: lines in one event. The SSE
+                # protocol joins them with a newline.
+                data = b"\n".join(data_lines).strip()
+
+                if data == b"[DONE]":
+                    saw_done = True
+                    return
+
+                try:
+                    event = json.loads(data)
+                except json.JSONDecodeError as err:
+                    raise OpenAITTSError(
+                        f"Invalid SSE event from TTS server: {data[:500]!r}"
+                    ) from err
+
+                event_type = event.get("type")
+
+                if event_type == "speech.audio.delta":
+                    audio_b64 = event.get("audio")
+
+                    if not audio_b64:
+                        _LOGGER.debug(
+                            "Received speech.audio.delta without audio data"
+                        )
+                        continue
+
+                    try:
+                        audio_bytes = base64.b64decode(
+                            audio_b64,
+                            validate=True,
+                        )
+                    except (ValueError, binascii.Error) as err:
+                        raise OpenAITTSError(
+                            "Invalid base64 audio in SSE response"
+                        ) from err
+
+                    if audio_bytes:
+                        yield audio_bytes
+
+                elif event_type == "speech.audio.done":
+                    # Do NOT terminate here.
+                    #
+                    # OpenAI-style SSE streams can subsequently send
+                    # `data: [DONE]`, which is the actual stream terminator.
+                    _LOGGER.debug(
+                        "Received speech.audio.done; waiting for [DONE]"
+                    )
+                    continue
+
+                elif event_type in {
+                    "error",
+                    "speech.error",
+                    "response.error",
+                }:
+                    error = event.get("error", event)
+
+                    raise OpenAITTSError(
+                        f"TTS streaming API error: {error}"
+                    )
+
+                else:
+                    # Unknown events are deliberately ignored. This keeps
+                    # the integration forward-compatible with additional
+                    # OpenAI streaming event types.
+                    _LOGGER.debug(
+                        "Ignoring SSE event type: %s",
+                        event_type,
+                    )
+
+        # If the HTTP connection closes without [DONE], the stream was
+        # incomplete. Do not silently report successful completion.
+        if not saw_done:
+            raise OpenAITTSError(
+                "TTS SSE stream ended before receiving data: [DONE]"
+            )
 
     def get_tts(
         self,
@@ -306,6 +454,13 @@ class OpenAITTSEngine:
         Error responses are classified BEFORE any chunk is yielded,
         so a failed request can never leak partial bytes into the HA
         TTS cache (see issue #64).
+        
+        ##NEW##
+        The backend is requested with ``stream_format=sse``. HTTP transport
+        chunks are not treated as audio boundaries; the SSE stream is parsed
+        until ``data: [DONE]``. Each ``speech.audio.delta`` event is base64
+        decoded and yielded as raw audio bytes to Home Assistant.
+        
         """
         headers, payload = self._builder.build(
             text=text,
@@ -315,6 +470,7 @@ class OpenAITTSEngine:
             model=model,
             instructions=instructions,
             extra_payload=extra_payload,
+            stream=True,
         )
         _LOGGER.debug(
             "Streaming TTS API request: model=%s, voice=%s, speed=%s, format=%s",
@@ -334,7 +490,6 @@ class OpenAITTSEngine:
             session = aiohttp.ClientSession()
             owns_session = True
 
-        chunk_size = 4096 if response_format == "opus" else 8192
         max_retries = 1
 
         try:
@@ -347,47 +502,29 @@ class OpenAITTSEngine:
                     response.headers.get("Content-Type", ""),
                 )
 
-                chunks_received = 0
-                total_bytes = 0
-                initial_buffer: list[bytes] = []
-                initial_buffer_size = 0
+                audio_chunks_received = 0
+                total_audio_bytes = 0
 
                 try:
-                    async for chunk in response.content.iter_chunked(chunk_size):
-                        if not chunk:
+                    async for audio_chunk in self._iter_sse_audio(response):
+                        if not audio_chunk:
                             continue
-                        chunks_received += 1
-                        total_bytes += len(chunk)
-
-                        if initial_buffer_size < INITIAL_BUFFER_BYTES:
-                            initial_buffer.append(chunk)
-                            initial_buffer_size += len(chunk)
-                            if initial_buffer_size >= INITIAL_BUFFER_BYTES:
-                                yield b"".join(initial_buffer)
-                                initial_buffer = []
-                        else:
-                            if chunks_received % 50 == 0:
-                                _LOGGER.debug(
-                                    "Streaming progress: %d chunks, %d bytes",
-                                    chunks_received, total_bytes,
-                                )
-                            yield chunk
-
-                    # Flush any leftover initial buffer for very short clips
-                    # whose total size never reached INITIAL_BUFFER_BYTES.
-                    if initial_buffer:
-                        yield b"".join(initial_buffer)
+                        audio_chunks_received += 1
+                        total_audio_bytes += len(audio_chunk)
+                        yield audio_chunk
 
                 except asyncio.CancelledError:
                     _LOGGER.warning(
-                        "Streaming cancelled after %d chunks (%d bytes)",
-                        chunks_received, total_bytes,
+                        "Streaming cancelled after %d audio chunks (%d bytes)",
+                        audio_chunks_received,
+                        total_audio_bytes,
                     )
                     raise
-
+                    
                 _LOGGER.debug(
-                    "Finished streaming: %d chunks, %d total bytes",
-                    chunks_received, total_bytes,
+                    "Finished streaming: %d audio chunks, %d total audio bytes",
+                    audio_chunks_received,
+                    total_audio_bytes,
                 )
             finally:
                 # Always release the response - covers cancellation and
