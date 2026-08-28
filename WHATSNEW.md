@@ -1,3 +1,10 @@
+## v3.9b2
+
+### Fixes
+
+- **Two announcements in quick succession no longer leave a speaker quiet**. The second one could take the volume the first had lowered to as the speaker's real level, because the speaker had not yet reported the level it was put back to.
+- **Announcements no longer stall for a minute when several profiles are configured**. Measured clip lengths were being thrown away at startup, one profile discarding another's, so a message whose audio Home Assistant already had cached was left with no length to work from and the volume stayed down while nothing answered.
+
 ## v3.9b1
 
 ### New
