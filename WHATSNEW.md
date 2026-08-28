@@ -26,9 +26,9 @@
 - **ffmpeg comes from the path configured for Home Assistant** rather than being assumed to be on the search path.
 - **Generating speech no longer blocks Home Assistant** while the clip length is measured.
 - **History no longer stores the voice catalogue** with every state change.
-- **Speakers that support neither pause nor stop are left playing.** Asking anyway logged an error and left a stray resume afterwards.
-- **The volume comes back even when the speaker reports a stale level.** A speaker whose volume updates never reached Home Assistant kept the announcement volume for good.
-- **An announcement no longer plays twice on speakers without an announcement feature.** The clip replaced what was playing and the resume replayed the clip; the original stream is restored instead.
+- **Speakers that support neither pause nor stop are left playing**. Asking anyway logged an error and left a stray resume afterwards.
+- **The volume comes back even when the speaker reports a stale level**. A speaker whose volume updates never reached Home Assistant kept the announcement volume for good.
+- **An announcement no longer plays twice on speakers without an announcement feature**. The clip replaced what was playing and the resume replayed the clip; the original stream is restored instead.
 
 ## v3.8.1b4
 
@@ -46,20 +46,3 @@
 - **Custom voice text survives reconfigure**. When the endpoint isn't OpenAI, the voice field is a free-text input. Reconfigure no longer drops a saved custom value back to a default; it keeps whatever the user typed.
 - **Friendlier error messages**. Provider rejections aren't labelled "OpenAI API error" when you're using a different backend. Auth, quota, rate-limit and server errors carry a one-line hint pointing at the likely fix, and HTTP 4xx errors include the upstream's actual error body so problems like wrong model id or unsupported field are visible directly in the logs.
 - **Chime + TTS playback works on every target**. The chime+TTS concat now goes through a single re-encode pass (`filter_complex` with `aresample` + `aformat` + optional `loudnorm` + concat → libmp3lame). Both inputs are normalised to 24 kHz mono before being glued together, so the output is a single consistent bitstream that decodes cleanly on Cast, Sonos, Music Assistant, AirPlay (Apple TV / HomePod) and anything else Home Assistant can target. User-supplied chimes at any sample rate, channel layout or codec are handled by the same filter graph.
-
-## v3.8
-
-### Highlights
-
-- **2-step config flow** for TTS agent profiles. Pick the model first, then voice and audio options on a follow-up step. The voice picker is filtered by the chosen model so incompatible combinations are rejected up front.
-- **Audio format selector** per profile (`mp3`, `opus`, `aac`, `flac`, `wav`, `pcm`). The selected format is requested from OpenAI (or any compatible custom backend) and delivered end-to-end without a forced mp3 round-trip. PCM uses explicit raw-stream flags so headerless input is handled correctly.
-- **Format-aware ffmpeg pipeline**. Chime mixing and loudness normalization stay in the requested format end to end.
-- **Expanded voice catalog**: `marin`, `cedar`, `ballad`, `verse` (gpt-4o-mini-tts only), with model compatibility validation in the service handler so misuse surfaces a clear error instead of an opaque API 400.
-- **Volume-restore overhold fix** for blocking TTS targets (Music Assistant, Sonos). The post-audio idle is bounded by the small buffer instead of stretching to the full clip duration.
-- **Cached audio reliability**. Stale failure markers stop blocking cached audio playback after a recovered API error, and they're actively cleared once playback succeeds again.
-- **Account name** field on the parent entry to distinguish multiple accounts in the integrations list.
-- **Auto-release CI**: pushing a `v*` tag now creates a GitHub release with `WHATSNEW.md` as the description and a downloadable `openai_tts.zip` asset.
-
-### Other fixes and refinements
-
-Faster, more stable volume control; tighter restore timing; HA URL extension respects the chosen format; full translation parity for `en` / `cs` / `de` / `el`; clearer field descriptions in service and config flow.
