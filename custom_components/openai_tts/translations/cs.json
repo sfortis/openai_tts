@@ -173,5 +173,80 @@
       "title": "TTS hlas byl smazán u poskytovatele",
       "description": "Hlas `{voice}` používaný TTS agentem `{profile}` již u poskytovatele neexistuje. Otevřete dialog Reconfigure tohoto agenta a vyberte aktuální hlas."
     }
+  },
+  "selector": {
+    "voice": {
+      "options": {
+        "alloy": "Alloy (neutrální)",
+        "ash": "Ash (klidný)",
+        "ballad": "Ballad (teplý), pouze gpt-4o-mini-tts",
+        "cedar": "Cedar (doporučený), pouze gpt-4o-mini-tts",
+        "coral": "Coral (přátelský)",
+        "echo": "Echo (hladký)",
+        "fable": "Fable (výrazný)",
+        "marin": "Marin (doporučený), pouze gpt-4o-mini-tts",
+        "nova": "Nova (energický)",
+        "onyx": "Onyx (autoritativní)",
+        "sage": "Sage (promyšlený)",
+        "shimmer": "Shimmer (jemný)",
+        "verse": "Verse (všestranný), pouze gpt-4o-mini-tts"
+      }
+    }
+  },
+  "services": {
+    "say": {
+      "name": "OpenAI TTS Přehrát řeč",
+      "description": "Použije OpenAI TTS engine k vyslovení zprávy, s volitelným zvukem signálu, normalizací a ovládáním hlasitosti.",
+      "fields": {
+        "tts_entity": {
+          "name": "Entita TTS",
+          "description": "Entita TTS, která bude mluvit."
+        },
+        "message": {
+          "name": "Zpráva",
+          "description": "Text k vyslovení."
+        },
+        "voice": {
+          "name": "Hlas",
+          "description": "Hlas použitý místo toho nastaveného v profile. Hlasy označené jako pouze gpt-4o-mini-tts jsou modely tts-1 a tts-1-hd odmítnuty. Pro custom backend lze zadat libovolný název."
+        },
+        "speed": {
+          "name": "Rychlost",
+          "description": "Rychlost řeči, od 0.25 do 4.0, kde 1.0 je normální."
+        },
+        "instructions": {
+          "name": "Pokyny",
+          "description": "Styl řeči pro model gpt-4o-mini-tts, například \"mluv jako pirát\". Custom backends jej mohou ignorovat."
+        },
+        "extra_payload": {
+          "name": "Další payload",
+          "description": "Doplňkový JSON sloučený do požadavku na API, pro custom backends přijímající další parametry."
+        },
+        "language": {
+          "name": "Jazyk",
+          "description": "Kód jazyka pro řeč."
+        },
+        "chime": {
+          "name": "Přehrát zvuk signálu",
+          "description": "Před zprávou přehraje zvuk signálu. Pokud není uvedeno, použije se nastavení profile. Vypíná streaming, protože zvuk signálu musí být nejprve spojen se zvukem."
+        },
+        "chime_sound": {
+          "name": "Zvuk signálu",
+          "description": "Název souboru se zvukem signálu. Vypíná streaming, jako výše."
+        },
+        "normalize_audio": {
+          "name": "Normalizovat zvuk",
+          "description": "Použije normalizaci hlasitosti. Pokud není uvedeno, použije se nastavení profile. Vypíná streaming, jako výše."
+        },
+        "volume": {
+          "name": "Hlasitost",
+          "description": "Hlasitost reproduktoru pouze pro toto hlášení, od 0.0 do 1.0. Předchozí hlasitost je poté obnovena."
+        },
+        "announce": {
+          "name": "Režim hlášení",
+          "description": "Zapnuto, což je výchozí stav, nechává rozhodnutí na každém reproduktoru: cíle, které nabízejí funkci hlášení, spolu se Sonos a Music Assistant, použijí vlastní vrstvu hlášení, takže se hudba na zařízení ztiší a poté pokračuje, zatímco cíle bez této funkce jsou před zprávou pozastaveny a poté obnoveny. Vypnuto znamená odeslat a dál se nestarat, a reproduktor se zachová jako u jakéhokoli jiného příchozího přehrávání."
+        }
+      }
+    }
   }
 }

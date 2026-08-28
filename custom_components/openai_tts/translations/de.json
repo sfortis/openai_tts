@@ -173,5 +173,80 @@
       "title": "TTS-Stimme wurde beim Anbieter gelöscht",
       "description": "Die Stimme `{voice}` des TTS-Agenten `{profile}` existiert beim Anbieter nicht mehr. Öffnen Sie den Reconfigure-Dialog des Agenten und wählen Sie eine aktuelle Stimme."
     }
+  },
+  "selector": {
+    "voice": {
+      "options": {
+        "alloy": "Alloy (neutral)",
+        "ash": "Ash (ruhig)",
+        "ballad": "Ballad (warm), nur gpt-4o-mini-tts",
+        "cedar": "Cedar (empfohlen), nur gpt-4o-mini-tts",
+        "coral": "Coral (freundlich)",
+        "echo": "Echo (weich)",
+        "fable": "Fable (ausdrucksstark)",
+        "marin": "Marin (empfohlen), nur gpt-4o-mini-tts",
+        "nova": "Nova (energisch)",
+        "onyx": "Onyx (bestimmt)",
+        "sage": "Sage (nachdenklich)",
+        "shimmer": "Shimmer (sanft)",
+        "verse": "Verse (vielseitig), nur gpt-4o-mini-tts"
+      }
+    }
+  },
+  "services": {
+    "say": {
+      "name": "OpenAI TTS Sprachausgabe",
+      "description": "Verwendet die OpenAI TTS Engine, um eine Nachricht zu sprechen, mit optionalem Signalton, Normalisierung und Lautstärkeregelung.",
+      "fields": {
+        "tts_entity": {
+          "name": "TTS-Entität",
+          "description": "Die TTS-Entität, die sprechen soll."
+        },
+        "message": {
+          "name": "Nachricht",
+          "description": "Der zu sprechende Text."
+        },
+        "voice": {
+          "name": "Stimme",
+          "description": "Stimme, die anstelle der im profile konfigurierten verwendet wird. Stimmen, die als nur gpt-4o-mini-tts gekennzeichnet sind, werden von tts-1 und tts-1-hd abgelehnt. Für ein custom backend kann ein beliebiger Name eingegeben werden."
+        },
+        "speed": {
+          "name": "Geschwindigkeit",
+          "description": "Sprechgeschwindigkeit, von 0.25 bis 4.0, wobei 1.0 normal ist."
+        },
+        "instructions": {
+          "name": "Anweisungen",
+          "description": "Sprechstil für das model gpt-4o-mini-tts, zum Beispiel \"sprich wie ein Pirat\". Custom backends ignorieren dies möglicherweise."
+        },
+        "extra_payload": {
+          "name": "Zusätzliches payload",
+          "description": "Zusätzliches JSON, das mit der API-Anfrage zusammengeführt wird, für custom backends mit weiteren Parametern."
+        },
+        "language": {
+          "name": "Sprache",
+          "description": "Sprachcode für die Sprachausgabe."
+        },
+        "chime": {
+          "name": "Signalton abspielen",
+          "description": "Spielt vor der Nachricht einen Signalton ab. Ohne Angabe gilt die Einstellung des profile. Schaltet streaming aus, weil der Signalton zuerst mit dem Audio verbunden werden muss."
+        },
+        "chime_sound": {
+          "name": "Signalton-Sound",
+          "description": "Dateiname des abzuspielenden Signaltons. Schaltet streaming aus, wie oben."
+        },
+        "normalize_audio": {
+          "name": "Audio normalisieren",
+          "description": "Wendet Lautheitsnormalisierung an. Ohne Angabe gilt die Einstellung des profile. Schaltet streaming aus, wie oben."
+        },
+        "volume": {
+          "name": "Lautstärke",
+          "description": "Lautstärke des Lautsprechers nur für diese Durchsage, von 0.0 bis 1.0. Die vorherige Lautstärke wird danach wiederhergestellt."
+        },
+        "announce": {
+          "name": "Durchsagemodus",
+          "description": "Ein, die Voreinstellung, überlässt die Entscheidung dem jeweiligen Lautsprecher: Ziele, die die Durchsagefunktion anbieten, sowie Sonos und Music Assistant, nutzen ihre eigene Durchsageebene, sodass die Musik auf dem Gerät leiser wird und danach weiterläuft, während Ziele ohne diese Funktion vor der Nachricht pausiert und danach fortgesetzt werden. Aus bedeutet abschicken ohne Rückmeldung, und der Lautsprecher verhält sich wie bei jeder anderen eingehenden Wiedergabe."
+        }
+      }
+    }
   }
 }
