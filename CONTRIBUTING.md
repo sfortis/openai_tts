@@ -10,12 +10,21 @@ Before opening an issue:
 3. Include the integration version (from HACS or manifest.json)
 4. Provide relevant logs from Home Assistant
 
+## Before you start
+
+For anything larger than a small fix, open an issue or a discussion
+first and describe what you want to change. Two recent pull requests
+solved real problems in a shape that could not be merged, and a short
+conversation beforehand would have saved their authors the rework. If
+you are unsure how something should look, ask; a half-formed idea is
+welcome.
+
 ## Development Setup
 
 1. Fork and clone the repository
-2. Create a feature branch from `beta`:
+2. Create a feature branch from `dev`:
    ```bash
-   git checkout beta
+   git checkout dev
    git checkout -b feature/your-feature-name
    ```
 3. Copy files to your HA test instance:
@@ -38,16 +47,25 @@ Before opening an issue:
 
 ## Pull Request Process
 
-1. Target the `beta` branch (not `main`)
+1. Target the `dev` branch, not `main`
 2. Ensure HACS and Hassfest checks pass
 3. Update translations if adding new strings
 4. Describe your changes clearly
 5. One feature/fix per PR
 
+If your change is provider-specific, say which backend you tested it
+against and what it does differently. This integration talks to a dozen
+OpenAI-compatible servers that disagree with each other, so a change
+that helps one can break another; naming yours lets it be made
+conditional rather than global.
+
 ## Branch Strategy
 
-- `beta` - Development branch, PRs target here
-- `main` - Stable releases only, merged from beta after testing
+- `dev` - Development branch, pull requests target here
+- `main` - Stable releases only, merged from `dev` after beta testing
+
+The `beta` branch is no longer used. If you have an older pull request
+against it, rebasing onto `dev` is enough.
 
 ## Translations
 

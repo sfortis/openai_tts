@@ -118,6 +118,16 @@ The integration works with any OpenAI-compatible TTS endpoint. When the URL is n
 - Use the **audio format** selector to negotiate around backends that reject mp3 (for example `pocket-tts` returning PCM).
 - The **extra payload** field forwards backend-specific JSON parameters with the request.
 
+## Contributing
+
+Bug reports, backend reports and pull requests are all welcome. Pull
+requests target the `dev` branch, and for anything larger than a small
+fix it is worth opening an issue first so the shape can be agreed before
+you write it. [CONTRIBUTING.md](CONTRIBUTING.md) has the details.
+
+If you use a backend that behaves differently from the others, saying so
+in an issue is useful on its own, even without a patch.
+
 ## Notes
 
 > *For OpenAI, an API key with available balance is required.* Pricing: <https://platform.openai.com/docs/pricing>
