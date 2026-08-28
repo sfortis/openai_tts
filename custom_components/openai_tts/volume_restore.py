@@ -228,6 +228,13 @@ SPEAKER_READY_TIMEOUT_S = 5.0
 # wait a little longer for the level itself, because a level we never
 # read is a level we cannot put back.
 VOLUME_ATTRIBUTE_TIMEOUT_S = 3.0
+
+# How long the gate holder waits for a speaker to report the level it was
+# just restored to, before handing the speaker to the announcement queued
+# behind it. Short, because it runs after the audio has finished and only
+# guards the handover: a device that has not caught up by then is better
+# released late than held.
+VOLUME_SETTLE_TIMEOUT_S = 2.0
 NOT_READY_STATES = frozenset({STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN})
 
 
@@ -324,6 +331,46 @@ async def _wait_for_volume_level(
                     )
         if asyncio.get_running_loop().time() >= deadline:
             return None
+        await asyncio.sleep(poll_interval_s)
+
+
+async def _wait_for_reported_volume(
+    hass: HomeAssistant,
+    entity_id: str,
+    expected: float,
+    *,
+    timeout_s: float = VOLUME_SETTLE_TIMEOUT_S,
+    poll_interval_s: float = 0.1,
+) -> bool:
+    """Wait until the speaker reports ``expected``, or give up.
+
+    Setting a volume tells Home Assistant to dispatch the command; the
+    entity keeps reporting the old level until the device answers. An
+    announcement released from the gate at that moment reads the level
+    the previous one had lowered to and adopts it as the original, which
+    leaves the speaker quiet for good. Waiting here for the value to
+    appear is what makes the handover honest.
+
+    Returns whether the level actually arrived, so the caller can say so
+    rather than assume it.
+    """
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    while True:
+        state = hass.states.get(entity_id)
+        if state is None or state.state in (STATE_UNAVAILABLE, STATE_UNKNOWN):
+            # Nothing will be reported while the entity is gone, and a
+            # Cast target routinely disappears for a while once its
+            # session ends. Do not burn the timeout on it.
+            return False
+        raw = state.attributes.get(ATTR_MEDIA_VOLUME_LEVEL)
+        if raw is not None:
+            try:
+                if abs(float(raw) - expected) < 0.01:
+                    return True
+            except (TypeError, ValueError):
+                return False
+        if asyncio.get_running_loop().time() >= deadline:
+            return False
         await asyncio.sleep(poll_interval_s)
 
 
@@ -1011,6 +1058,42 @@ class _VolumeRestorer:
                 await asyncio.sleep(0.4)
         await self._resume_paused_media()
         self._stop_unintended_playback()
+
+    async def await_volume_settled(
+        self, timeout_s: float = VOLUME_SETTLE_TIMEOUT_S
+    ) -> None:
+        """Wait for the levels this announcement restored to be reported.
+
+        Only the targets whose volume was actually changed are waited
+        on, and only until they report the level they were put back to.
+        The caller uses this to hold the speaker gate a moment longer,
+        so the next announcement snapshots a real level.
+        """
+        pending = [
+            (eid, self._original_volumes[eid])
+            for eid in self._volume_changed
+            if eid in self._original_volumes
+        ]
+        if not pending:
+            return
+        results = await asyncio.gather(
+            *(
+                _wait_for_reported_volume(
+                    self.hass, eid, level, timeout_s=timeout_s
+                )
+                for eid, level in pending
+            ),
+            return_exceptions=True,
+        )
+        late = [
+            eid for (eid, _), ok in zip(pending, results) if ok is not True
+        ]
+        if late:
+            _LOGGER.debug(
+                "await_volume_settled: %s had not reported the restored "
+                "level within %.1fs; releasing anyway",
+                ", ".join(late), timeout_s,
+            )
 
     async def _restore_one(self, entity_id: str, original_volume: float) -> bool:
         """Put one speaker back to the level it had before the announcement.
@@ -1739,7 +1822,13 @@ async def announce(
         finally:
             # Last, and after the unwind on purpose: the announcement
             # waiting behind this one must find the speaker back at its
-            # own volume, not at the level this one set.
+            # own volume, not at the level this one set. Dispatching the
+            # restore is not enough for that, because the entity goes on
+            # reporting the old level until the device answers, so wait
+            # for the value to actually appear before handing over.
+            if restorer is not None:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await asyncio.shield(restorer.await_volume_settled())
             _release_speaker_gate(gated_players)
 
 
