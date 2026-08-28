@@ -26,6 +26,9 @@
 - **ffmpeg comes from the path configured for Home Assistant** rather than being assumed to be on the search path.
 - **Generating speech no longer blocks Home Assistant** while the clip length is measured.
 - **History no longer stores the voice catalogue** with every state change.
+- **Speakers that support neither pause nor stop are left playing.** Asking anyway logged an error and left a stray resume afterwards.
+- **The volume comes back even when the speaker reports a stale level.** A speaker whose volume updates never reached Home Assistant kept the announcement volume for good.
+- **An announcement no longer plays twice on speakers without an announcement feature.** The clip replaced what was playing and the resume replayed the clip; the original stream is restored instead.
 
 ## v3.8.1b4
 
