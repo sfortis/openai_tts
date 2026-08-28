@@ -312,7 +312,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         self._attr_name = "OpenAI TTS"
 
     def _legacy_store_key(self) -> str:
-        """Reproduce the storage key this entity used before 3.8.2.
+        """Reproduce the storage key this entity used before 3.9b1.
 
         The per-entity store was keyed on the entity id this class
         computed, which the two changes above alter for names that were
