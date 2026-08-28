@@ -36,7 +36,16 @@ from .const import DOMAIN, MESSAGE_DURATIONS_KEY
 _LOGGER = logging.getLogger(__name__)
 
 DEFAULT_MAX_LOCAL_ENTRIES = 100
-DEFAULT_MAX_SHARED_ENTRIES = 50
+
+# Counted per owning entity, not across the whole dictionary. The shared
+# dictionary is where every lookup actually reads, while each entity
+# persists up to ``DEFAULT_MAX_LOCAL_ENTRIES`` of its own. A global limit
+# smaller than that made the two disagree: five profiles restoring 248
+# durations between them left 50 in the dictionary and silently dropped
+# the rest, so a message whose audio Home Assistant still had cached
+# found no duration and the caller waited the full sixty seconds with the
+# volume down. Matching the local limit keeps everything an entity
+# persisted readable.
 
 # Sentinel value indicating the last TTS attempt for this message
 # failed. Keeps the value space simple: the only thing the cache ever
@@ -98,7 +107,7 @@ class MessageDurationCache:
         hass: HomeAssistant,
         entity_id: str,
         max_local_entries: int = DEFAULT_MAX_LOCAL_ENTRIES,
-        max_shared_entries: int = DEFAULT_MAX_SHARED_ENTRIES,
+        max_shared_entries: int = DEFAULT_MAX_LOCAL_ENTRIES,
     ) -> None:
         self._hass = hass
         self._entity_id = entity_id
@@ -211,11 +220,18 @@ class MessageDurationCache:
             "timestamp": asyncio.get_running_loop().time(),
             "entity_id": self._entity_id,
         }
-        if len(shared) > self._max_shared:
-            sorted_keys = sorted(
-                shared.keys(), key=lambda k: shared[k].get("timestamp", 0)
-            )
-            for key in sorted_keys[: -self._max_shared]:
+        # Evict only among this entity's own entries. Trimming the whole
+        # dictionary let one profile throw away another's measurements,
+        # which is how a restart discarded most of what had been
+        # persisted: every profile restored into the same dictionary and
+        # the last one to finish evicted the rest.
+        mine = [
+            key for key, entry in shared.items()
+            if entry.get("entity_id") == self._entity_id
+        ]
+        if len(mine) > self._max_shared:
+            mine.sort(key=lambda k: shared[k].get("timestamp", 0))
+            for key in mine[: -self._max_shared]:
                 del shared[key]
 
     def _ensure_shared_dict(self) -> dict:
