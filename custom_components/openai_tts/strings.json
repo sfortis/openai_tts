@@ -93,7 +93,7 @@
         },
         "voice_audio": {
           "title": "Add TTS Agent (Step 2 of 2)",
-          "description": "Voice and audio options for model {model}. Note: enabling chime or normalize_audio disables streaming (post-processing required).",
+          "description": "Voice and audio options for model {model}. Note: enabling chime disables streaming, because the chime has to be attached to the finished audio.",
           "data": {
             "voice": "Voice",
             "speed": "Speed (0.25 to 4.0)",
@@ -119,7 +119,7 @@
         },
         "reconfigure_voice": {
           "title": "Update TTS Agent (Step 2 of 2)",
-          "description": "Voice and audio options for model {model}. Note: enabling chime or normalize_audio disables streaming (post-processing required).",
+          "description": "Voice and audio options for model {model}. Note: enabling chime disables streaming, because the chime has to be attached to the finished audio.",
           "data": {
             "voice": "Voice",
             "speed": "Speed (0.25 to 4.0)",
@@ -140,8 +140,8 @@
       "error": {
         "already_exists": "A profile with this name already exists",
         "pipelining_needs_no_chime": "Turn the chime off to stream. A chime has to be attached to the finished audio, so speech cannot start before the reply is complete.",
-        "pipelining_needs_no_normalize": "Turn loudness normalisation off to stream. Normalisation measures the whole clip, so speech cannot start before the reply is complete.",
         "pipelining_needs_joinable_format": "Pick MP3, WAV or PCM to stream. The other formats state their total length up front, so only the first sentence would be played.",
+        "pipelining_needs_filterable_format": "Pick MP3 or PCM to stream with normalisation on. WAV states its total length in the header, which cannot be known while the audio is still being produced, so it is corrected as a finished file instead.",
         "unknown_error": "Something went wrong. Check the Home Assistant log for the details.",
         "profile_name_required": "Give the TTS agent a name."
       },
@@ -217,15 +217,15 @@
         },
         "normalize_audio": {
           "name": "Normalise audio",
-          "description": "Applies loudness normalisation. Falls back to the profile setting when omitted. Turns streaming off, as above."
+          "description": "Applies loudness normalisation, which is on by default. Falls back to the profile setting when omitted. Works with streaming."
         },
         "volume": {
           "name": "Volume",
-          "description": "Speaker volume for this announcement only, from 0.0 to 1.0. The previous volume is restored afterwards."
+          "description": "Volume for this announcement only, 0.0 to 1.0, restored afterwards. Setting it pauses the music instead of ducking it."
         },
         "announce": {
           "name": "Announcement mode",
-          "description": "On, the default, lets each speaker decide: targets that advertise the announcement feature, along with Sonos and Music Assistant, use their own announcement layer, so the music ducks and resumes on the device, while targets without it are paused before the message and resumed after. Off is fire and forget, and the speaker does whatever it normally does with incoming media."
+          "description": "On by default: speakers that support announcements duck the music, the rest are paused and resumed. Off sends the audio as ordinary media."
         }
       }
     }

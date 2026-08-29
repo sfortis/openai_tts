@@ -68,7 +68,7 @@
         },
         "voice_audio": {
           "title": "TTS agent hinzufügen (Schritt 2 von 2)",
-          "description": "Stimme und Audiooptionen für model {model}. Hinweis: das Aktivieren von chime oder normalize_audio deaktiviert das Streaming (Post-Processing erforderlich).",
+          "description": "Stimme und Audiooptionen für model {model}. Hinweis: das Aktivieren von Signalton deaktiviert das Streaming, weil der Signalton mit dem fertigen Audio verbunden werden muss.",
           "data": {
             "voice": "Stimme",
             "speed": "Geschwindigkeit (0,25 bis 4,0)",
@@ -94,7 +94,7 @@
         },
         "reconfigure_voice": {
           "title": "TTS agent aktualisieren (Schritt 2 von 2)",
-          "description": "Stimme und Audiooptionen für model {model}. Hinweis: das Aktivieren von chime oder normalize_audio deaktiviert das Streaming (Post-Processing erforderlich).",
+          "description": "Stimme und Audiooptionen für model {model}. Hinweis: das Aktivieren von Signalton deaktiviert das Streaming, weil der Signalton mit dem fertigen Audio verbunden werden muss.",
           "data": {
             "voice": "Stimme",
             "speed": "Geschwindigkeit (0,25 bis 4,0)",
@@ -115,8 +115,8 @@
       "error": {
         "already_exists": "Ein Profil mit diesem Namen existiert bereits",
         "pipelining_needs_no_chime": "Schalten Sie den Signalton aus, um zu streamen. Der Signalton wird an das fertige Audio angefügt, daher kann die Sprache nicht vor Fertigstellung der Antwort beginnen.",
-        "pipelining_needs_no_normalize": "Schalten Sie die Lautstärkenormalisierung aus, um zu streamen. Die Normalisierung vermisst den gesamten Clip, daher kann die Sprache nicht vorher beginnen.",
         "pipelining_needs_joinable_format": "Wählen Sie MP3, WAV oder PCM, um zu streamen. Die anderen Formate geben ihre Gesamtlänge vorab an, sodass nur der erste Satz abgespielt würde.",
+        "pipelining_needs_filterable_format": "Wählen Sie MP3 oder PCM, um mit aktiver Normalisierung zu streamen. WAV gibt seine Gesamtlänge im Header an, die noch nicht bekannt sein kann, solange das Audio erzeugt wird, daher wird es stattdessen als fertige Datei korrigiert.",
         "unknown_error": "Etwas ist schiefgelaufen. Details finden Sie im Home Assistant Protokoll.",
         "profile_name_required": "Geben Sie dem TTS-Agenten einen Namen."
       },
@@ -236,15 +236,15 @@
         },
         "normalize_audio": {
           "name": "Audio normalisieren",
-          "description": "Wendet Lautheitsnormalisierung an. Ohne Angabe gilt die Einstellung des profile. Schaltet streaming aus, wie oben."
+          "description": "Wendet Lautheitsnormalisierung an, die standardmäßig aktiv ist. Ohne Angabe gilt die Einstellung des profile. Funktioniert zusammen mit streaming."
         },
         "volume": {
           "name": "Lautstärke",
-          "description": "Lautstärke des Lautsprechers nur für diese Durchsage, von 0.0 bis 1.0. Die vorherige Lautstärke wird danach wiederhergestellt."
+          "description": "Lautstärke nur für diese Durchsage, 0.0 bis 1.0, danach wiederhergestellt. Wird sie gesetzt, wird die Musik pausiert statt leiser gestellt."
         },
         "announce": {
           "name": "Durchsagemodus",
-          "description": "Ein, die Voreinstellung, überlässt die Entscheidung dem jeweiligen Lautsprecher: Ziele, die die Durchsagefunktion anbieten, sowie Sonos und Music Assistant, nutzen ihre eigene Durchsageebene, sodass die Musik auf dem Gerät leiser wird und danach weiterläuft, während Ziele ohne diese Funktion vor der Nachricht pausiert und danach fortgesetzt werden. Aus bedeutet abschicken ohne Rückmeldung, und der Lautsprecher verhält sich wie bei jeder anderen eingehenden Wiedergabe."
+          "description": "Standardmäßig ein: Lautsprecher mit Durchsagefunktion stellen die Musik leiser, die übrigen werden pausiert und danach fortgesetzt. Aus sendet das Audio als normale Wiedergabe."
         }
       }
     }

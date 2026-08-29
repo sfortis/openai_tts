@@ -68,7 +68,7 @@
         },
         "voice_audio": {
           "title": "Přidat TTS agent (krok 2 z 2)",
-          "description": "Hlas a možnosti zvuku pro model {model}. Poznámka: povolení chime nebo normalize_audio vypne streaming (vyžaduje post-processing).",
+          "description": "Hlas a možnosti zvuku pro model {model}. Poznámka: povolení zvuku signálu vypne streaming, protože zvuk signálu musí být spojen s hotovým zvukem.",
           "data": {
             "voice": "Hlas",
             "speed": "Rychlost (0,25 až 4,0)",
@@ -94,7 +94,7 @@
         },
         "reconfigure_voice": {
           "title": "Aktualizovat TTS agent (krok 2 z 2)",
-          "description": "Hlas a možnosti zvuku pro model {model}. Poznámka: povolení chime nebo normalize_audio vypne streaming (vyžaduje post-processing).",
+          "description": "Hlas a možnosti zvuku pro model {model}. Poznámka: povolení zvuku signálu vypne streaming, protože zvuk signálu musí být spojen s hotovým zvukem.",
           "data": {
             "voice": "Hlas",
             "speed": "Rychlost (0,25 až 4,0)",
@@ -115,8 +115,8 @@
       "error": {
         "already_exists": "Profil s tímto názvem již existuje",
         "pipelining_needs_no_chime": "Pro streamování vypněte zvukový signál. Signál se připojuje k hotovému zvuku, takže řeč nemůže začít před dokončením odpovědi.",
-        "pipelining_needs_no_normalize": "Pro streamování vypněte normalizaci hlasitosti. Normalizace měří celou nahrávku, takže řeč nemůže začít před dokončením odpovědi.",
         "pipelining_needs_joinable_format": "Pro streamování zvolte MP3, WAV nebo PCM. Ostatní formáty uvádějí celkovou délku předem, takže by se přehrála jen první věta.",
+        "pipelining_needs_filterable_format": "Pro streamování se zapnutou normalizací zvolte MP3 nebo PCM. WAV uvádí celkovou délku v hlavičce, kterou nelze znát, dokud se zvuk teprve vytváří, takže se místo toho koriguje jako hotový soubor.",
         "unknown_error": "Něco se pokazilo. Podrobnosti najdete v protokolu Home Assistant.",
         "profile_name_required": "Zadejte název TTS agenta."
       },
@@ -236,15 +236,15 @@
         },
         "normalize_audio": {
           "name": "Normalizovat zvuk",
-          "description": "Použije normalizaci hlasitosti. Pokud není uvedeno, použije se nastavení profile. Vypíná streaming, jako výše."
+          "description": "Použije normalizaci hlasitosti, která je ve výchozím nastavení zapnutá. Pokud není uvedeno, použije se nastavení profile. Funguje společně se streamingem."
         },
         "volume": {
           "name": "Hlasitost",
-          "description": "Hlasitost reproduktoru pouze pro toto hlášení, od 0.0 do 1.0. Předchozí hlasitost je poté obnovena."
+          "description": "Hlasitost pouze pro toto hlášení, 0.0 až 1.0, poté obnovena. Pokud ji nastavíte, hudba se pozastaví místo ztlumení."
         },
         "announce": {
           "name": "Režim hlášení",
-          "description": "Zapnuto, což je výchozí stav, nechává rozhodnutí na každém reproduktoru: cíle, které nabízejí funkci hlášení, spolu se Sonos a Music Assistant, použijí vlastní vrstvu hlášení, takže se hudba na zařízení ztiší a poté pokračuje, zatímco cíle bez této funkce jsou před zprávou pozastaveny a poté obnoveny. Vypnuto znamená odeslat a dál se nestarat, a reproduktor se zachová jako u jakéhokoli jiného příchozího přehrávání."
+          "description": "Ve výchozím nastavení zapnuto: reproduktory s podporou hlášení hudbu ztlumí, ostatní se pozastaví a poté pokračují. Vypnuto odešle zvuk jako běžné přehrávání."
         }
       }
     }
