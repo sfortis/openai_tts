@@ -22,6 +22,35 @@ from .const import AUDIO_FORMAT_ENCODER
 
 _LOGGER = logging.getLogger(__name__)
 
+# Loudness correction for speech.
+#
+# Two filters in series, and both are needed for different reasons.
+#
+# ``dynaudnorm`` replaced ``loudnorm=I=-16:TP=-1:LRA=5``. Measured
+# against three engines on 2026-08-29, loudnorm made a short OpenAI clip
+# six decibels QUIETER than it started (-24.25 LUFS in, -30.20 out): it
+# is designed to run in two passes, and given only one it has not
+# converged before a two second announcement ends. dynaudnorm corrects
+# continuously instead, so it needs neither a second pass nor a complete
+# file, which is also what lets normalisation run on a stream.
+#
+# ``acompressor`` in front of it answers a separate complaint: the clip
+# was loud enough on average while individual words were still swallowed.
+# Levelling the average does not lift a quiet syllable, and a fast
+# compressor does. Measured on a thirteen second announcement, the
+# quiet passages rose from -17.4 to -14.8 LUFS with the loudness range
+# unchanged at 1.9 LU.
+#
+# The peak target is 0.85 rather than the filter's own 0.95 default.
+# At 0.95 two of the three engines came out above -0.5 dBTP once the mp3
+# encoder had added its overshoot, which clips. At 0.85 the worst of the
+# three sits at -1.29 dBTP with the quiet passages only half a decibel
+# lower, which is a good trade.
+LOUDNESS_FILTER = (
+    "acompressor=threshold=-28dB:ratio=4:attack=3:release=60,"
+    "dynaudnorm=p=0.85:m=20:f=40:g=5"
+)
+
 
 def resolve_ffmpeg_paths(hass: HomeAssistant) -> Tuple[str, str]:
     """Return the ffmpeg and ffprobe commands to use.
@@ -274,7 +303,7 @@ def build_ffmpeg_command(
     # Both streams are forced to a common PCM layout before concat so
     # the operation is codec-agnostic.
     if len(input_paths) > 1:
-        norm_step = ",loudnorm=I=-16:TP=-1:LRA=5" if normalize_audio else ""
+        norm_step = f",{LOUDNESS_FILTER}" if normalize_audio else ""
         common = "aresample=24000:async=1,aformat=sample_fmts=fltp:channel_layouts=mono"
         cmd.extend([
             "-filter_complex",
@@ -286,7 +315,7 @@ def build_ffmpeg_command(
             "-map", "[out]",
         ])
     elif normalize_audio:
-        cmd.extend(["-af", "loudnorm=I=-16:TP=-1:LRA=5"])
+        cmd.extend(["-af", LOUDNESS_FILTER])
 
     # Output side: pick codec and muxer for the requested format. Always a
     # real re-encode. There used to be a ``-c copy`` remux path here for a
