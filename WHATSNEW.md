@@ -1,3 +1,17 @@
+## v3.9b3
+
+### New
+
+- **Loudness correction now works while speech is streaming.** It used to force the whole clip to be produced first, so the two could not be combined. Only a chime still requires the finished audio.
+- **Loudness correction is on by default.** A profile that already has the setting saved keeps whatever it says; only profiles created before the setting existed change behaviour.
+
+### Fixes
+
+- **Loudness correction no longer makes short announcements quieter.** The filter needed a second pass it never got, so on a short clip it could finish below where it started. Measured on one provider, a two second announcement came out six decibels quieter than the original.
+- **Quiet words in an announcement are lifted instead of being left to fade.** Levelling the average of a clip does nothing for a syllable swallowed inside it.
+- **Speech starts about a second sooner** when correction is on, because the audio is no longer inspected before it is processed.
+- **A profile that cannot stream and correct at once now says so when saved**, rather than accepting the combination and quietly falling back at playback time.
+
 ## v3.9b2
 
 ### Fixes
