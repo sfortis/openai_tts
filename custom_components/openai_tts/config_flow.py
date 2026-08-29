@@ -24,6 +24,7 @@ from homeassistant.helpers.selector import selector, TemplateSelector
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import callback
 
+from .loudness import can_normalize_stream
 from .streaming import PIPELINEABLE_FORMATS
 from .voice_listing import async_fetch_voice_options
 from .const import (
@@ -76,25 +77,30 @@ class _PipeliningConflict(Exception):
 def _pipelining_conflict(user_input: dict[str, Any]) -> str | None:
     """Return an error key when pipelining is on but cannot take effect.
 
-    Three settings silently defeat streaming, and until now the only
-    trace was a debug log line. That is how someone ends up believing
-    streaming is broken when their own profile turned it off: chime and
-    normalisation both need the finished audio before anything can be
-    sent, and the excluded formats cannot have two responses joined.
+    Settings that silently defeat streaming are refused here rather
+    than ignored at playback time, because quietly dropping something
+    the user asked for tells them nothing and leaves them believing
+    streaming is broken.
 
-    Refusing the save is deliberate. The alternative, quietly ignoring
-    chime because pipelining is on, would drop a setting the user
-    explicitly asked for without telling them.
+    A chime needs the finished audio before anything can be sent. The
+    excluded formats cannot have two responses joined. And loudness
+    correction, which streams in general, needs a format it can read
+    from a pipe, which rules out the one container whose header states
+    a length before the length is known.
     """
     if not user_input.get("stream_pipelining"):
         return None
     if user_input.get("chime"):
         return "pipelining_needs_no_chime"
-    if user_input.get("normalize_audio"):
-        return "pipelining_needs_no_normalize"
     audio_format = user_input.get("audio_format")
     if audio_format and audio_format not in PIPELINEABLE_FORMATS:
         return "pipelining_needs_joinable_format"
+    if (
+        user_input.get("normalize_audio")
+        and audio_format
+        and not can_normalize_stream(audio_format)
+    ):
+        return "pipelining_needs_filterable_format"
     return None
 
 
@@ -884,7 +890,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             vol.Optional("chime_sound", default="threetone.mp3"): selector({
                 "select": {"options": chime_opts}
             }),
-            vol.Optional("normalize_audio", default=False): selector({"boolean": {}}),
+            vol.Optional("normalize_audio", default=True): selector({"boolean": {}}),
         })
         # ``extra_payload`` is the value-add of self-hosted / custom
         # presets (e.g. Chatterbox ``seed``, TTS Web UI speaker_id).
@@ -1164,7 +1170,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             vol.Optional("chime_sound", default=existing_data.get(CONF_CHIME_SOUND, "threetone.mp3")): selector({
                 "select": {"options": chime_opts}
             }),
-            vol.Optional("normalize_audio", default=existing_data.get(CONF_NORMALIZE_AUDIO, False)): selector({"boolean": {}}),
+            vol.Optional("normalize_audio", default=existing_data.get(CONF_NORMALIZE_AUDIO, True)): selector({"boolean": {}}),
         })
         if preset.get("supports_extra_payload", False):
             step2_fields[
@@ -1366,7 +1372,7 @@ class OpenAITTSOptionsFlow(OptionsFlow):
 
             schema_dict[vol.Optional(
                 "normalize_audio",  # Use strings directly
-                default=self._config_entry.options.get(CONF_NORMALIZE_AUDIO, self._config_entry.data.get(CONF_NORMALIZE_AUDIO, False)),
+                default=self._config_entry.options.get(CONF_NORMALIZE_AUDIO, self._config_entry.data.get(CONF_NORMALIZE_AUDIO, True)),
             )] = selector({"boolean": {}})
 
             # Instructions fields moved above after voice

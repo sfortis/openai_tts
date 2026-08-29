@@ -174,7 +174,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             # Get options that should move to subentry
             chime = config_entry.options.get(CONF_CHIME_ENABLE, config_entry.data.get(CONF_CHIME_ENABLE, False))
             chime_sound = config_entry.options.get(CONF_CHIME_SOUND, config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3"))
-            normalize = config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, False))
+            normalize = config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, True))
             instructions = config_entry.options.get(CONF_INSTRUCTIONS, config_entry.data.get(CONF_INSTRUCTIONS))
 
             # Create parent entry data (only API config)

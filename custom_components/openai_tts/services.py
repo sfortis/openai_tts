@@ -297,7 +297,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                             entity_defaults = {
                                 "chime": subentry.data.get(CONF_CHIME_ENABLE, False),
                                 "chime_sound": subentry.data.get(CONF_CHIME_SOUND, "threetone.mp3"),
-                                "normalize_audio": subentry.data.get(CONF_NORMALIZE_AUDIO, False),
+                                "normalize_audio": subentry.data.get(CONF_NORMALIZE_AUDIO, True),
                             }
                             _LOGGER.debug("Found entity defaults from subentry: %s", entity_defaults)
                             break
@@ -308,7 +308,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 entity_defaults = {
                     "chime": config_entry.options.get(CONF_CHIME_ENABLE, config_entry.data.get(CONF_CHIME_ENABLE, False)),
                     "chime_sound": config_entry.options.get(CONF_CHIME_SOUND, config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3")),
-                    "normalize_audio": config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, False)),
+                    "normalize_audio": config_entry.options.get(CONF_NORMALIZE_AUDIO, config_entry.data.get(CONF_NORMALIZE_AUDIO, True)),
                 }
                 _LOGGER.debug("Found entity defaults from config entry: %s", entity_defaults)
 

@@ -71,6 +71,7 @@ from .exceptions import (
     OpenAIVoiceDeletedError,
 )
 from .openaitts_engine import OpenAITTSEngine
+from .loudness import can_normalize_stream, normalize_stream
 from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
 from .repairs import create_voice_deleted_issue
 from .voice_listing import CATALOGUE_TTL_S, async_fetch_voice_options
@@ -78,6 +79,7 @@ from .utils import (
     is_valid_audio,
     measure_audio_duration,
     process_audio,
+    LOUDNESS_FILTER,
     resolve_ffmpeg_paths,
 )
 
@@ -625,7 +627,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_SPEED: self._get_config_value(CONF_SPEED) or self._engine._speed,
             CONF_CHIME_ENABLE: self._get_config_value(CONF_CHIME_ENABLE, False),
             CONF_CHIME_SOUND: self._get_config_value(CONF_CHIME_SOUND, "threetone.mp3"),
-            CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, False),
+            CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, True),
             CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
             CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
             CONF_AUDIO_FORMAT: audio_format,
@@ -689,8 +691,45 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         )
         return int(duration_seconds * 1000)
 
-    def _can_use_streaming(self, text: str, options: dict) -> bool:
-        if options.get(CONF_CHIME_ENABLE) or options.get(CONF_NORMALIZE_AUDIO):
+    def _will_filter_stream(
+        self, resolved: dict[str, Any], audio_format: str
+    ) -> bool:
+        """Whether a loudness filter goes in front of this stream."""
+        return bool(
+            resolved.get("normalize_audio")
+            and can_normalize_stream(audio_format)
+        )
+
+    def _apply_loudness(
+        self,
+        source: AsyncGenerator[bytes, None],
+        resolved: dict[str, Any],
+        audio_format: str,
+    ) -> AsyncGenerator[bytes, None]:
+        """Put the loudness filter in front of a stream when asked to.
+
+        Returns ``source`` untouched when nothing is to be done, so
+        callers can wrap unconditionally.
+        """
+        if not self._will_filter_stream(resolved, audio_format):
+            return source
+        ffmpeg_bin, _ = resolve_ffmpeg_paths(self.hass)
+        return normalize_stream(
+            source, audio_format, ffmpeg_bin, LOUDNESS_FILTER
+        )
+
+    def _can_use_streaming(
+        self, text: str, options: dict, audio_format: str
+    ) -> bool:
+        # A chime has to be attached to finished audio, so it still
+        # forces the atomic path. Normalisation no longer does: the
+        # filter corrects continuously and runs on a pipe, for the
+        # formats ``can_normalize_stream`` accepts.
+        if options.get(CONF_CHIME_ENABLE):
+            return False
+        if options.get(CONF_NORMALIZE_AUDIO) and not can_normalize_stream(
+            audio_format
+        ):
             return False
         # Some backends (older self-hosted servers, pocket-tts variants
         # that don't speak chunked HTTP cleanly) deliver corrupted audio
@@ -726,8 +765,16 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 "falling back to a single request", audio_format,
             )
             return False
-        if options.get(CONF_CHIME_ENABLE) or options.get(CONF_NORMALIZE_AUDIO):
-            # Both need the finished audio, so there is nothing to gain.
+        if options.get(CONF_CHIME_ENABLE):
+            # A chime is attached to finished audio, so there is nothing
+            # to gain from producing that audio in pieces.
+            return False
+        if options.get(CONF_NORMALIZE_AUDIO) and not can_normalize_stream(
+            audio_format
+        ):
+            # Normalisation itself streams, but not in every container.
+            # A format it cannot filter on a pipe belongs on the atomic
+            # path, where the filter runs against a finished file.
             return False
         parent = self._parent_entry or self._config
         provider_key = (
@@ -787,8 +834,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         stats: dict[str, Any] = {}
         collected: list[bytes] = []
         try:
-            async for chunk in pipelined_audio_stream(
+            source = pipelined_audio_stream(
                 message_gen, _synthesize, audio_format, _spawn, stats
+            )
+            async for chunk in self._apply_loudness(
+                source, resolved, audio_format
             ):
                 collected.append(chunk)
                 yield chunk
@@ -831,7 +881,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         normalize_audio = (
             opts[CONF_NORMALIZE_AUDIO]
             if CONF_NORMALIZE_AUDIO in opts
-            else (self._get_config_value(CONF_NORMALIZE_AUDIO) or False)
+            else self._get_config_value(CONF_NORMALIZE_AUDIO, True)
         )
 
         return {
@@ -1188,7 +1238,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # current stream is still in flight and may succeed.
         self._clear_failure_sentinel(full_text, resolved)
         audio_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
-        can_stream = self._can_use_streaming(full_text, options)
+        can_stream = self._can_use_streaming(full_text, options, audio_format)
 
         _LOGGER.info(
             "Streaming TTS - voice: %s, model: %s, speed: %s, format: %s, "
@@ -1200,7 +1250,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         if can_stream:
             return TTSAudioResponse(
                 extension=audio_format,
-                data_gen=self._stream_with_validation(
+                data_gen=self._validated_stream(
                     full_text, resolved, audio_format
                 ),
             )
@@ -1271,6 +1321,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         text: str,
         resolved: dict[str, Any],
         audio_format: str,
+        record_success: bool = True,
     ) -> AsyncGenerator[bytes, None]:
         """Stream chunks as they arrive; validate the first chunk before yielding.
 
@@ -1324,28 +1375,84 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             self._record_failure(text, err, resolved)
             raise
 
-        # Stream completed cleanly: store the measured duration so
-        # volume_restore can use it on this AND on subsequent HA-cache
-        # hits, and tell the health tracker the API is responsive.
-        if all_chunks:
-            complete_audio = b"".join(all_chunks)
-            duration_ms = await self._get_audio_duration(complete_audio)
-            self._last_duration_ms = duration_ms
-            r = resolved or {}
-            self._duration_cache.store_duration(
-                text, duration_ms,
-                voice=r.get("voice"), model=r.get("model"), speed=r.get("speed"),
-                instructions=r.get("instructions"),
-                chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
-                extra_payload=r.get("extra_payload"),
+        if record_success and all_chunks:
+            await self._record_stream_success(
+                text, b"".join(all_chunks), resolved
             )
-            self.async_write_ha_state()
-            await self._save_persisted_state()
-            if self._health_tracker is not None:
-                self._health_tracker.record_success()
-            _LOGGER.info(
-                "Streaming complete: %d bytes, %d ms",
-                len(complete_audio), duration_ms,
+
+    async def _record_stream_success(
+        self, text: str, audio: bytes, resolved: dict[str, Any]
+    ) -> None:
+        """Record a finished stream: duration, state, health.
+
+        Takes the audio as an argument rather than reading it from the
+        producing generator, because when a filter sits in front of the
+        consumer the bytes that play are the filtered ones, and those
+        are what the duration has to describe.
+        """
+        duration_ms = await self._get_audio_duration(audio)
+        self._last_duration_ms = duration_ms
+        r = resolved or {}
+        self._duration_cache.store_duration(
+            text, duration_ms,
+            voice=r.get("voice"), model=r.get("model"), speed=r.get("speed"),
+            instructions=r.get("instructions"),
+            chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
+            extra_payload=r.get("extra_payload"),
+        )
+        self.async_write_ha_state()
+        await self._save_persisted_state()
+        if self._health_tracker is not None:
+            self._health_tracker.record_success()
+        _LOGGER.info(
+            "Streaming complete: %d bytes, %d ms", len(audio), duration_ms,
+        )
+
+    async def _validated_stream(
+        self, text: str, resolved: dict[str, Any], audio_format: str
+    ) -> AsyncGenerator[bytes, None]:
+        """Validated provider stream, loudness-corrected when asked.
+
+        When nothing is put in front of the provider, the inner
+        generator does its own bookkeeping and this adds no buffering.
+
+        When the loudness filter is in front, the bookkeeping moves out
+        here, because the inner generator finishes as soon as the last
+        provider byte is read, which is before ffmpeg has produced,
+        or failed to produce, anything. Recording success there marked
+        the call successful for a clip that never arrived, and left no
+        failure sentinel for ``volume_restore`` to find.
+        """
+        if not self._will_filter_stream(resolved, audio_format):
+            # Nothing goes in front, so let the inner generator keep its
+            # own bookkeeping and avoid a second copy of the audio.
+            async for chunk in self._stream_with_validation(
+                text, resolved, audio_format
+            ):
+                yield chunk
+            return
+
+        filtered = self._apply_loudness(
+            self._stream_with_validation(
+                text, resolved, audio_format, record_success=False
+            ),
+            resolved,
+            audio_format,
+        )
+        collected: list[bytes] = []
+        try:
+            async for chunk in filtered:
+                collected.append(chunk)
+                yield chunk
+        except Exception as err:
+            # The filter failed after the provider had already finished,
+            # so nothing else has written the sentinel volume_restore
+            # needs in order to stop waiting for audio.
+            self._record_failure(text, err, resolved)
+            raise
+        if collected:
+            await self._record_stream_success(
+                text, b"".join(collected), resolved
             )
 
     @staticmethod
