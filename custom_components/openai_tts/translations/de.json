@@ -115,8 +115,7 @@
       "error": {
         "already_exists": "Ein Profil mit diesem Namen existiert bereits",
         "pipelining_needs_no_chime": "Schalten Sie den Signalton aus, um zu streamen. Der Signalton wird an das fertige Audio angefügt, daher kann die Sprache nicht vor Fertigstellung der Antwort beginnen.",
-        "pipelining_needs_joinable_format": "Wählen Sie MP3, WAV oder PCM, um zu streamen. Die anderen Formate geben ihre Gesamtlänge vorab an, sodass nur der erste Satz abgespielt würde.",
-        "pipelining_needs_filterable_format": "Wählen Sie MP3 oder PCM, um mit aktiver Normalisierung zu streamen. WAV gibt seine Gesamtlänge im Header an, die noch nicht bekannt sein kann, solange das Audio erzeugt wird, daher wird es stattdessen als fertige Datei korrigiert.",
+        "pipelining_needs_joinable_format": "Wählen Sie MP3 oder PCM, um zu streamen. Die anderen Formate lassen sich entweder nicht aneinanderfügen, oder sie geben im Header eine Gesamtlänge an, die erst am Ende des Audios bekannt ist.",
         "unknown_error": "Etwas ist schiefgelaufen. Details finden Sie im Home Assistant Protokoll.",
         "profile_name_required": "Geben Sie dem TTS-Agenten einen Namen."
       },

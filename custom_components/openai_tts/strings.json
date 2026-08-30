@@ -140,8 +140,7 @@
       "error": {
         "already_exists": "A profile with this name already exists",
         "pipelining_needs_no_chime": "Turn the chime off to stream. A chime has to be attached to the finished audio, so speech cannot start before the reply is complete.",
-        "pipelining_needs_joinable_format": "Pick MP3, WAV or PCM to stream. The other formats state their total length up front, so only the first sentence would be played.",
-        "pipelining_needs_filterable_format": "Pick MP3 or PCM to stream with normalisation on. WAV states its total length in the header, which cannot be known while the audio is still being produced, so it is corrected as a finished file instead.",
+        "pipelining_needs_joinable_format": "Pick MP3 or PCM to stream. The other formats either cannot be joined end to end, or state a total length in their header that is not known until the audio ends.",
         "unknown_error": "Something went wrong. Check the Home Assistant log for the details.",
         "profile_name_required": "Give the TTS agent a name."
       },

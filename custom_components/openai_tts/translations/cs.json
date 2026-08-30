@@ -115,8 +115,7 @@
       "error": {
         "already_exists": "Profil s tímto názvem již existuje",
         "pipelining_needs_no_chime": "Pro streamování vypněte zvukový signál. Signál se připojuje k hotovému zvuku, takže řeč nemůže začít před dokončením odpovědi.",
-        "pipelining_needs_joinable_format": "Pro streamování zvolte MP3, WAV nebo PCM. Ostatní formáty uvádějí celkovou délku předem, takže by se přehrála jen první věta.",
-        "pipelining_needs_filterable_format": "Pro streamování se zapnutou normalizací zvolte MP3 nebo PCM. WAV uvádí celkovou délku v hlavičce, kterou nelze znát, dokud se zvuk teprve vytváří, takže se místo toho koriguje jako hotový soubor.",
+        "pipelining_needs_joinable_format": "Pro streamování zvolte MP3 nebo PCM. Ostatní formáty buď nelze spojovat za sebe, nebo v hlavičce uvádějí celkovou délku, která není známa, dokud zvuk neskončí.",
         "unknown_error": "Něco se pokazilo. Podrobnosti najdete v protokolu Home Assistant.",
         "profile_name_required": "Zadejte název TTS agenta."
       },

@@ -24,7 +24,6 @@ from homeassistant.helpers.selector import selector, TemplateSelector
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import callback
 
-from .loudness import can_normalize_stream
 from .streaming import PIPELINEABLE_FORMATS
 from .voice_listing import async_fetch_voice_options
 from .const import (
@@ -95,12 +94,6 @@ def _pipelining_conflict(user_input: dict[str, Any]) -> str | None:
     audio_format = user_input.get("audio_format")
     if audio_format and audio_format not in PIPELINEABLE_FORMATS:
         return "pipelining_needs_joinable_format"
-    if (
-        user_input.get("normalize_audio")
-        and audio_format
-        and not can_normalize_stream(audio_format)
-    ):
-        return "pipelining_needs_filterable_format"
     return None
 
 
