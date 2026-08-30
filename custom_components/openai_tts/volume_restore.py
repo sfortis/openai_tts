@@ -235,6 +235,39 @@ VOLUME_ATTRIBUTE_TIMEOUT_S = 3.0
 # guards the handover: a device that has not caught up by then is better
 # released late than held.
 VOLUME_SETTLE_TIMEOUT_S = 2.0
+
+# How long to wait for a paused speaker to actually fall silent before
+# the announcement volume is applied. A cap, not a delay: the wait ends
+# the moment the speaker reports it has stopped, which on most targets
+# is well inside this.
+PAUSE_SILENCE_TIMEOUT_S = 2.5
+
+# How much of the synthesis window to spend before sending the
+# announcement volume. Not an estimate of how long a speaker takes to
+# fall silent, which nothing here can see: it is how much of a gap that
+# exists anyway to make use of, since the audio does not reach the
+# speaker until it has been generated and fetched. It costs no time,
+# because the wait runs alongside a synthesis that was happening
+# regardless.
+#
+# The value is a compromise between two audible failures, and both were
+# heard on a real speaker while choosing it. Applying the volume too
+# early lets the paused music be heard rising to announcement level
+# before it stops. Applying it too late lets the announcement itself
+# begin at the old level, which is worse, because that level is one the
+# caller explicitly asked not to use.
+#
+# Measured on the speaker this was tuned against: the paused music was
+# clearly audible rising at 0.29 s after the pause and down to a
+# fraction of a second at 1.5 s, while our engine had its first audio
+# ready 0.65 s in on a short message. 0.8 s sits between those, giving
+# the music roughly three times the margin it had before while staying
+# ahead of the first audio.
+#
+# What has NOT been measured is when sound actually leaves the speaker,
+# as opposed to when audio exists here; the device still has to fetch
+# it. So this remains partly an estimate, and is written down as one.
+VOLUME_APPLY_WINDOW_S = 0.8
 NOT_READY_STATES = frozenset({STATE_OFF, STATE_UNAVAILABLE, STATE_UNKNOWN})
 
 
@@ -332,6 +365,41 @@ async def _wait_for_volume_level(
         if asyncio.get_running_loop().time() >= deadline:
             return None
         await asyncio.sleep(poll_interval_s)
+
+
+async def _wait_until_silent(
+    hass: HomeAssistant,
+    entity_ids: Set[str],
+    *,
+    timeout_s: float = PAUSE_SILENCE_TIMEOUT_S,
+    poll_interval_s: float = 0.05,
+) -> List[str]:
+    """Wait for paused speakers to stop producing sound.
+
+    ``media_pause`` returns as soon as Home Assistant has dispatched it,
+    while the speaker keeps playing for anywhere between a few
+    milliseconds and a couple of seconds. Raising the volume inside that
+    window is audible: the music swells to announcement level and only
+    then cuts out, which is what a fixed settle of 0.4 s still let
+    through on a speaker slower than that.
+
+    Returns the ids that never reported silence, so the caller can say
+    so rather than assume it worked.
+    """
+    if not entity_ids:
+        return []
+    deadline = asyncio.get_running_loop().time() + timeout_s
+    pending = set(entity_ids)
+    while pending:
+        for entity_id in list(pending):
+            state = hass.states.get(entity_id)
+            # A speaker that has gone away is not making a sound either.
+            if state is None or state.state != STATE_PLAYING:
+                pending.discard(entity_id)
+        if not pending or asyncio.get_running_loop().time() >= deadline:
+            break
+        await asyncio.sleep(poll_interval_s)
+    return sorted(pending)
 
 
 async def _wait_for_reported_volume(
@@ -578,6 +646,11 @@ class _VolumeRestorer:
         # Assistant still said 0.27 while the speaker itself was at
         # 0.30, so the comparison decided there was nothing to undo.
         self._volume_changed: Set[str] = set()
+        # Announcement volume that has been decided but not yet sent,
+        # so it can be applied while the audio is being synthesised
+        # rather than while the paused music is still fading out. See
+        # ``apply_deferred_volume``.
+        self._deferred_volume: Optional[float] = None
 
     def _spawn(self, coro: Any, name: str) -> None:
         """Run ``coro`` in the background, tied to the config entry.
@@ -599,6 +672,7 @@ class _VolumeRestorer:
         pause_playback: bool,
         announce_mode: bool = True,
         force_manual: bool = False,
+        defer_volume: bool = False,
     ) -> None:
         """Turn devices on, snapshot volumes, optionally pause, set level.
 
@@ -898,20 +972,57 @@ class _VolumeRestorer:
                 len(pause_tasks),
             )
             await asyncio.gather(*pause_tasks, return_exceptions=True)
-            # Pause is async on most media platforms - the service call
-            # returns instantly but the device takes a few hundred ms
-            # to actually mute its output. Without this settle, the
-            # subsequent volume bump is audible as a brief loudness
-            # spike on the music that's still playing while pause
-            # propagates.
-            await asyncio.sleep(0.4)
-            _LOGGER.debug("prepare(): pause settle done (0.4s)")
+            # Pause is dispatched, not done: the speaker goes on playing
+            # for anywhere between a few milliseconds and a couple of
+            # seconds. Raising the volume inside that window makes the
+            # music swell to announcement level and only then cut out.
+            # Wait for silence rather than guessing at it, and say so
+            # when a speaker never reports it.
+            began = asyncio.get_running_loop().time()
+            still_playing = await _wait_until_silent(
+                self.hass,
+                set(self._paused_media) | set(self._stopped_media),
+            )
+            waited = asyncio.get_running_loop().time() - began
+            if still_playing:
+                _LOGGER.debug(
+                    "prepare(): %s had not reported silence after %.1fs; "
+                    "setting the announcement volume anyway",
+                    ", ".join(still_playing), waited,
+                )
+            else:
+                _LOGGER.debug(
+                    "prepare(): all paused targets silent after %.2fs", waited
+                )
         elif pause_playback:
             _LOGGER.debug(
                 "prepare(): pause_playback=True but no playing targets, skipping pause"
             )
 
-        if target_volume is not None:
+        if target_volume is not None and defer_volume and (
+            self._paused_media or self._stopped_media
+        ):
+            # Something was playing and has just been told to stop. It
+            # will go on being heard for as long as its buffer takes to
+            # drain, which nothing here can observe: three of the four
+            # platforms tested report nothing about their own output,
+            # and the fourth reports silence a quarter of a second
+            # before the sound ends. Raising the volume now is heard as
+            # the music swelling and only then stopping.
+            #
+            # So do not race the drain, sidestep it. The level only has
+            # to be right by the time the announcement reaches the
+            # speaker, and synthesising it takes on the order of two
+            # seconds. Handing the change to ``apply_deferred_volume``
+            # puts it inside that window, which costs nothing and needs
+            # no signal from the speaker.
+            self._deferred_volume = target_volume
+            _LOGGER.debug(
+                "prepare(): holding announcement volume %.2f until the "
+                "audio is being generated, so the paused music is not "
+                "heard rising", target_volume,
+            )
+        elif target_volume is not None:
             _LOGGER.debug(
                 "prepare(): about to set announcement volume %.2f "
                 "(playing-and-not-paused targets: %s)",
@@ -942,6 +1053,19 @@ class _VolumeRestorer:
                 len(cast_targets),
             )
             await asyncio.sleep(1.0)
+
+    async def apply_deferred_volume(self) -> None:
+        """Send the announcement volume held back by ``prepare``.
+
+        Meant to be awaited alongside the synthesis, not before it. Does
+        nothing when the volume was applied in ``prepare`` already, so
+        callers can call it unconditionally.
+        """
+        target = self._deferred_volume
+        if target is None:
+            return
+        self._deferred_volume = None
+        await self._set_announcement_volume(target)
 
     async def _set_announcement_volume(self, target: float) -> None:
         """Push every speaker to ``target`` (skip ones already there).
@@ -983,9 +1107,16 @@ class _VolumeRestorer:
                 tasks.append(set_media_player_volume(self.hass, entity_id, target))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
-            # Brief settle so the volume actually lands before tts.speak
-            # starts streaming chunks at the device.
-            await asyncio.sleep(0.3)
+            applied = {
+                eid: target
+                for eid in self._volume_changed
+            }
+            # The level has to be in place before the announcement is
+            # audible. Wait for the speaker to report it rather than
+            # allowing a fixed moment, which is either longer than the
+            # device needs or shorter, and was silently the latter on
+            # anything slow.
+            await self.await_volume_settled(expected=applied)
 
     async def restore_immediate(self, *, restore_volumes: bool = True) -> None:
         """Restore all speakers right now - failure path, no wait.
@@ -1002,11 +1133,11 @@ class _VolumeRestorer:
                 ),
                 return_exceptions=True,
             )
-            # Same settle as the happy-path restore: let the volume
-            # change reach the device before we unpause, so the music
-            # doesn't briefly come back at the announcement level.
+            # Same wait as the happy-path restore: the level has to be
+            # reported before the music comes back, or it comes back at
+            # the announcement volume.
             if self._paused_media or self._stopped_media:
-                await asyncio.sleep(0.4)
+                await self.await_volume_settled()
         await self._resume_paused_media()
         self._stop_unintended_playback()
 
@@ -1049,30 +1180,37 @@ class _VolumeRestorer:
                 ),
                 return_exceptions=True,
             )
-            # Volume changes are async on the device side too, so give
-            # the speaker a moment to settle on the original level
-            # before we unpause - otherwise the music would briefly
-            # come back at the announcement volume while the restore
-            # request is still propagating.
+            # Wait for the speaker to report the original level
+            # before unpausing. Guessing at how long that takes is
+            # what let the music come back at announcement volume
+            # on a device slower than the guess.
             if self._paused_media or self._stopped_media:
-                await asyncio.sleep(0.4)
+                await self.await_volume_settled()
         await self._resume_paused_media()
         self._stop_unintended_playback()
 
     async def await_volume_settled(
-        self, timeout_s: float = VOLUME_SETTLE_TIMEOUT_S
+        self,
+        timeout_s: float = VOLUME_SETTLE_TIMEOUT_S,
+        expected: Optional[Dict[str, float]] = None,
     ) -> None:
-        """Wait for the levels this announcement restored to be reported.
+        """Wait for a level this announcement set to be reported back.
 
-        Only the targets whose volume was actually changed are waited
-        on, and only until they report the level they were put back to.
-        The caller uses this to hold the speaker gate a moment longer,
-        so the next announcement snapshots a real level.
+        ``expected`` names the level to wait for per entity. It defaults
+        to the levels recorded before the announcement, which is what
+        the restore path wants. The announcement path has to pass its
+        own target instead: waiting for the original level right after
+        raising the volume can never succeed, and quietly spent the
+        whole timeout on every single announcement.
+
+        Only targets whose volume this announcement actually changed
+        are waited on.
         """
+        levels = self._original_volumes if expected is None else expected
         pending = [
-            (eid, self._original_volumes[eid])
+            (eid, levels[eid])
             for eid in self._volume_changed
-            if eid in self._original_volumes
+            if eid in levels
         ]
         if not pending:
             return
@@ -1686,14 +1824,51 @@ async def announce(
                 pause_playback=pause_for_manual,
                 announce_mode=announce_enabled,
                 force_manual=force_manual,
+                defer_volume=True,
             )
         if watcher is not None:
             watcher.start()
 
         try:
-            await _call_tts_speak(hass, tts_entity, message, language,
-                                  options, available_players,
-                                  tts_volume=tts_volume)
+            # Speak and the deferred volume run together on purpose. The
+            # level has to be right when the announcement reaches the
+            # speaker, not before the audio for it has been asked for,
+            # and the gap between the two is where the paused music
+            # finishes fading out. See ``apply_deferred_volume``.
+            speak_task = asyncio.create_task(
+                _call_tts_speak(hass, tts_entity, message, language,
+                                options, available_players,
+                                tts_volume=tts_volume),
+                name="openai_tts speak",
+            )
+            try:
+                if restorer is not None:
+                    # Wait for the synthesis, but not past the point
+                    # where the audio could start without the level
+                    # being right. Whichever comes first: a clip out of
+                    # cache lands here in milliseconds, a generated one
+                    # gives the paused music the whole window to fade.
+                    await asyncio.wait(
+                        {speak_task}, timeout=VOLUME_APPLY_WINDOW_S
+                    )
+                    await restorer.apply_deferred_volume()
+                await speak_task
+            finally:
+                # A failure on either side must not leave the other
+                # running unattended.
+                if not speak_task.done():
+                    speak_task.cancel()
+                    try:
+                        await speak_task
+                    except asyncio.CancelledError:
+                        pass
+                    except Exception:
+                        # Swallowing this silently would hide a real
+                        # speak failure behind whatever sent us here.
+                        _LOGGER.exception(
+                            "tts.speak failed while it was being "
+                            "cancelled"
+                        )
         except Exception as err:
             if restorer is not None:
                 await restorer.restore_immediate(restore_volumes=restore_enabled)
