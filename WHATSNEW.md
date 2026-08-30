@@ -1,3 +1,11 @@
+## v3.9b4
+
+- Add a per profile switch to stop sending the voice name, for backends that reject the field
+- Write a real length into wav and flac instead of the placeholder a streaming producer has to use, which strict players read as hours of audio
+- Wait for a speaker to report a volume instead of assuming the change landed
+- Set the announcement volume while the audio is generated, so paused music is not heard rising to it
+- Say which formats can actually stream, and drop a profile rule that could never fire
+
 ## v3.9b3
 
 - Apply loudness correction while speech is streaming
@@ -6,8 +14,6 @@
 - Lift quiet words instead of levelling only the average of a clip
 - Start speech about a second sooner when correction is on
 - Refuse a profile that cannot stream and correct at once, instead of falling back silently at playback time
-- Wait for a speaker to report a volume instead of assuming the change landed
-- Set the announcement volume while the audio is generated, so paused music is not heard rising to it
 
 ## v3.9b2
 
