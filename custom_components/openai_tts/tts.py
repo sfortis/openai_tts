@@ -72,7 +72,11 @@ from .exceptions import (
 )
 from .openaitts_engine import OpenAITTSEngine
 from .loudness import can_normalize_stream, normalize_stream
-from .streaming import PIPELINEABLE_FORMATS, pipelined_audio_stream
+from .streaming import (
+    PIPELINEABLE_FORMATS,
+    SELF_DESCRIBING_LENGTH_FORMATS,
+    pipelined_audio_stream,
+)
 from .repairs import create_voice_deleted_issue
 from .voice_listing import CATALOGUE_TTL_S, async_fetch_voice_options
 from .utils import (
@@ -731,6 +735,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             audio_format
         ):
             return False
+        if audio_format in SELF_DESCRIBING_LENGTH_FORMATS:
+            # The header would have to state a length that is not known
+            # until the audio ends. The atomic path can go back and
+            # correct it; a stream cannot.
+            return False
         # Some backends (older self-hosted servers, pocket-tts variants
         # that don't speak chunked HTTP cleanly) deliver corrupted audio
         # via the streaming path even when a single blocking read works.
@@ -944,22 +953,32 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     async def _maybe_post_process(
         self, audio_data: bytes, resolved: dict[str, Any]
     ) -> bytes:
-        """Apply chime + normalization when requested.
+        """Apply chime + normalization, and repair a declared length.
 
-        When chime/normalize are off, returns the engine bytes unchanged
-        regardless of format - the streaming path or HA's own
-        ``preferred_format`` ffmpeg layer handles delivery to the
-        media_player. Only chime/normalize need the heavy local
-        transcode, and that path keeps the profile's own format rather
-        than forcing mp3.
+        When there is nothing to apply the engine bytes are returned
+        unchanged, and delivery is left to the streaming path or to
+        Home Assistant's own ``preferred_format`` layer.
+
+        Formats that state a total length in a header are the exception.
+        A provider producing one as a stream cannot know that length, so
+        it writes a placeholder: wav writes 0xFFFFFFFF, flac writes zero
+        samples. Lenient decoders ignore the field, strict ones believe
+        it, and the same clip then reads as 1.1 seconds under ffmpeg and
+        as 89478 seconds under a decoder that honours the header. That
+        is the difference between an announcement that plays on Chrome
+        and one that does not on Safari or iOS (issue #68).
+
+        Here the whole clip is in hand, so ffmpeg can write the real
+        length. It costs a transcode, on the two formats nobody picks
+        for speed.
         """
         chime_enable = resolved["chime_enable"]
         normalize_audio = resolved["normalize_audio"]
-
-        if not (chime_enable or normalize_audio):
-            return audio_data
-
         requested_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
+        repair_length = requested_format in SELF_DESCRIBING_LENGTH_FORMATS
+
+        if not (chime_enable or normalize_audio or repair_length):
+            return audio_data
 
         chime_path = None
         if chime_enable and resolved["chime_sound"]:

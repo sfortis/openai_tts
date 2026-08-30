@@ -66,7 +66,30 @@ _LOGGER = logging.getLogger(__name__)
 # stop there, so a second response is silently ignored. ``aac`` loses
 # samples at the seam. Those three are excluded, and the caller falls
 # back to a single request for them.
-PIPELINEABLE_FORMATS: frozenset[str] = frozenset({"pcm", "wav", "mp3"})
+# Formats whose responses can be joined end to end, and whose header
+# does not have to state a total length. ``wav`` used to be here and was
+# removed: see ``SELF_DESCRIBING_LENGTH_FORMATS``.
+PIPELINEABLE_FORMATS: frozenset[str] = frozenset({"pcm", "mp3"})
+
+# Containers that state their total length in a header written before
+# any audio exists. Streaming one means writing a length nobody knows
+# yet, and both formats have a sentinel for that: wav writes
+# 0xFFFFFFFF, flac writes zero samples.
+#
+# Lenient decoders (ffmpeg, Chromium, Android) ignore the field and read
+# to the end of the stream. Strict ones honour it. Measured against a
+# clip of 54000 audio bytes served by this integration, ffmpeg reported
+# 1.13 seconds while Python's ``wave`` module, which honours the field
+# like AVFoundation does, reported 89478 seconds. That is the difference
+# between a working announcement on Chrome and a broken one on Safari or
+# iOS, which is what issue #68 describes.
+#
+# Nothing here can fix the header while streaming, because the length is
+# genuinely unknown until the last byte. So these formats do not stream:
+# they take the atomic path, where ffmpeg writes to a file, seeks back
+# and fills in the real length. Measured on the same clip, that path
+# produces a header stating exactly the bytes present.
+SELF_DESCRIBING_LENGTH_FORMATS: frozenset[str] = frozenset({"wav", "flac"})
 
 # How many sentences to put in each successive request.
 #
