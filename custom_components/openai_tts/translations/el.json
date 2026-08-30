@@ -78,11 +78,13 @@
             "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
             "audio_format": "Μορφή ήχου",
-            "stream_pipelining": "Streaming ανά πρόταση"
+            "stream_pipelining": "Streaming ανά πρόταση",
+            "send_voice": "Αποστολή του ονόματος φωνής"
           },
           "data_description": {
             "stream_pipelining": "Αρχίζει να μιλά μόλις είναι έτοιμη η πρώτη πρόταση, αντί να περιμένει να γραφτεί όλη η απάντηση. Επηρεάζει μόνο τον φωνητικό βοηθό και απαιτεί MP3, WAV ή PCM.",
-            "audio_format": "Το MP3 είναι η ασφαλής προεπιλογή. Αλλάξτε το μόνο αν το backend σας απαιτεί άλλη μορφή."
+            "audio_format": "Το MP3 είναι η ασφαλής προεπιλογή. Αλλάξτε το μόνο αν το backend σας απαιτεί άλλη μορφή.",
+            "send_voice": "Ενεργό από προεπιλογή. Απενεργοποιήστε το για backend που απορρίπτει το πεδίο φωνής, όπως το audio.cpp με Chatterbox ή VoxCPM2."
           }
         },
         "reconfigure": {
@@ -104,11 +106,13 @@
             "instructions": "Οδηγίες φωνής",
             "extra_payload": "Extra JSON payload (για custom TTS backends)",
             "audio_format": "Μορφή ήχου",
-            "stream_pipelining": "Streaming ανά πρόταση"
+            "stream_pipelining": "Streaming ανά πρόταση",
+            "send_voice": "Αποστολή του ονόματος φωνής"
           },
           "data_description": {
             "stream_pipelining": "Αρχίζει να μιλά μόλις είναι έτοιμη η πρώτη πρόταση, αντί να περιμένει να γραφτεί όλη η απάντηση. Επηρεάζει μόνο τον φωνητικό βοηθό και απαιτεί MP3, WAV ή PCM.",
-            "audio_format": "Το MP3 είναι η ασφαλής προεπιλογή. Αλλάξτε το μόνο αν το backend σας απαιτεί άλλη μορφή."
+            "audio_format": "Το MP3 είναι η ασφαλής προεπιλογή. Αλλάξτε το μόνο αν το backend σας απαιτεί άλλη μορφή.",
+            "send_voice": "Ενεργό από προεπιλογή. Απενεργοποιήστε το για backend που απορρίπτει το πεδίο φωνής, όπως το audio.cpp με Chatterbox ή VoxCPM2."
           }
         }
       },

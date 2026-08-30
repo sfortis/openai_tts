@@ -47,6 +47,7 @@ from .const import (
     CONF_INSTRUCTIONS,
     CONF_MODEL,
     CONF_NORMALIZE_AUDIO,
+    CONF_SEND_VOICE,
     CONF_PROFILE_NAME,
     CONF_STREAM_PIPELINING,
     CONF_PROVIDER,
@@ -54,6 +55,7 @@ from .const import (
     CONF_URL,
     CONF_VOICE,
     DEFAULT_AUDIO_FORMAT,
+    DEFAULT_SEND_VOICE,
     DOMAIN,
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
@@ -825,6 +827,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 speed=resolved["speed"],
                 instructions=resolved["instructions"],
                 extra_payload=resolved["extra_payload"],
+                send_voice=resolved["send_voice"],
             ):
                 if first:
                     # Same guard as the single-request path: a backend
@@ -916,6 +919,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 or self._get_config_value(CONF_CHIME_SOUND)
             ),
             "normalize_audio": normalize_audio,
+            "send_voice": (
+                opts[CONF_SEND_VOICE]
+                if CONF_SEND_VOICE in opts
+                else self._get_config_value(CONF_SEND_VOICE, DEFAULT_SEND_VOICE)
+            ),
             "audio_format": (
                 opts.get(CONF_AUDIO_FORMAT)
                 or self._get_config_value(CONF_AUDIO_FORMAT)
@@ -941,6 +949,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 model=resolved["model"],
                 instructions=resolved["instructions"],
                 extra_payload=resolved["extra_payload"],
+                send_voice=resolved["send_voice"],
                 response_format=resolved.get("audio_format", DEFAULT_AUDIO_FORMAT),
             )
         )
@@ -1360,6 +1369,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 speed=resolved["speed"],
                 instructions=resolved["instructions"],
                 extra_payload=resolved["extra_payload"],
+                send_voice=resolved["send_voice"],
             ):
                 all_chunks.append(chunk)
 

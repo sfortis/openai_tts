@@ -275,8 +275,14 @@ class _RequestBuilder:
         speed: Optional[float] = None,
         instructions: Optional[str] = None,
         extra_payload: Optional[str] = None,
+        send_voice: bool = True,
     ) -> tuple[dict[str, str], dict[str, object]]:
-        """Return (headers, payload) for an OpenAI TTS request."""
+        """Return (headers, payload) for an OpenAI TTS request.
+
+        ``send_voice`` false leaves the ``voice`` key out entirely, for
+        backends that reject it. This is the only place the payload is
+        built, so one check covers the streaming and blocking paths.
+        """
         headers: dict[str, str] = {
             "Content-Type": "application/json",
             "User-Agent": "HomeAssistant-OpenAI-TTS",
@@ -287,9 +293,13 @@ class _RequestBuilder:
         payload: dict[str, object] = {
             "model": model or self._default_model,
             "input": text,
-            "voice": voice or self._default_voice,
             "response_format": response_format,
         }
+        # Omitted rather than sent empty: a backend that refuses the key
+        # refuses a null value just the same. Same treatment, and for the
+        # same class of reason, as ``speed`` below.
+        if send_voice:
+            payload["voice"] = voice or self._default_voice
         # Only send ``speed`` when the user has actually changed it from
         # the API default of 1.0. Some compatible backends (Mistral
         # Voxtral) reject any unrecognised body field with HTTP 422
@@ -399,6 +409,7 @@ class OpenAITTSEngine:
         instructions: str | None = None,
         extra_payload: str | None = None,
         response_format: str = "mp3",
+        send_voice: bool = True,
     ) -> AudioResponse:
         """Blocking TTS request. Must be invoked via an executor.
 
@@ -423,6 +434,7 @@ class OpenAITTSEngine:
             model=model,
             instructions=instructions,
             extra_payload=extra_payload,
+            send_voice=send_voice,
         )
         _LOGGER.debug(
             "TTS API request: model=%s, voice=%s, speed=%s",
@@ -505,6 +517,7 @@ class OpenAITTSEngine:
         model: str | None = None,
         instructions: str | None = None,
         extra_payload: str | None = None,
+        send_voice: bool = True,
     ) -> AsyncGenerator[bytes, None]:
         """Stream TTS audio from the OpenAI API.
 
@@ -526,6 +539,7 @@ class OpenAITTSEngine:
             model=model,
             instructions=instructions,
             extra_payload=extra_payload,
+            send_voice=send_voice,
         )
         _LOGGER.debug(
             "Streaming TTS API request: model=%s, voice=%s, speed=%s, format=%s",

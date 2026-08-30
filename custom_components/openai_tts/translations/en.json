@@ -78,11 +78,13 @@
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format",
-            "stream_pipelining": "Sentence streaming"
+            "stream_pipelining": "Sentence streaming",
+            "send_voice": "Send the voice name"
           },
           "data_description": {
             "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3, WAV or PCM.",
-            "audio_format": "MP3 is the safe default. Change it only if your backend requires another format."
+            "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
+            "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2."
           }
         },
         "reconfigure": {
@@ -104,11 +106,13 @@
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format",
-            "stream_pipelining": "Sentence streaming"
+            "stream_pipelining": "Sentence streaming",
+            "send_voice": "Send the voice name"
           },
           "data_description": {
             "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3, WAV or PCM.",
-            "audio_format": "MP3 is the safe default. Change it only if your backend requires another format."
+            "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
+            "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2."
           }
         }
       },

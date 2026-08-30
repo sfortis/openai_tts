@@ -49,6 +49,7 @@ from .const import (
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_NORMALIZE_AUDIO,
+    CONF_SEND_VOICE,
     CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
     CONF_AUDIO_FORMAT,
@@ -764,6 +765,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
                     "audio_format": CONF_AUDIO_FORMAT,
+                    "send_voice": CONF_SEND_VOICE,
                     "stream_pipelining": CONF_STREAM_PIPELINING,
                 }
                 mapped_input: dict[str, Any] = {
@@ -893,6 +895,15 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             step2_fields[
                 vol.Optional("extra_payload", description={"suggested_value": ""})
             ] = TemplateSelector()
+        # The ``voice`` key itself. Every hosted provider expects it, so
+        # the toggle is only offered where it can be needed: audio.cpp
+        # serving Chatterbox or VoxCPM2 rejects the request when the key
+        # is present and rejects a null value too, leaving no way to
+        # suppress it (#71).
+        if not is_openai:
+            step2_fields[
+                vol.Optional("send_voice", default=True)
+            ] = selector({"boolean": {}})
         # ``audio_format`` is always surfaced. OpenAI handles all values
         # natively, so users can switch to wav/opus without breaking the
         # request. For custom backends (issue #61: pocket-tts) it's the
@@ -1013,6 +1024,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "instructions": CONF_INSTRUCTIONS,
                     "extra_payload": CONF_EXTRA_PAYLOAD,
                     "audio_format": CONF_AUDIO_FORMAT,
+                    "send_voice": CONF_SEND_VOICE,
                     "stream_pipelining": CONF_STREAM_PIPELINING,
                 }
                 mapped_input: dict[str, Any] = {CONF_MODEL: self._step1_model}
@@ -1174,6 +1186,18 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     },
                 )
             ] = TemplateSelector()
+        # The ``voice`` key itself. Every hosted provider expects it, so
+        # the toggle is only offered where it can be needed: audio.cpp
+        # serving Chatterbox or VoxCPM2 rejects the request when the key
+        # is present and rejects a null value too, leaving no way to
+        # suppress it (#71).
+        if not is_openai:
+            step2_fields[
+                vol.Optional(
+                    "send_voice",
+                    default=existing_data.get(CONF_SEND_VOICE, True),
+                )
+            ] = selector({"boolean": {}})
         # Always surface audio_format in reconfigure too (see create-flow note).
         # The dropdown is filtered to the preset's ``allowed_formats``
         # for the same reason as in the create flow. The saved value is

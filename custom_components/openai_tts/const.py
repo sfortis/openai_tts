@@ -19,6 +19,20 @@ DOMAIN = "openai_tts"
 CONF_MODEL = "model"
 CONF_VOICE = "voice"
 CONF_SPEED = "speed"
+
+# Whether the ``voice`` key is sent at all.
+#
+# Every OpenAI-compatible backend is expected to take a voice, but some
+# do not: audio.cpp serving Chatterbox or VoxCPM2 rejects the request
+# when the key is present, and rejects a null value too, so there was no
+# way to suppress it. ``extra_payload`` cannot help, since it merges
+# keys and cannot remove one.
+#
+# Per profile rather than per entry, because the same server can host
+# one model that wants a voice and another that refuses it, and profiles
+# are already per model here. Reported by @Arjenlodder in #71.
+CONF_SEND_VOICE = "send_voice"
+DEFAULT_SEND_VOICE = True
 CONF_PROVIDER = "provider"  # provider preset key, e.g. "openai", "mistral", "custom"
 DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 

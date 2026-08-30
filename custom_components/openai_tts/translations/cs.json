@@ -78,11 +78,13 @@
             "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Formát zvuku",
-            "stream_pipelining": "Streamování po větách"
+            "stream_pipelining": "Streamování po větách",
+            "send_voice": "Odesílat název hlasu"
           },
           "data_description": {
             "stream_pipelining": "Začne mluvit hned, jak je hotová první věta, místo čekání na dokončení celé odpovědi. Ovlivňuje pouze hlasového asistenta a vyžaduje MP3, WAV nebo PCM.",
-            "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát."
+            "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
+            "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2."
           }
         },
         "reconfigure": {
@@ -104,11 +106,13 @@
             "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Formát zvuku",
-            "stream_pipelining": "Streamování po větách"
+            "stream_pipelining": "Streamování po větách",
+            "send_voice": "Odesílat název hlasu"
           },
           "data_description": {
             "stream_pipelining": "Začne mluvit hned, jak je hotová první věta, místo čekání na dokončení celé odpovědi. Ovlivňuje pouze hlasového asistenta a vyžaduje MP3, WAV nebo PCM.",
-            "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát."
+            "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
+            "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2."
           }
         }
       },
