@@ -1,3 +1,8 @@
+## v3.9b5
+
+- Fix loudness correction turning itself off when a profile's own settings could not be read
+- Show the loudness correction setting on the entity, next to the other profile settings
+
 ## v3.9b4
 
 - Add a per profile switch to stop sending the voice name, for backends that reject the field
