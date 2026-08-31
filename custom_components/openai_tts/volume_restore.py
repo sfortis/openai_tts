@@ -1843,15 +1843,36 @@ async def announce(
             )
             try:
                 if restorer is not None:
-                    # Wait for the synthesis, but not past the point
-                    # where the audio could start without the level
-                    # being right. Whichever comes first: a clip out of
-                    # cache lands here in milliseconds, a generated one
-                    # gives the paused music the whole window to fade.
-                    await asyncio.wait(
+                    # Wait out the window, then set the level. It is
+                    # tempting to stop as soon as ``speak_task`` is
+                    # done, and that is what this used to do, but the
+                    # task finishing says nothing about when sound
+                    # reaches the speaker: ``tts.speak`` hands the audio
+                    # over and returns, in single-digit milliseconds on
+                    # every platform measured here. Stopping on it gave
+                    # the window away entirely and put the volume change
+                    # back on top of the music still draining out of the
+                    # speaker we had just paused.
+                    #
+                    # A speak that has already failed is the one case
+                    # worth cutting short: there is no announcement left
+                    # to set a level for.
+                    loop = asyncio.get_running_loop()
+                    deadline = loop.time() + VOLUME_APPLY_WINDOW_S
+                    done, _ = await asyncio.wait(
                         {speak_task}, timeout=VOLUME_APPLY_WINDOW_S
                     )
-                    await restorer.apply_deferred_volume()
+                    # ``.exception()`` re-raises on a cancelled
+                    # task, so ask about cancellation first.
+                    failed = bool(done) and (
+                        speak_task.cancelled()
+                        or speak_task.exception() is not None
+                    )
+                    if not failed:
+                        remaining = deadline - loop.time()
+                        if remaining > 0:
+                            await asyncio.sleep(remaining)
+                        await restorer.apply_deferred_volume()
                 await speak_task
             finally:
                 # A failure on either side must not leave the other
