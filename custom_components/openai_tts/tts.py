@@ -457,6 +457,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             "current_instructions": self._get_config_value(CONF_INSTRUCTIONS),
             "current_chime_enable": self._get_config_value(CONF_CHIME_ENABLE) or False,
             "current_chime_sound": self._get_config_value(CONF_CHIME_SOUND),
+            "current_normalize_audio": self._get_config_value(
+                CONF_NORMALIZE_AUDIO, True
+            ),
             "current_extra_payload": self._get_config_value(CONF_EXTRA_PAYLOAD),
         }
 

@@ -342,7 +342,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # For chime/normalize_audio: use service call value if provided, else entity default
         # Note: data.get("chime") returns None if not in call, False if explicitly set to False
         chime_value = data.get("chime") if "chime" in data else entity_defaults.get("chime", False)
-        normalize_value = data.get("normalize_audio") if "normalize_audio" in data else entity_defaults.get("normalize_audio", False)
+        normalize_value = data.get("normalize_audio") if "normalize_audio" in data else entity_defaults.get("normalize_audio", True)
         chime_sound_value = data.get("chime_sound") if "chime_sound" in data else entity_defaults.get("chime_sound")
 
         options = {
