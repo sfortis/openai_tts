@@ -1,5 +1,6 @@
 ## v3.9b5
 
+- Fix the announcement volume landing on music that was still fading out of a paused speaker, which made it swell before it stopped
 - Fix loudness correction turning itself off when a profile's own settings could not be read
 - Show the loudness correction setting on the entity, next to the other profile settings
 
