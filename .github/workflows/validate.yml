@@ -8,6 +8,22 @@ on:
   workflow_dispatch:
 
 jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      - name: Install ruff
+        # Pinned on purpose. Ruff adds checks to existing rule families
+        # between releases, so an unpinned install can turn this job red
+        # without a single line changing here. Bump it deliberately, and
+        # keep it in step with what developers run locally.
+        run: pip install ruff==0.14.14
+      - name: Ruff
+        run: ruff check --output-format=github .
+
   validate-hacs:
     runs-on: ubuntu-latest
     steps:
