@@ -1,0 +1,32 @@
+# Tooling configuration only. There is no [project] table on purpose:
+# this repository ships a Home Assistant custom component, not a
+# installable Python package, and HACS copies the folder as it is.
+
+[tool.ruff]
+# The component already uses PEP 695 syntax (``type X = ...`` in
+# api_health.py), so 3.13 is the floor no matter what the manifest says.
+target-version = "py313"
+extend-exclude = ["internal_docs", ".claude"]
+
+[tool.ruff.lint]
+# Ruff's defaults are only E4, E7, E9 and F, which the component already
+# passed while carrying an unused import and three logging calls that
+# throw away tracebacks. The families added here were each measured
+# before being switched on: together they cost 29 one-off fixes, while
+# UP, W and E501 would have cost another 313 for no behavioural gain.
+select = [
+    "E4", "E7", "E9",  # pycodestyle errors ruff enables by default
+    "F",               # pyflakes: unused imports and names
+    "I",               # import ordering
+    "B",               # bugbear: likely bugs
+    "ASYNC",           # blocking calls in async functions
+    "LOG", "G",        # logging call correctness
+    "SIM",             # simplifications
+    "RUF",             # ruff's own rules
+]
+
+# Home Assistant core ignores this one too. Entity attributes such as
+# ``_attr_options`` are declared by the base class as ordinary
+# annotated attributes, so marking them ClassVar in a subclass would
+# be wrong rather than merely noisy.
+ignore = ["RUF012"]

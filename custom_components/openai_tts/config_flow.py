@@ -3,64 +3,65 @@
 Config flow for OpenAI TTS.
 """
 from __future__ import annotations
-from typing import Any
-import os
-import voluptuous as vol
-import logging
-from urllib.parse import urlparse
-import uuid
-import aiohttp
 
+import logging
+import os
+import uuid
+from typing import Any
+from urllib.parse import urlparse
+
+import aiohttp
+import voluptuous as vol
 from homeassistant import data_entry_flow
 from homeassistant.config_entries import (
+    ConfigEntry,
     ConfigFlow,
+    ConfigFlowResult,
     ConfigSubentryFlow,
     OptionsFlow,
-    ConfigEntry,
-    ConfigFlowResult,
     SubentryFlowResult,
 )
-from homeassistant.helpers.selector import selector, TemplateSelector
-from homeassistant.exceptions import HomeAssistantError
 from homeassistant.core import callback
+from homeassistant.exceptions import HomeAssistantError
+from homeassistant.helpers.selector import TemplateSelector, selector
 
-from .streaming import PIPELINEABLE_FORMATS
-from .voice_listing import async_fetch_voice_options
 from .const import (
+    CONF_ANNOUNCE_MODE,
     CONF_API_KEY,
-    CONF_MODEL,
-    CONF_VOICE,
-    CONF_SPEED,
-    CONF_URL,
-    CONF_PROVIDER,
-    DEFAULT_URL,
-    DEFAULT_PROVIDER,
-    DOMAIN,
-    MODELS,
-    PROVIDER_PRESETS,
-    PROVIDER_CUSTOM,
-    PROVIDER_OPENAI,
-    audio_format_options_for,
-    model_supports_instructions,
-    is_openai_endpoint,
-    voice_options,
-    voices_for_model,
-    UNIQUE_ID,
+    CONF_AUDIO_FORMAT,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
-    CONF_NORMALIZE_AUDIO,
-    CONF_SEND_VOICE,
-    CONF_INSTRUCTIONS,
     CONF_EXTRA_PAYLOAD,
-    CONF_AUDIO_FORMAT,
-    DEFAULT_AUDIO_FORMAT,
-    CONF_VOLUME_RESTORE,
-    CONF_ANNOUNCE_MODE,
+    CONF_INSTRUCTIONS,
+    CONF_MODEL,
+    CONF_NORMALIZE_AUDIO,
     CONF_PAUSE_PLAYBACK,
-    DEFAULT_ANNOUNCE_MODE,
     CONF_PROFILE_NAME,
+    CONF_PROVIDER,
+    CONF_SEND_VOICE,
+    CONF_SPEED,
     CONF_STREAM_PIPELINING,
+    CONF_URL,
+    CONF_VOICE,
+    CONF_VOLUME_RESTORE,
+    DEFAULT_ANNOUNCE_MODE,
+    DEFAULT_AUDIO_FORMAT,
+    DEFAULT_PROVIDER,
+    DEFAULT_URL,
+    DOMAIN,
+    MODELS,
+    PROVIDER_CUSTOM,
+    PROVIDER_OPENAI,
+    PROVIDER_PRESETS,
+    UNIQUE_ID,
+    audio_format_options_for,
+    is_openai_endpoint,
+    model_supports_instructions,
+    voice_options,
+    voices_for_model,
 )
+from .streaming import PIPELINEABLE_FORMATS
+from .voice_listing import async_fetch_voice_options
 
 SUBENTRY_TYPE_PROFILE = "profile"
 
@@ -140,26 +141,25 @@ async def async_validate_api_key(api_key: str, url: str) -> bool:
     }
 
     try:
-        async with aiohttp.ClientSession() as session:
-            async with session.post(
-                url,
-                json=payload,
-                headers=headers,
-                timeout=aiohttp.ClientTimeout(total=10)
-            ) as response:
-                if response.status == 401:
-                    _LOGGER.error("API key validation failed: Unauthorized (401)")
-                    raise InvalidAPIKey("Invalid API key")
-                elif response.status == 403:
-                    _LOGGER.error("API key validation failed: Forbidden (403)")
-                    raise InvalidAPIKey("API key does not have required permissions")
-                elif response.status >= 400:
-                    _LOGGER.error("API validation failed with status %d", response.status)
-                    raise CannotConnect(f"API returned status {response.status}")
+        async with aiohttp.ClientSession() as session, session.post(
+            url,
+            json=payload,
+            headers=headers,
+            timeout=aiohttp.ClientTimeout(total=10)
+        ) as response:
+            if response.status == 401:
+                _LOGGER.error("API key validation failed: Unauthorized (401)")
+                raise InvalidAPIKey("Invalid API key")
+            elif response.status == 403:
+                _LOGGER.error("API key validation failed: Forbidden (403)")
+                raise InvalidAPIKey("API key does not have required permissions")
+            elif response.status >= 400:
+                _LOGGER.error("API validation failed with status %d", response.status)
+                raise CannotConnect(f"API returned status {response.status}")
 
-                # Success - we got audio data back
-                _LOGGER.debug("API key validation successful")
-                return True
+            # Success - we got audio data back
+            _LOGGER.debug("API key validation successful")
+            return True
 
     except aiohttp.ClientError as err:
         _LOGGER.error("Connection error during API validation: %s", err)

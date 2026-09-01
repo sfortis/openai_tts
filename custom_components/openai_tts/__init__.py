@@ -14,28 +14,29 @@ from homeassistant.config_entries import (
 )
 from homeassistant.const import Platform
 from homeassistant.core import HomeAssistant
-from homeassistant.helpers import device_registry as dr, entity_registry as er
+from homeassistant.helpers import device_registry as dr
+from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.start import async_at_started
 from homeassistant.helpers.storage import Store
 from homeassistant.helpers.typing import ConfigType
 
 from .api_health import OpenAITTSHealthTracker
 from .const import (
-    DOMAIN,
-    CONF_MODEL,
-    CONF_VOICE,
-    CONF_SPEED,
+    CONF_ANNOUNCE_MODE,
+    CONF_API_KEY,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
-    CONF_NORMALIZE_AUDIO,
     CONF_INSTRUCTIONS,
-    CONF_PROFILE_NAME,
-    CONF_ANNOUNCE_MODE,
+    CONF_MODEL,
+    CONF_NORMALIZE_AUDIO,
     CONF_PAUSE_PLAYBACK,
-    DEFAULT_URL,
-    CONF_API_KEY,
-    UNIQUE_ID,
+    CONF_PROFILE_NAME,
+    CONF_SPEED,
     CONF_URL,
+    CONF_VOICE,
+    DEFAULT_URL,
+    DOMAIN,
+    UNIQUE_ID,
 )
 from .repairs import clear_repairs_for_entry
 from .services import async_setup_services
@@ -422,15 +423,7 @@ async def async_unload_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     is_subentry = False
     
     # Method 1: Check subentry_type attribute
-    if hasattr(entry, 'subentry_type') and entry.subentry_type == SUBENTRY_TYPE_PROFILE:
-        is_subentry = True
-    
-    # Method 2: Check if entry has parent_entry_id (for older HA versions)
-    elif hasattr(entry, 'parent_entry_id') and entry.parent_entry_id is not None:
-        is_subentry = True
-    
-    # Method 3: Check if data contains profile_name (our subentry marker)
-    elif entry.data.get(CONF_PROFILE_NAME) is not None:
+    if (hasattr(entry, 'subentry_type') and entry.subentry_type == SUBENTRY_TYPE_PROFILE) or (hasattr(entry, 'parent_entry_id') and entry.parent_entry_id is not None) or entry.data.get(CONF_PROFILE_NAME) is not None:
         is_subentry = True
     
     # Whether the entry is legacy or a modern parent no longer changes

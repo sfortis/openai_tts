@@ -3,20 +3,23 @@ Utility functions for OpenAI TTS integration.
 """
 from __future__ import annotations
 
+import contextlib
 import logging
 import os
 import subprocess
 import tempfile
 from typing import Any, Dict, List, Optional, Tuple, Union
 
+from homeassistant.components.media_player import (
+    ATTR_MEDIA_VOLUME_LEVEL,
+)
+from homeassistant.components.media_player import (
+    DOMAIN as MP_DOMAIN,
+)
+from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
 from homeassistant.core import HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import StateType
-from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.components.media_player import (
-    ATTR_MEDIA_VOLUME_LEVEL,
-    DOMAIN as MP_DOMAIN,
-)
 
 from .const import AUDIO_FORMAT_ENCODER
 
@@ -183,9 +186,7 @@ def is_valid_audio(
 
     # Unknown format: reject obvious text/JSON/HTML payloads.
     first = audio_data[:1]
-    if first in (b"{", b"<", b"["):
-        return False
-    return True
+    return first not in (b"{", b"<", b"[")
 
 
 def get_media_duration(file_path: str, ffprobe: str = "ffprobe") -> float:
@@ -267,10 +268,8 @@ def measure_audio_duration(
 
 def _remove_quietly(path: str) -> None:
     """Delete a path, ignoring the case where it is already gone."""
-    try:
+    with contextlib.suppress(OSError):
         os.unlink(path)
-    except OSError:
-        pass
 
 
 def build_ffmpeg_command(
@@ -467,8 +466,14 @@ async def process_audio(
 
         try:
             _LOGGER.debug("Running ffmpeg in executor")
+            # ASYNC221 reads the ``subprocess.run`` lexically and takes it
+            # for a blocking call on the event loop. It is not: the lambda
+            # is handed to the executor, which is the pattern the rule
+            # exists to ask for.
             await hass.async_add_executor_job(
-                lambda: subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+                lambda: subprocess.run(  # noqa: ASYNC221
+                    cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
             )
         except Exception as exc:
             _LOGGER.error("Error executing ffmpeg: %s", exc)

@@ -26,10 +26,10 @@ from typing import Any, Dict, List, Optional, Set
 
 from homeassistant.components.media_player import (
     ATTR_MEDIA_VOLUME_LEVEL,
-    MediaPlayerEntityFeature,
     SERVICE_MEDIA_PAUSE,
     SERVICE_MEDIA_PLAY,
     STATE_PLAYING,
+    MediaPlayerEntityFeature,
 )
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
 from homeassistant.config_entries import ConfigEntry
@@ -764,14 +764,14 @@ class _VolumeRestorer:
                 ),
                 return_exceptions=True,
             )
-            for i, fresh in zip(buffering_idx, refreshed):
+            for i, fresh in zip(buffering_idx, refreshed, strict=True):
                 states[i] = fresh
 
         turn_on_tasks = []
         pause_tasks = []
         capture_after_on: List[str] = []
 
-        for entity_id, state_or_exc in zip(self.entity_ids, states):
+        for entity_id, state_or_exc in zip(self.entity_ids, states, strict=True):
             if isinstance(state_or_exc, Exception):
                 _LOGGER.warning("Skipping %s (state lookup failed: %s)",
                                 entity_id, state_or_exc)
@@ -1224,7 +1224,9 @@ class _VolumeRestorer:
             return_exceptions=True,
         )
         late = [
-            eid for (eid, _), ok in zip(pending, results) if ok is not True
+            eid
+            for (eid, _), ok in zip(pending, results, strict=True)
+            if ok is not True
         ]
         if late:
             _LOGGER.debug(
@@ -1392,10 +1394,8 @@ class _VolumeRestorer:
         def _teardown() -> None:
             while disposers:
                 d = disposers.pop()
-                try:
+                with contextlib.suppress(Exception):  # pragma: no cover
                     d()
-                except Exception:  # pragma: no cover - defensive
-                    pass
 
         @callback
         def _on_change(event: Event) -> None:

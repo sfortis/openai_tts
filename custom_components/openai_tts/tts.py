@@ -47,11 +47,11 @@ from .const import (
     CONF_INSTRUCTIONS,
     CONF_MODEL,
     CONF_NORMALIZE_AUDIO,
-    CONF_SEND_VOICE,
     CONF_PROFILE_NAME,
-    CONF_STREAM_PIPELINING,
     CONF_PROVIDER,
+    CONF_SEND_VOICE,
     CONF_SPEED,
+    CONF_STREAM_PIPELINING,
     CONF_URL,
     CONF_VOICE,
     DEFAULT_AUDIO_FORMAT,
@@ -59,8 +59,8 @@ from .const import (
     DOMAIN,
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
-    preset_for,
     is_openai_endpoint,
+    preset_for,
     voices_for_model,
 )
 from .entity_helpers import is_subentry, sanitize_profile_name
@@ -72,22 +72,22 @@ from .exceptions import (
     OpenAITTSError,
     OpenAIVoiceDeletedError,
 )
-from .openaitts_engine import OpenAITTSEngine
 from .loudness import can_normalize_stream, normalize_stream
+from .openaitts_engine import OpenAITTSEngine
+from .repairs import create_voice_deleted_issue
 from .streaming import (
     PIPELINEABLE_FORMATS,
     SELF_DESCRIBING_LENGTH_FORMATS,
     pipelined_audio_stream,
 )
-from .repairs import create_voice_deleted_issue
-from .voice_listing import CATALOGUE_TTL_S, async_fetch_voice_options
 from .utils import (
+    LOUDNESS_FILTER,
     is_valid_audio,
     measure_audio_duration,
     process_audio,
-    LOUDNESS_FILTER,
     resolve_ffmpeg_paths,
 )
+from .voice_listing import CATALOGUE_TTL_S, async_fetch_voice_options
 
 _LOGGER = logging.getLogger(__name__)
 
@@ -1301,7 +1301,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             await self._handle_engine_error(err)
             return self._empty_response(audio_format)
         except Exception as err:
-            _LOGGER.error("Atomic TTS unexpected error: %s", err, exc_info=True)
+            _LOGGER.exception("Atomic TTS unexpected error: %s", err)
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 
@@ -1324,7 +1324,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         try:
             audio_data = await self._maybe_post_process(audio_data, resolved)
         except Exception as err:
-            _LOGGER.error("Atomic TTS post-processing failed: %s", err, exc_info=True)
+            _LOGGER.exception("Atomic TTS post-processing failed: %s", err)
             self._record_failure(full_text, err, resolved)
             return self._empty_response(audio_format)
 

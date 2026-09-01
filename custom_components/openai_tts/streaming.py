@@ -37,6 +37,7 @@ know nothing about the engine, options, caching or error handling.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import io
 import logging
 import wave
@@ -224,9 +225,11 @@ def _make_wav_header(rate: int, width: int, channels: int) -> bytes:
     when the header goes out. Players treat it as "read until the
     stream ends".
     """
+    # The two context managers stay nested rather than combined: the
+    # header is only finalised when the wave writer closes, so
+    # ``getvalue`` has to run after that and still inside the buffer.
     with io.BytesIO() as buf:
-        writer = wave.open(buf, "wb")
-        with writer:
+        with wave.open(buf, "wb") as writer:
             writer.setframerate(rate)
             writer.setsampwidth(width)
             writer.setnchannels(channels)
@@ -235,17 +238,15 @@ def _make_wav_header(rate: int, width: int, channels: int) -> bytes:
 
 def _split_wav_header(wav_bytes: bytes) -> tuple[bytes, bytes]:
     """Split one WAV response into (streamable header, raw frames)."""
-    with io.BytesIO(wav_bytes) as buf:
-        reader = wave.open(buf, "rb")
-        with reader:
-            return (
-                _make_wav_header(
-                    rate=reader.getframerate(),
-                    width=reader.getsampwidth(),
-                    channels=reader.getnchannels(),
-                ),
-                reader.readframes(reader.getnframes()),
-            )
+    with io.BytesIO(wav_bytes) as buf, wave.open(buf, "rb") as reader:
+        return (
+            _make_wav_header(
+                rate=reader.getframerate(),
+                width=reader.getsampwidth(),
+                channels=reader.getnchannels(),
+            ),
+            reader.readframes(reader.getnframes()),
+        )
 
 
 class _SentenceCollector:
@@ -288,16 +289,15 @@ class _SentenceCollector:
                 if added:
                     self.ready.set()
 
-            if trailing := self._detector.finish():
-                if trailing.strip():
-                    self._sentences.append(trailing)
+            if (trailing := self._detector.finish()) and trailing.strip():
+                self._sentences.append(trailing)
         except asyncio.CancelledError:
             raise
-        except BaseException as err:  # noqa: BLE001 - surfaced to consumer
+        except BaseException as err:
             # Store rather than raise: this runs detached, so the
             # consumer is the only place that can report it.
             self.error = err
-            _LOGGER.error("Text stream failed: %s", err, exc_info=True)
+            _LOGGER.exception("Text stream failed: %s", err)
         finally:
             self.complete = True
             self.ready.set()
@@ -407,12 +407,10 @@ async def pipelined_audio_stream(
             if first_batch and not collector.complete:
                 # Settle the "was the text complete all along?" question
                 # before splitting anything. See _COMPLETION_GRACE_S.
-                try:
+                with contextlib.suppress(asyncio.TimeoutError, TimeoutError):
                     await asyncio.wait_for(
                         collector.finished.wait(), _COMPLETION_GRACE_S
                     )
-                except (asyncio.TimeoutError, TimeoutError):
-                    pass
 
             if not collector.complete:
                 # Only clear while more text may still arrive, otherwise

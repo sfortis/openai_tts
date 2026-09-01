@@ -41,11 +41,11 @@ from homeassistant.helpers.entity_platform import (
 from homeassistant.helpers.update_coordinator import CoordinatorEntity
 
 from .api_health import (
-    health_tracker_for,
     ALL_STATUSES,
     API_STATUS_OK,
-    OpenAITTSHealthTracker,
     STATUS_DESCRIPTIONS,
+    OpenAITTSHealthTracker,
+    health_tracker_for,
 )
 from .const import CONF_PROVIDER, DOMAIN, preset_for
 

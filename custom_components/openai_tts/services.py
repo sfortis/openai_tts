@@ -23,13 +23,16 @@ from homeassistant.core import (
     SupportsResponse,
     callback,
 )
+from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import (
     config_validation as cv,
+)
+from homeassistant.helpers import (
     device_registry as dr,
+)
+from homeassistant.helpers import (
     entity_registry as er,
 )
-
-from homeassistant.exceptions import HomeAssistantError
 
 from .const import (
     CONF_CHIME_ENABLE,

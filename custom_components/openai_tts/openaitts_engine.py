@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import contextlib
 import json
 import logging
 import time
@@ -202,9 +203,7 @@ def _is_retryable(exc: BaseException) -> bool:
         return False
     if isinstance(exc, (OpenAIRateLimitError, OpenAIServerError, OpenAINetworkError)):
         return True
-    if isinstance(exc, (URLError, aiohttp.ClientError)):
-        return True
-    return False
+    return isinstance(exc, (URLError, aiohttp.ClientError))
 
 
 def _decode_json_audio_blob(body: bytes) -> bytes:
@@ -463,10 +462,8 @@ class OpenAITTSEngine:
 
             except HTTPError as http_err:
                 body_snippet = ""
-                try:
+                with contextlib.suppress(Exception):
                     body_snippet = http_err.read(2048).decode("utf-8", errors="replace")
-                except Exception:
-                    pass
                 classified = _classify_http_error(
                     http_err.code, body_snippet, voice=voice
                 )
@@ -689,12 +686,10 @@ class OpenAITTSEngine:
                 return response
 
             body_snippet = ""
-            try:
+            with contextlib.suppress(Exception):
                 body_snippet = (await response.content.read(2048)).decode(
                     "utf-8", errors="replace"
                 )
-            except Exception:
-                pass
             response.release()
             classified = _classify_http_error(
                 response.status, body_snippet, voice=payload.get("voice"),
