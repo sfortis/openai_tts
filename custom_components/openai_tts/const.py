@@ -494,6 +494,33 @@ SUPPORTED_LANGUAGES = [
     "zh",  # Chinese
 ]
 
+# Region-qualified (BCP-47) tags accepted *in addition to* the base
+# ISO-639-1 codes above. Home Assistant validates a caller's language
+# by EXACT membership in ``supported_languages`` with no tag
+# normalisation (homeassistant/components/tts/__init__.py). Clients that
+# send a full tag — e.g. Music Assistant AI Radio sends the host
+# language "en-US" — are otherwise rejected with
+# ``Language 'en-US' not supported`` even though the OpenAI backend
+# auto-detects voice/language from the text and never receives the tag.
+# Each tag maps to a base code already in the list; accepting them is a
+# pure compatibility expansion, not a new capability.
+_REGION_TAGS: dict[str, tuple[str, ...]] = {
+    "en": ("en-US", "en-GB", "en-AU", "en-CA", "en-IE", "en-IN"),
+    "pt": ("pt-BR", "pt-PT"),
+    "zh": ("zh-CN", "zh-TW", "zh-HK"),
+    "nb": ("nb-NO",),
+    "sr": ("sr-Latn",),
+}
+
+# Base codes plus region-qualified variants, in stable order. Exposed so
+# the entity can advertise every tag Home Assistant will accept.
+SUPPORTED_LANGUAGES_WITH_REGIONS: list[str] = list(SUPPORTED_LANGUAGES)
+for _base, _variants in _REGION_TAGS.items():
+    for _tag in _variants:
+        if _tag not in SUPPORTED_LANGUAGES_WITH_REGIONS:
+            SUPPORTED_LANGUAGES_WITH_REGIONS.append(_tag)
+del _base, _variants, _tag
+
 CONF_CHIME_ENABLE = "chime"
 CONF_CHIME_SOUND = "chime_sound"
 CONF_NORMALIZE_AUDIO = "normalize_audio"

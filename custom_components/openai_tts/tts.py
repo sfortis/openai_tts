@@ -58,6 +58,7 @@ from .const import (
     DEFAULT_SEND_VOICE,
     DOMAIN,
     SUPPORTED_LANGUAGES,
+    SUPPORTED_LANGUAGES_WITH_REGIONS,
     UNIQUE_ID,
     preset_for,
     is_openai_endpoint,
@@ -469,7 +470,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @property
     def supported_languages(self) -> list[str]:
-        return SUPPORTED_LANGUAGES
+        return SUPPORTED_LANGUAGES_WITH_REGIONS
 
     def _available_voice_ids(self) -> list[str]:
         """Voice names for the attribute, matching what the entity offers.
