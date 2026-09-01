@@ -150,11 +150,21 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
             "troy",
         ],
         "requires_api_key": True,
-        # Orpheus only emits WAV today (response_format=wav). Picking
-        # mp3/opus/etc. on the dropdown produced an opaque 400 from the
-        # Groq router, so we lock the list down. Length cap stays open;
-        # the Groq router does enforce a per-request limit but it varies
-        # by model and we'd rather pass through their error verbatim.
+        # Orpheus only emits WAV. Asking for anything else is refused by
+        # the Groq router with a plain message rather than an opaque
+        # error: probed again on 2026-09-01, mp3, opus and flac each came
+        # back 400 "response_format must be one of [wav]" while wav
+        # returned a RIFF body, so the dropdown stays locked to wav.
+        #
+        # That also means Groq announcements never stream. WAV states its
+        # length in a header written before any audio exists, so it takes
+        # the atomic path no matter what ``supports_streaming`` says
+        # below: that flag is about the provider speaking chunked HTTP,
+        # not about the container being streamable.
+        #
+        # Length cap stays open; the Groq router does enforce a
+        # per-request limit but it varies by model and we'd rather pass
+        # through their error verbatim.
         "allowed_formats": ["wav"],
         "max_text_length": None,
         "supports_streaming": True,
