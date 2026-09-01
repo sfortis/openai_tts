@@ -27,13 +27,24 @@ from .const import AUDIO_FORMAT_ENCODER
 
 _LOGGER = logging.getLogger(__name__)
 
-# How each format is described to ffmpeg on a pipe. A container whose
-# header carries a length the writer cannot know in advance is not
-# here: wav declares its size up front, and a streamed wav header
-# claims a length that never matches, which ffmpeg reads as truncation.
-_PIPE_ARGS: dict[str, list[str]] = {
-    "mp3": ["-f", "mp3"],
-    "pcm": ["-f", "s16le", "-ar", "24000", "-ac", "1"],
+# How each format is described to ffmpeg on a pipe, reading and writing.
+# The two differ for aac: ffmpeg demuxes it as ``aac`` and muxes it as
+# ``adts``, and giving ``adts`` on the input side fails outright, which
+# is why these are two lists rather than one used at both ends.
+#
+# A container whose header carries a length the writer cannot know in
+# advance is not here: wav declares its size up front, and a streamed
+# wav header claims a length that never matches, which ffmpeg reads as
+# truncation. flac has the same problem and comes back with no duration
+# at all when it is produced this way.
+_PIPE_ARGS: dict[str, dict[str, list[str]]] = {
+    "mp3":  {"read": ["-f", "mp3"], "write": ["-f", "mp3"]},
+    "opus": {"read": ["-f", "ogg"], "write": ["-f", "ogg"]},
+    "aac":  {"read": ["-f", "aac"], "write": ["-f", "adts"]},
+    "pcm":  {
+        "read": ["-f", "s16le", "-ar", "24000", "-ac", "1"],
+        "write": ["-f", "s16le", "-ar", "24000", "-ac", "1"],
+    },
 }
 
 # Re-encoding is unavoidable once a filter is in the way, so the output
@@ -88,16 +99,16 @@ async def normalize_stream(
             f"format {audio_format!r} cannot be filtered on a stream"
         )
 
-    args = _PIPE_ARGS[audio_format]
+    pipe_args = _PIPE_ARGS[audio_format]
     encoder = AUDIO_FORMAT_ENCODER[audio_format]
     proc = await asyncio.create_subprocess_exec(
         ffmpeg_bin, "-hide_banner", "-loglevel", "error",
         *_FAST_START,
-        *args, "-i", "pipe:0",
+        *pipe_args["read"], "-i", "pipe:0",
         "-af", loudness_filter,
         "-ac", "1", "-ar", "24000",
         *encoder["codec_args"],
-        *args, "pipe:1",
+        *pipe_args["write"], "pipe:1",
         stdin=asyncio.subprocess.PIPE,
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
