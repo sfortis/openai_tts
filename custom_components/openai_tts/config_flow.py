@@ -40,6 +40,7 @@ from .const import (
     CONF_PROVIDER,
     CONF_SEND_VOICE,
     CONF_SPEED,
+    CONF_STREAM_AUDIO,
     CONF_STREAM_PIPELINING,
     CONF_URL,
     CONF_VOICE,
@@ -47,6 +48,7 @@ from .const import (
     DEFAULT_ANNOUNCE_MODE,
     DEFAULT_AUDIO_FORMAT,
     DEFAULT_PROVIDER,
+    DEFAULT_STREAM_AUDIO,
     DEFAULT_URL,
     DOMAIN,
     MODELS,
@@ -706,6 +708,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "audio_format": CONF_AUDIO_FORMAT,
                     "send_voice": CONF_SEND_VOICE,
                     "stream_pipelining": CONF_STREAM_PIPELINING,
+                    "stream_audio": CONF_STREAM_AUDIO,
                 }
                 mapped_input: dict[str, Any] = {
                     CONF_PROFILE_NAME: self._step1_profile_name,
@@ -870,6 +873,9 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # saved before that validation was added.
         if preset.get("supports_streaming", True):
             step2_fields[
+                vol.Optional("stream_audio", default=DEFAULT_STREAM_AUDIO)
+            ] = selector({"boolean": {}})
+            step2_fields[
                 vol.Optional("stream_pipelining", default=False)
             ] = selector({"boolean": {}})
         step2_schema = vol.Schema(step2_fields)
@@ -965,6 +971,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     "audio_format": CONF_AUDIO_FORMAT,
                     "send_voice": CONF_SEND_VOICE,
                     "stream_pipelining": CONF_STREAM_PIPELINING,
+                    "stream_audio": CONF_STREAM_AUDIO,
                 }
                 mapped_input: dict[str, Any] = {CONF_MODEL: self._step1_model}
                 for key, value in user_input.items():
@@ -1163,6 +1170,14 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             }
         })
         if preset.get("supports_streaming", True):
+            step2_fields[
+                vol.Optional(
+                    "stream_audio",
+                    default=existing_data.get(
+                        CONF_STREAM_AUDIO, DEFAULT_STREAM_AUDIO
+                    ),
+                )
+            ] = selector({"boolean": {}})
             step2_fields[
                 vol.Optional(
                     "stream_pipelining",

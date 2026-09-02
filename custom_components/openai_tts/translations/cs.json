@@ -79,12 +79,14 @@
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Formát zvuku",
             "stream_pipelining": "Streamování po větách",
-            "send_voice": "Odesílat název hlasu"
+            "send_voice": "Odesílat název hlasu",
+            "stream_audio": "Streamovat zvuk"
           },
           "data_description": {
             "stream_pipelining": "Začne mluvit hned, jak je hotová první věta, místo čekání na dokončení celé odpovědi. Ovlivňuje pouze hlasového asistenta a vyžaduje MP3 nebo PCM.",
             "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
-            "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2."
+            "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2.",
+            "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje."
           }
         },
         "reconfigure": {
@@ -107,12 +109,14 @@
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Formát zvuku",
             "stream_pipelining": "Streamování po větách",
-            "send_voice": "Odesílat název hlasu"
+            "send_voice": "Odesílat název hlasu",
+            "stream_audio": "Streamovat zvuk"
           },
           "data_description": {
             "stream_pipelining": "Začne mluvit hned, jak je hotová první věta, místo čekání na dokončení celé odpovědi. Ovlivňuje pouze hlasového asistenta a vyžaduje MP3 nebo PCM.",
             "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
-            "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2."
+            "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2.",
+            "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje."
           }
         }
       },

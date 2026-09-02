@@ -51,11 +51,13 @@ from .const import (
     CONF_PROVIDER,
     CONF_SEND_VOICE,
     CONF_SPEED,
+    CONF_STREAM_AUDIO,
     CONF_STREAM_PIPELINING,
     CONF_URL,
     CONF_VOICE,
     DEFAULT_AUDIO_FORMAT,
     DEFAULT_SEND_VOICE,
+    DEFAULT_STREAM_AUDIO,
     DOMAIN,
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
@@ -748,9 +750,16 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # Some backends (older self-hosted servers, pocket-tts variants
         # that don't speak chunked HTTP cleanly) deliver corrupted audio
         # via the streaming path even when a single blocking read works.
-        # The parent entry's preset can flip this off, which sends the
-        # request down the atomic branch of ``async_stream_tts_audio``:
-        # one blocking fetch, validate, then yield the whole clip.
+        # Turning this off per profile sends the request down the atomic
+        # branch of ``async_stream_tts_audio``: one blocking fetch,
+        # validate, then yield the whole clip.
+        #
+        # There is a preset flag for the same thing, kept because a
+        # provider known to be broken should not need every user to
+        # discover the switch. It is the profile setting that anyone can
+        # actually reach.
+        if not self._get_config_value(CONF_STREAM_AUDIO, DEFAULT_STREAM_AUDIO):
+            return False
         parent = self._parent_entry or self._config
         provider_key = (
             parent.data.get(CONF_PROVIDER) if parent is not None else None

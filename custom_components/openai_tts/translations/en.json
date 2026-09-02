@@ -79,12 +79,14 @@
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format",
             "stream_pipelining": "Sentence streaming",
-            "send_voice": "Send the voice name"
+            "send_voice": "Send the voice name",
+            "stream_audio": "Stream the audio"
           },
           "data_description": {
             "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3 or PCM.",
             "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
-            "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2."
+            "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2.",
+            "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine."
           }
         },
         "reconfigure": {
@@ -107,12 +109,14 @@
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format",
             "stream_pipelining": "Sentence streaming",
-            "send_voice": "Send the voice name"
+            "send_voice": "Send the voice name",
+            "stream_audio": "Stream the audio"
           },
           "data_description": {
             "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3 or PCM.",
             "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
-            "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2."
+            "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2.",
+            "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine."
           }
         }
       },

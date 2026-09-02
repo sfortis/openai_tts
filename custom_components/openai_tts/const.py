@@ -32,6 +32,16 @@ CONF_SPEED = "speed"
 # one model that wants a voice and another that refuses it, and profiles
 # are already per model here. Reported by @Arjenlodder in #71.
 CONF_SEND_VOICE = "send_voice"
+
+# Whether to read the response as it arrives. Off sends the request down
+# the atomic path: one blocking fetch, validated, then handed over whole.
+# It exists because some self-hosted backends answer a streamed read with
+# audio that will not decode, while the same request read in one go is
+# fine, and until now there was no way for anyone to say so: the preset
+# flag this used to depend on is True in every preset and no user could
+# reach it.
+CONF_STREAM_AUDIO = "stream_audio"
+DEFAULT_STREAM_AUDIO = True
 DEFAULT_SEND_VOICE = True
 CONF_PROVIDER = "provider"  # provider preset key, e.g. "openai", "mistral", "custom"
 DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
