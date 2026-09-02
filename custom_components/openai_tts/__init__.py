@@ -37,6 +37,7 @@ from .const import (
     DEFAULT_URL,
     DOMAIN,
     UNIQUE_ID,
+    migrating_flag,
 )
 from .repairs import clear_repairs_for_entry
 from .services import async_setup_services
@@ -165,7 +166,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             
             # Set migration flag to prevent reload during migration
             hass.data.setdefault(DOMAIN, {})
-            hass.data[DOMAIN][f"{config_entry.entry_id}_migrating"] = True
+            hass.data[DOMAIN][migrating_flag(config_entry.entry_id)] = True
             
             # Extract voice configuration from the entry
             model = config_entry.data.get(CONF_MODEL, "tts-1")
@@ -239,7 +240,7 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             _LOGGER.info("Successfully migrated legacy entry to parent+subentry structure")
             
             # Clear migration flag
-            hass.data[DOMAIN].pop(f"{config_entry.entry_id}_migrating", None)
+            hass.data[DOMAIN].pop(migrating_flag(config_entry.entry_id), None)
             
             # Fix device registry associations after migration
             # Devices should only be associated with subentries, not parent entries
@@ -393,7 +394,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
     async def update_listener(hass: HomeAssistant, entry: ConfigEntry) -> None:
         """Handle config entry updates."""
         # Don't reload during migration - migration handles its own reload
-        if hass.data.get(DOMAIN, {}).get(f"{entry.entry_id}_migrating"):
+        if hass.data.get(DOMAIN, {}).get(migrating_flag(entry.entry_id)):
             _LOGGER.debug("Skipping reload during migration for entry %s", entry.entry_id)
             return
 

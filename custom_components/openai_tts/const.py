@@ -549,6 +549,16 @@ CONF_VOLUME_RESTORE = "volume_restore"
 # turning "don't pause my music" into "manage my music".
 CONF_PAUSE_PLAYBACK = "pause_playback"
 
+
+def migrating_flag(entry_id: str) -> str:
+    """Key under ``hass.data[DOMAIN]`` that marks an entry mid-migration.
+
+    Two places have to agree on it: the migration sets it, and anything
+    that would otherwise reload the entry has to leave it alone until the
+    migration takes its own reload.
+    """
+    return f"{entry_id}_migrating"
+
 # Announcement-mode toggle, the modern setting. Mirrors the
 # ``announce`` field on the ``openai_tts.say`` service. Semantics on
 # True (the default):

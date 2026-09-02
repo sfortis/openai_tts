@@ -50,6 +50,7 @@ from .const import (
     DEFAULT_URL,
     DOMAIN,
     is_openai_endpoint,
+    migrating_flag,
     preset_for,
     voices_for_model,
 )
@@ -76,7 +77,9 @@ SERVICE_SET_API_KEY = "set_api_key"
 SET_API_KEY_SCHEMA = vol.All(
     vol.Schema(
         {
-            vol.Optional("config_entry_id"): cv.string,
+            vol.Optional("config_entry_id"): vol.All(
+                cv.string, vol.Strip, vol.Length(min=1)
+            ),
             vol.Optional("tts_entity"): cv.entity_domain(TTS_DOMAIN),
             vol.Required("api_key"): vol.All(cv.string, vol.Strip, vol.Length(min=1)),
             vol.Optional("validate", default=True): cv.boolean,
@@ -529,13 +532,16 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # for an action meant to be driven by automations. So the reply
         # says what was actually done, stored, and separately whether the
         # running engine has picked it up yet.
-        active = hass.is_running
+        active = hass.is_running and not hass.data.get(DOMAIN, {}).get(
+            migrating_flag(entry.entry_id)
+        )
         if active:
             _LOGGER.info("Stored a new API key for %s, reloading", entry.title)
         else:
             _LOGGER.warning(
-                "Stored a new API key for %s, but Home Assistant is still "
-                "starting and the entry will not reload now. The running "
+                "Stored a new API key for %s, but the entry will not "
+                "reload right now, because Home Assistant is still "
+                "starting or the entry is being migrated. The running "
                 "engine keeps the previous key until the entry is "
                 "reloaded.", entry.title,
             )
