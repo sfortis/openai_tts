@@ -17,13 +17,14 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
+from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
     SupportsResponse,
     callback,
 )
-from homeassistant.exceptions import HomeAssistantError
+from homeassistant.exceptions import HomeAssistantError, ServiceValidationError
 from homeassistant.helpers import (
     config_validation as cv,
 )
@@ -33,8 +34,11 @@ from homeassistant.helpers import (
 from homeassistant.helpers import (
     entity_registry as er,
 )
+from homeassistant.helpers.service import async_register_admin_service
 
+from .api_validation import async_validate_api_key
 from .const import (
+    CONF_API_KEY,
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_EXTRA_PAYLOAD,
@@ -43,11 +47,13 @@ from .const import (
     CONF_PROVIDER,
     CONF_URL,
     CONF_VOICE,
+    DEFAULT_URL,
     DOMAIN,
     is_openai_endpoint,
     preset_for,
     voices_for_model,
 )
+from .exceptions import OpenAIAuthError
 from .utils import normalize_entity_ids
 from .volume_restore import announce
 
@@ -55,6 +61,30 @@ _LOGGER = logging.getLogger(__name__)
 
 SERVICE_NAME = "say"
 
+
+SERVICE_SET_API_KEY = "set_api_key"
+
+# Either way of naming the entry is accepted. ``config_entry_id`` is the
+# accurate one, since the key belongs to the parent entry and not to a
+# profile; ``tts_entity`` is offered because that is what every other
+# call in this integration is targeted with.
+# Exactly one way of naming the entry, not one or both. Accepting both
+# meant the entry id quietly won and the entity was never looked at, so a
+# caller could believe it was addressing one entry while writing to
+# another. The key itself has to be non-blank: with validation turned
+# off, an empty string would otherwise overwrite a working credential.
+SET_API_KEY_SCHEMA = vol.All(
+    vol.Schema(
+        {
+            vol.Optional("config_entry_id"): cv.string,
+            vol.Optional("tts_entity"): cv.entity_domain(TTS_DOMAIN),
+            vol.Required("api_key"): vol.All(cv.string, vol.Strip, vol.Length(min=1)),
+            vol.Optional("validate", default=True): cv.boolean,
+        }
+    ),
+    cv.has_at_least_one_key("config_entry_id", "tts_entity"),
+    cv.has_at_most_one_key("config_entry_id", "tts_entity"),
+)
 
 # Service Schema
 SAY_SCHEMA = vol.Schema(
@@ -417,6 +447,112 @@ def async_setup_services(hass: HomeAssistant) -> None:
         if call.return_response:
             return {"success": True}
         return None
+
+    async def _handle_set_api_key(call: ServiceCall) -> dict[str, Any]:
+        """Store a new API key on an entry and let the reload pick it up.
+
+        Written for providers that hand out keys with a short life, where
+        the alternative is a person opening the settings once a month. The
+        key goes into the entry's own data, which is where Home Assistant
+        keeps credentials; putting it in an ``input_text`` instead would
+        publish it through the states API and the recorder.
+        """
+        data = call.data
+        entry_id = data.get("config_entry_id")
+        tts_entity = data.get("tts_entity")
+        if not entry_id:
+            entity_entry = er.async_get(hass).async_get(tts_entity)
+            if entity_entry is None or not entity_entry.config_entry_id:
+                raise ServiceValidationError(
+                    f"TTS entity {tts_entity} not found"
+                )
+            entry_id = entity_entry.config_entry_id
+
+        entry = hass.config_entries.async_get_entry(entry_id)
+        if entry is None or entry.domain != DOMAIN:
+            raise ServiceValidationError(
+                f"{entry_id} is not an OpenAI TTS entry"
+            )
+
+        api_key = data["api_key"]
+        url = entry.data.get(CONF_URL, DEFAULT_URL)
+
+        # The unchanged case is settled before anything is sent anywhere.
+        # This action is built to be called on a schedule, so the common
+        # run is one where the key has not moved, and validating it would
+        # bill the provider for a request that changes nothing.
+        if entry.data.get(CONF_API_KEY) == api_key:
+            _LOGGER.debug("API key for %s is unchanged", entry.title)
+            return {"success": True, "changed": False}
+
+        if data["validate"]:
+            # A key that does not work is worth refusing here. The caller
+            # is an automation, so nobody is watching, and the failure
+            # would otherwise surface at the next announcement.
+            #
+            # The two ways this can fail are kept apart on purpose. Only
+            # 401 and 403 mean the endpoint looked at the key and said no.
+            # Anything else, a timeout, a 5xx, or a 400 because the probe
+            # asks for tts-1 and alloy and a self-hosted backend has never
+            # heard of either, says nothing about the key. Reporting that
+            # as "rejected" would accuse a perfectly good key, and this
+            # action exists for exactly those custom endpoints.
+            try:
+                await async_validate_api_key(hass, api_key, url)
+            except OpenAIAuthError as err:
+                _LOGGER.error(
+                    "%s rejected the new API key for %s: %s",
+                    url, entry.title, err,
+                )
+                raise HomeAssistantError(
+                    f"{url} rejected this key: {err}"
+                ) from err
+            except Exception as err:
+                _LOGGER.error(
+                    "Could not check the new API key for %s against %s, "
+                    "keeping the old one: %s",
+                    entry.title, url, err,
+                )
+                raise HomeAssistantError(
+                    f"The key could not be checked against {url} ({err}). "
+                    "The old key is still in place. Call this action with "
+                    "validate: false to store it without checking."
+                ) from err
+
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_API_KEY: api_key}
+        )
+        # Writing the entry is synchronous; the reload that rebuilds the
+        # engine with the new key is not. The entry's update listener
+        # schedules it, and that listener declines to reload at all while
+        # Home Assistant is still starting, which is a real possibility
+        # for an action meant to be driven by automations. So the reply
+        # says what was actually done, stored, and separately whether the
+        # running engine has picked it up yet.
+        active = hass.is_running
+        if active:
+            _LOGGER.info("Stored a new API key for %s, reloading", entry.title)
+        else:
+            _LOGGER.warning(
+                "Stored a new API key for %s, but Home Assistant is still "
+                "starting and the entry will not reload now. The running "
+                "engine keeps the previous key until the entry is "
+                "reloaded.", entry.title,
+            )
+        return {"success": True, "changed": True, "reloading": active}
+
+    # Admin only, unlike ``say``. This one rewrites a credential, so the
+    # bar is not "may call actions" but "administers this install".
+    # ``async_register_admin_service`` is Home Assistant's own wrapper for
+    # exactly that and refuses the call for anyone else.
+    async_register_admin_service(
+        hass,
+        DOMAIN,
+        SERVICE_SET_API_KEY,
+        _handle_set_api_key,
+        schema=SET_API_KEY_SCHEMA,
+        supports_response=SupportsResponse.OPTIONAL,
+    )
 
     # Register service. ``SupportsResponse.OPTIONAL`` keeps existing
     # fire-and-forget callers working AND lets newer automations use

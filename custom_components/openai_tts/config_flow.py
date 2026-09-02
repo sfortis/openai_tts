@@ -10,7 +10,6 @@ import uuid
 from typing import Any
 from urllib.parse import urlparse
 
-import aiohttp
 import voluptuous as vol
 from homeassistant import data_entry_flow
 from homeassistant.config_entries import (
@@ -25,6 +24,7 @@ from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import TemplateSelector, selector
 
+from .api_validation import async_validate_api_key
 from .const import (
     CONF_ANNOUNCE_MODE,
     CONF_API_KEY,
@@ -60,6 +60,7 @@ from .const import (
     voice_options,
     voices_for_model,
 )
+from .exceptions import OpenAIAuthError, OpenAITTSError
 from .streaming import PIPELINEABLE_FORMATS
 from .voice_listing import async_fetch_voice_options
 
@@ -102,71 +103,9 @@ def _pipelining_conflict(user_input: dict[str, Any]) -> str | None:
 
 _LOGGER = logging.getLogger(__name__)
 
-# Custom exceptions for API validation
-class InvalidAPIKey(HomeAssistantError):
-    """Error to indicate invalid API key."""
-
-class CannotConnect(HomeAssistantError):
-    """Error to indicate connection failure."""
-
 def generate_entry_id() -> str:
     return str(uuid.uuid4())
 
-async def async_validate_api_key(api_key: str, url: str) -> bool:
-    """Validate the API key by making a minimal test request.
-
-    Args:
-        api_key: The OpenAI API key to validate
-        url: The API endpoint URL
-
-    Returns:
-        True if validation succeeds
-
-    Raises:
-        InvalidAPIKey: If the API key is invalid (401/403)
-        CannotConnect: If unable to connect to the API
-    """
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {api_key}"
-    }
-
-    # Make a minimal TTS request to validate the API key
-    # Using minimal text to reduce cost
-    payload = {
-        "model": "tts-1",
-        "input": ".",
-        "voice": "alloy",
-        "response_format": "mp3",
-    }
-
-    try:
-        async with aiohttp.ClientSession() as session, session.post(
-            url,
-            json=payload,
-            headers=headers,
-            timeout=aiohttp.ClientTimeout(total=10)
-        ) as response:
-            if response.status == 401:
-                _LOGGER.error("API key validation failed: Unauthorized (401)")
-                raise InvalidAPIKey("Invalid API key")
-            elif response.status == 403:
-                _LOGGER.error("API key validation failed: Forbidden (403)")
-                raise InvalidAPIKey("API key does not have required permissions")
-            elif response.status >= 400:
-                _LOGGER.error("API validation failed with status %d", response.status)
-                raise CannotConnect(f"API returned status {response.status}")
-
-            # Success - we got audio data back
-            _LOGGER.debug("API key validation successful")
-            return True
-
-    except aiohttp.ClientError as err:
-        _LOGGER.error("Connection error during API validation: %s", err)
-        raise CannotConnect(f"Cannot connect to API: {err}") from err
-    except TimeoutError as err:
-        _LOGGER.error("Timeout during API validation")
-        raise CannotConnect("Connection timed out") from err
 
 def validate_user_input(user_input: dict) -> str | None:
     """Return an error translation key for bad input, or None if it is fine.
@@ -311,7 +250,7 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
 
                 # Validate API key by making a test request (only for default OpenAI endpoint)
                 if api_key and not is_custom_endpoint:
-                    await async_validate_api_key(api_key, api_url)
+                    await async_validate_api_key(self.hass, api_key, api_url)
 
                 # Generate unique ID
                 import hashlib
@@ -348,9 +287,9 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 )
             except data_entry_flow.AbortFlow:
                 return self.async_abort(reason="already_configured")
-            except InvalidAPIKey:
+            except OpenAIAuthError:
                 errors["base"] = "invalid_api_key"
-            except CannotConnect:
+            except OpenAITTSError:
                 errors["base"] = "cannot_connect"
             except HomeAssistantError:
                 # ``errors`` values are translation keys, not prose, so
@@ -459,7 +398,7 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 api_url = self._reauth_entry.data.get(CONF_URL, "https://api.openai.com/v1/audio/speech")
 
                 # Validate the new API key
-                await async_validate_api_key(api_key, api_url)
+                await async_validate_api_key(self.hass, api_key, api_url)
 
                 # Update the entry with new credentials
                 self.hass.config_entries.async_update_entry(
@@ -469,9 +408,9 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
                 return self.async_abort(reason="reauth_successful")
 
-            except InvalidAPIKey:
+            except OpenAIAuthError:
                 errors["base"] = "invalid_api_key"
-            except CannotConnect:
+            except OpenAITTSError:
                 errors["base"] = "cannot_connect"
             except Exception:
                 _LOGGER.exception("Unexpected error during reauth")
@@ -528,7 +467,7 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # so reconfigure can't quietly save an invalid key that
                 # would only fail at runtime.
                 if not errors and api_key and not is_custom_endpoint:
-                    await async_validate_api_key(api_key, api_url)
+                    await async_validate_api_key(self.hass, api_key, api_url)
 
                 if not errors:
                     # Update the entry using the recommended helper
@@ -560,9 +499,9 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                         title=new_title,
                     )
 
-            except InvalidAPIKey:
+            except OpenAIAuthError:
                 errors["base"] = "invalid_api_key"
-            except CannotConnect:
+            except OpenAITTSError:
                 errors["base"] = "cannot_connect"
             except HomeAssistantError:
                 # ``errors`` values are translation keys, not prose, so

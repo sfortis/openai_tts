@@ -250,6 +250,28 @@
           "description": "Standardmäßig ein: Lautsprecher mit Durchsagefunktion stellen die Musik leiser, die übrigen werden pausiert und danach fortgesetzt. Aus sendet das Audio als normale Wiedergabe."
         }
       }
+    },
+    "set_api_key": {
+      "name": "API-Schlüssel setzen",
+      "description": "Speichert einen neuen API-Schlüssel in einem OpenAI-TTS-Eintrag und lädt ihn neu. Gedacht für Anbieter mit kurzlebigen Schlüsseln, damit eine Automatisierung den Schlüssel erneuern kann, ohne dass jemand die Einstellungen öffnet. Der Schlüssel wird im Speicher von Home Assistant abgelegt, nicht in einer Entität; beachten Sie aber, dass Automatisierungs-Traces die Aufrufdaten einer Aktion aufbewahren.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Eintrag",
+          "description": "Der OpenAI-TTS-Eintrag, der den Schlüssel enthält."
+        },
+        "tts_entity": {
+          "name": "TTS-Entität",
+          "description": "Eine beliebige TTS-Entität des Eintrags, falls Sie lieber diese angeben als den Eintrag selbst."
+        },
+        "api_key": {
+          "name": "API-Schlüssel",
+          "description": "Der neue Schlüssel."
+        },
+        "validate": {
+          "name": "Schlüssel zuerst prüfen",
+          "description": "Den Schlüssel vor dem Speichern am Endpunkt testen, damit ein falscher abgelehnt wird, statt die nächste Durchsage zu stören. Kostet eine sehr kurze Anfrage."
+        }
+      }
     }
   }
 }

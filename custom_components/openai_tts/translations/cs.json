@@ -250,6 +250,28 @@
           "description": "Ve výchozím nastavení zapnuto: reproduktory s podporou hlášení hudbu ztlumí, ostatní se pozastaví a poté pokračují. Vypnuto odešle zvuk jako běžné přehrávání."
         }
       }
+    },
+    "set_api_key": {
+      "name": "Nastavit klíč API",
+      "description": "Uloží nový klíč API do záznamu OpenAI TTS a znovu jej načte. Je určeno pro poskytovatele, kteří vydávají krátkodobé klíče, aby automatizace mohla klíč obnovit, aniž by někdo otevíral nastavení. Klíč se zapisuje do úložiště Home Assistant, nikoli do entity, ale pozor: záznamy průběhu automatizací uchovávají data, se kterými byla akce zavolána.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Záznam",
+          "description": "Záznam OpenAI TTS, který klíč obsahuje."
+        },
+        "tts_entity": {
+          "name": "Entita TTS",
+          "description": "Libovolná entita TTS daného záznamu, pokud chcete uvést raději ji než samotný záznam."
+        },
+        "api_key": {
+          "name": "Klíč API",
+          "description": "Nový klíč."
+        },
+        "validate": {
+          "name": "Nejprve klíč ověřit",
+          "description": "Vyzkoušet klíč proti koncovému bodu před uložením, aby byl chybný odmítnut a nerozbil další hlášení. Stojí jeden velmi krátký požadavek."
+        }
+      }
     }
   }
 }

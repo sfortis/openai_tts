@@ -231,6 +231,28 @@
           "description": "On by default: speakers that support announcements duck the music, the rest are paused and resumed. Off sends the audio as ordinary media."
         }
       }
+    },
+    "set_api_key": {
+      "name": "Set API key",
+      "description": "Stores a new API key on an OpenAI TTS entry and reloads it. Meant for providers that issue short-lived keys, so an automation can refresh the key without anyone opening the settings. The key is written to Home Assistant's own storage, not to an entity, but note that automation traces keep the data a service was called with.",
+      "fields": {
+        "config_entry_id": {
+          "name": "Entry",
+          "description": "The OpenAI TTS entry that holds the key."
+        },
+        "tts_entity": {
+          "name": "TTS entity",
+          "description": "Any TTS entity of the entry, if you would rather name one of those than the entry itself."
+        },
+        "api_key": {
+          "name": "API key",
+          "description": "The new key."
+        },
+        "validate": {
+          "name": "Check the key first",
+          "description": "Try the key against the endpoint before storing it, so a bad one is refused instead of breaking the next announcement. Costs one very short request."
+        }
+      }
     }
   },
   "selector": {

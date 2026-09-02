@@ -109,3 +109,28 @@ say:
     # working untouched. It's intentionally not surfaced in the UI -
     # advertising both fields confused users (issue #N: "why do I
     # see two toggles that mean the same thing?").
+
+set_api_key:
+  fields:
+    config_entry_id:
+      required: false
+      selector:
+        config_entry:
+          integration: openai_tts
+    tts_entity:
+      required: false
+      example: "tts.openai_tts_tts_1"
+      selector:
+        entity:
+          domain: tts
+          integration: openai_tts
+    api_key:
+      required: true
+      selector:
+        text:
+          type: password
+    validate:
+      required: false
+      default: true
+      selector:
+        boolean:
