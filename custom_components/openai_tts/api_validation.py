@@ -79,10 +79,14 @@ async def async_validate_api_key(
                     response.status,
                 )
                 raise OpenAIServerError(f"API returned status {response.status}")
-            if response.status >= 400:
-                # Not an auth answer. A backend that does not implement the
-                # model or the format this probe asks for lands here, and
-                # its key may well be fine.
+            if not 200 <= response.status < 300:
+                # Everything that is neither an auth answer nor a server
+                # error lands here, and none of it says the key is bad. A
+                # backend that has never heard of the model this probe
+                # asks for answers 400, and a redirect aiohttp did not
+                # follow answers 3xx. Only a 2xx is taken as acceptance:
+                # falling through on anything else would call a key good
+                # without the endpoint ever having said so.
                 _LOGGER.error(
                     "API validation could not complete, HTTP %d",
                     response.status,

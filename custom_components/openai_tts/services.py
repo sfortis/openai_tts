@@ -18,6 +18,7 @@ from typing import Any
 import voluptuous as vol
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
+from homeassistant.config_entries import ConfigEntryState
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -532,18 +533,29 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # for an action meant to be driven by automations. So the reply
         # says what was actually done, stored, and separately whether the
         # running engine has picked it up yet.
-        active = hass.is_running and not hass.data.get(DOMAIN, {}).get(
-            migrating_flag(entry.entry_id)
+        # Three things have to hold for the entry to reload. The listener
+        # that does it is registered in ``async_setup_entry`` and torn
+        # down on unload, so an entry that is disabled or failed to set
+        # up has no listener at all and nothing will pick the key up.
+        active = (
+            entry.state is ConfigEntryState.LOADED
+            and hass.is_running
+            and not hass.data.get(DOMAIN, {}).get(
+                migrating_flag(entry.entry_id)
+            )
         )
         if active:
             _LOGGER.info("Stored a new API key for %s, reloading", entry.title)
         else:
             _LOGGER.warning(
                 "Stored a new API key for %s, but the entry will not "
-                "reload right now, because Home Assistant is still "
-                "starting or the entry is being migrated. The running "
-                "engine keeps the previous key until the entry is "
-                "reloaded.", entry.title,
+                "reload right now: it is %s, Home Assistant running is "
+                "%s, migrating is %s. The key takes effect the next time "
+                "the entry is loaded.",
+                entry.title, entry.state, hass.is_running,
+                bool(hass.data.get(DOMAIN, {}).get(
+                    migrating_flag(entry.entry_id)
+                )),
             )
         return {"success": True, "changed": True, "reloading": active}
 
