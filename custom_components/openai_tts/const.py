@@ -60,6 +60,7 @@ PROVIDER_MISTRAL = "mistral"
 PROVIDER_GROQ = "groq"
 PROVIDER_LEMONFOX = "lemonfox"
 PROVIDER_KOKORO = "kokoro"
+PROVIDER_CHATTERBOX = "chatterbox"
 PROVIDER_CUSTOM = "custom"
 DEFAULT_PROVIDER = PROVIDER_OPENAI
 
@@ -270,6 +271,40 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # as authoritative and renders one option per name.
         "supports_voice_listing": True,
     },
+    PROVIDER_CHATTERBOX: {
+        # Chatterbox-TTS-Server (devnen). It serves an OpenAI compatible
+        # endpoint next to its own ``/tts``, and that is the one to use:
+        # ``/tts`` ignores ``output_format`` whenever ``stream`` is set and
+        # answers in WAV, so on that endpoint progressive audio and a
+        # compressed container are mutually exclusive. Sentence streaming
+        # gets both, because each sentence is an ordinary request here.
+        #
+        # Measured against the server on 2026-09-03:
+        #  - ``model`` is accepted and then ignored; every value answered
+        #    200, including an empty string. The model is whatever the
+        #    server's own config.yaml selected, so the catalogue below is
+        #    a label rather than a choice.
+        #  - ``response_format`` accepts mp3, opus and wav. flac, aac and
+        #    pcm come back 422.
+        #  - ``speed`` is honoured: 0.5 gave 7.0 s where 2.0 gave 1.8 s on
+        #    the same sentence.
+        #  - voices are published at ``/v1/audio/voices`` as file names
+        #    such as ``Abigail.wav``.
+        "label": "Chatterbox (self-hosted)",
+        "url": "http://localhost:8004/v1/audio/speech",
+        "default_model": "chatterbox",
+        "model_catalog": ["chatterbox"],
+        "default_format": "mp3",
+        "voice_catalog": None,
+        "requires_api_key": False,
+        "allowed_formats": ["mp3", "opus", "wav"],
+        "max_text_length": None,
+        "supports_streaming": True,
+        "supports_speed": True,
+        "supports_extra_payload": True,
+        "supports_voice_listing": True,
+    },
+
     PROVIDER_CUSTOM: {
         # Catch-all preset for any OpenAI-compatible TTS endpoint we
         # don't have a dedicated preset for. Covers self-hosted servers
