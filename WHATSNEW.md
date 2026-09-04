@@ -1,3 +1,11 @@
+## v3.9b6
+
+- Add a Chatterbox preset, which fills in the endpoint, the voices it publishes and the three audio formats it actually accepts
+- Play opus and aac as they arrive instead of waiting for the whole clip, which loudness correction used to prevent
+- Add an admin action, `openai_tts.set_api_key`, so an automation can rotate a short lived key without anyone opening the settings
+- Let a profile turn streaming off, for a backend that answers a streamed read with audio that will not decode
+- Say plainly which formats stream and which do not, in the README and in the profile options
+
 ## v3.9b5
 
 - Fix the announcement volume landing on music that was still fading out of a paused speaker, which made it swell before it stopped
