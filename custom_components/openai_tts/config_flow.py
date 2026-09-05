@@ -517,9 +517,34 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     # "OpenAI TTS", which made non-OpenAI entries
                     # read as "OpenAI TTS - Mistral".
                     provider_key = reconfigure_entry.data.get(CONF_PROVIDER)
-                    preset = PROVIDER_PRESETS.get(
-                        provider_key, PROVIDER_PRESETS[PROVIDER_OPENAI]
-                    ) if provider_key else PROVIDER_PRESETS[PROVIDER_OPENAI]
+                    stored_preset = (
+                        PROVIDER_PRESETS.get(provider_key) if provider_key
+                        else None
+                    )
+                    # A preset carries capability rules, not just a
+                    # label: which formats a profile may pick, whether
+                    # the speed slider appears, whether extra_payload is
+                    # offered. Those rules stayed attached after the
+                    # endpoint was pointed somewhere else, so an entry
+                    # moved from Groq to a self-hosted server kept
+                    # Groq's wav-only restriction. Drop the stored
+                    # provider when the URL no longer belongs to it and
+                    # let the preset be inferred from the new endpoint.
+                    url_changed = api_url != reconfigure_entry.data.get(CONF_URL)
+                    if (
+                        url_changed
+                        and stored_preset is not None
+                        and stored_preset.get("url")
+                        and api_url != stored_preset["url"]
+                    ):
+                        _LOGGER.info(
+                            "Endpoint moved off the %s preset; the entry "
+                            "will follow the new URL instead",
+                            stored_preset["label"],
+                        )
+                        user_input[CONF_PROVIDER] = None
+                        stored_preset = None
+                    preset = stored_preset or PROVIDER_PRESETS[PROVIDER_OPENAI]
                     title_prefix = preset["label"]
 
                     custom_name = (user_input.get("name") or "").strip()
