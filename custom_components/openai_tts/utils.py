@@ -336,6 +336,12 @@ def build_ffmpeg_command(
 
     return cmd
 
+def _remove_quietly(path: str) -> None:
+    """Delete ``path``, ignoring a file that is already gone."""
+    with contextlib.suppress(FileNotFoundError, OSError):
+        os.remove(path)
+
+
 async def process_audio(
     hass: HomeAssistant,
     audio_content: bytes,
@@ -458,6 +464,12 @@ async def process_audio(
 
             final_audio = await hass.async_add_executor_job(read_original)
             await hass.async_add_executor_job(os.remove, tts_path)
+            # This branch never runs ffmpeg, so the output file created
+            # above is still the empty placeholder. Returning without
+            # removing it left one zero byte file behind per call, on
+            # what is the default configuration: no chime, no loudness
+            # correction, mp3.
+            await hass.async_add_executor_job(_remove_quietly, final_output_path)
             total_time = (time.monotonic() - start_time) * 1000
             return audio_format, final_audio, total_time
 
