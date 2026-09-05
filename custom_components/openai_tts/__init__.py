@@ -168,10 +168,22 @@ async def async_migrate_entry(hass: HomeAssistant, config_entry: ConfigEntry) ->
             hass.data.setdefault(DOMAIN, {})
             hass.data[DOMAIN][migrating_flag(config_entry.entry_id)] = True
             
-            # Extract voice configuration from the entry
-            model = config_entry.data.get(CONF_MODEL, "tts-1")
-            voice = config_entry.data.get(CONF_VOICE, "shimmer")
-            speed = config_entry.data.get(CONF_SPEED, 1.0)
+            # Extract voice configuration from the entry. Options win
+            # over data, the same way the legacy entity reads them and
+            # for the same reason: the old options flow wrote model,
+            # voice and speed into options, so an entry whose owner ever
+            # opened that dialog carries the real values there. Reading
+            # only data migrated such an entry back to whatever it was
+            # first created with, silently.
+            model = config_entry.options.get(
+                CONF_MODEL, config_entry.data.get(CONF_MODEL, "tts-1")
+            )
+            voice = config_entry.options.get(
+                CONF_VOICE, config_entry.data.get(CONF_VOICE, "shimmer")
+            )
+            speed = config_entry.options.get(
+                CONF_SPEED, config_entry.data.get(CONF_SPEED, 1.0)
+            )
             
             # Get options that should move to subentry
             chime = config_entry.options.get(CONF_CHIME_ENABLE, config_entry.data.get(CONF_CHIME_ENABLE, False))
