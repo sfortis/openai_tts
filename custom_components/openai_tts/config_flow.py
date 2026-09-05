@@ -465,7 +465,16 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = invalid
 
                 api_key = user_input.get(CONF_API_KEY, "")
-                api_url = user_input.get(CONF_URL, DEFAULT_URL)
+                api_url = (user_input.get(CONF_URL) or "").strip()
+                if not api_url:
+                    # The create step refuses a blank endpoint for the
+                    # same reason: an entry saved without one fails at
+                    # the first TTS call rather than here. The default
+                    # above only fills in a key that is absent, not one
+                    # the user cleared.
+                    errors["base"] = "url_required"
+                api_url = api_url or DEFAULT_URL
+                user_input[CONF_URL] = api_url
                 is_custom_endpoint = api_url != DEFAULT_URL
 
                 # Check for duplicate API key (exclude current entry)
