@@ -1,3 +1,45 @@
+## v3.9
+
+- Pick a provider from a list: OpenAI, Mistral, Groq, Lemonfox, Kokoro, Chatterbox or a custom endpoint
+- Offer the voices the provider publishes, in the profile and in the voice picker
+- Start speaking before the reply is finished, sentence by sentence, as an option per profile
+- Let speakers that support announcements duck and resume the music themselves
+- Apply loudness correction while speech is streaming, and turn it on by default
+- Lift quiet words instead of levelling only the average of a clip
+- Start speech about a second sooner when correction is on
+- Add an admin action, `openai_tts.set_api_key`, so an automation can rotate a short lived key without anyone opening the settings
+- Add a per profile switch to stop sending the voice name, for backends that reject the field
+- Let a profile turn streaming off, for a backend that answers a streamed read with audio that will not decode
+- Raise a repair when a voice disappears at the provider, instead of failing on every call
+- Ask for a new API key when the current one is rejected
+- Support `response_variable` on `openai_tts.say`
+- Write a real length into wav and flac instead of the placeholder a streaming producer has to use, which strict players read as hours of audio
+- Set the announcement volume while the audio is generated, so paused music is not heard rising to it
+- Wait for a speaker to report a volume instead of assuming the change landed
+- Refuse a profile that cannot stream and correct at once, instead of falling back silently at playback time
+- Show the loudness correction setting on the entity, next to the other profile settings
+- Name the status sensor after its provider, and follow the interface language
+- Translate the fields of `openai_tts.say`
+- Keep measured clip lengths across a restart
+- Keep the `say` action available while an entry reloads
+- Take ffmpeg from the path configured for Home Assistant
+- Measure clip length off the event loop
+- Keep the voice catalogue out of the recorder
+- Remove what an entry or a profile stored when it is deleted
+- Fix loudness correction making short announcements quieter than the original
+- Fix the announcement volume landing on music that was still fading out of a paused speaker, which made it swell before it stopped
+- Fix a speaker left quiet after two announcements in quick succession
+- Fix announcements stalling for a minute when several profiles are configured
+- Fix the volume staying down after a cancelled announcement
+- Fix two announcements on one speaker taking each other's lowered volume for the original
+- Fix the volume staying down for a minute on a message Home Assistant already had cached
+- Fix an announcement playing twice on speakers without an announcement feature
+- Stop music a speaker resumes on its own after an announcement, without cutting the announcement short
+- Leave a speaker alone when it never reports its volume
+- Leave a speaker playing when it supports neither pause nor stop
+- Restore the volume even when the speaker reports a stale level
+- Recover from a blocked API once the block ages out, rather than on a reload
+
 ## v3.9b6
 
 - Add a Chatterbox preset, which fills in the endpoint, the voices it publishes and the three audio formats it actually accepts

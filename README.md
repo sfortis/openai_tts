@@ -34,8 +34,8 @@ OpenAI TTS turns text into speech inside Home Assistant. It works with the offic
 Version 3.9 is mostly about backends other than OpenAI, and about what a speaker
 does while an announcement is playing.
 
-- **Provider presets**: pick OpenAI, Mistral, Groq, Lemonfox, Kokoro or a custom
-  endpoint when you create an entry. The preset fills in the URL, the models and
+- **Provider presets**: pick OpenAI, Mistral, Groq, Lemonfox, Kokoro, Chatterbox
+  or a custom endpoint when you create an entry. The preset fills in the URL, the models and
   the voices the provider publishes, so a profile cannot be saved with a
   combination the backend will reject.
 - **Voices from the provider**: the voice picker lists what the backend reports
@@ -51,6 +51,12 @@ does while an announcement is playing.
 - **Repairs** are raised when a voice disappears at the provider or an API key is
   rejected, instead of every call failing with no explanation.
 - **`response_variable`** is supported on `openai_tts.say`.
+- **Stream the audio** can be turned off per profile, for a backend that answers
+  a streamed read with audio that will not decode while the same request read in
+  one go is fine.
+- **`openai_tts.set_api_key`** is an admin action that replaces the key on an
+  entry, so an automation can rotate a short lived token without anyone opening
+  the settings. The key is checked against the endpoint before it is stored.
 
 [WHATSNEW.md](WHATSNEW.md) lists every change, including the fixes.
 

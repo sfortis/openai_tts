@@ -30,3 +30,7 @@ internal_docs/
 CLAUDE.md
 GEMINI.md
 AGENTS.md
+
+# Tooling caches
+.ruff_cache/
+.pytest_cache/
