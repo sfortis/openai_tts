@@ -1687,8 +1687,15 @@ async def announce(
 
     available_players = _filter_available(hass, media_players)
     if not available_players:
-        _LOGGER.warning("No available media players")
-        return
+        # Every target was missing or unavailable, so no speech happened
+        # anywhere. Returning quietly here contradicted this function's
+        # own contract and told an automation the announcement played.
+        # Note this only fires when nothing at all is left: one live
+        # speaker among several is enough to carry on.
+        raise HomeAssistantError(
+            "None of the targeted media players are available: "
+            f"{', '.join(sorted(media_players))}. Nothing was played."
+        )
 
     _LOGGER.info(
         "Playing TTS on %d players with%s volume control",
