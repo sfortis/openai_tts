@@ -39,6 +39,23 @@
 - Leave a speaker playing when it supports neither pause nor stop
 - Restore the volume even when the speaker reports a stale level
 - Recover from a blocked API once the block ages out, rather than on a reload
+- Fix speech failing on every call when a profile is set not to send the voice name
+- Keep the model, voice and speed that were set through the old options dialog when an older entry is migrated
+- Fix reauthentication being impossible on any endpoint other than OpenAI
+- Honour the switch that turns streaming off on the sentence streaming path as well
+- Fix music being restarted a second time when an announcement failed early
+- Report a failure when sentence streaming breaks, instead of holding the speaker
+- Report an announcement that reached no speaker, instead of reporting success
+- Refuse a blank endpoint when reconfiguring, as creating one already did
+- Limit a diagnostics download to the entry it was requested for
+- Keep the body of an authentication failure out of the stored error message
+- Treat the same key at a different endpoint as a separate account
+- Keep a chime that is no longer on disk selectable, so reconfiguring does not replace it
+- Follow the new endpoint when one is moved to a different provider
+- Deliver finished audio even when measuring its length fails
+- Remove a temporary file left behind on every call in the default configuration
+- Evict remembered clip lengths by last use, matching what the shared cache does
+- Skip an ID3v2.4 footer when joining streamed audio
 
 ## v3.9b6
 
