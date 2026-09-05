@@ -780,6 +780,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         """
         if not self._get_config_value(CONF_STREAM_PIPELINING):
             return False
+        if not self._get_config_value(CONF_STREAM_AUDIO, DEFAULT_STREAM_AUDIO):
+            # The same escape hatch ``_can_use_streaming`` honours. A
+            # backend that hands back undecodable audio on a streamed
+            # read does it here too, and pipelining reads it the same
+            # way, so the switch has to cover both or it covers nothing.
+            return False
         if audio_format not in PIPELINEABLE_FORMATS:
             # mp3 and friends would need several container headers in one
             # stream. See the note in streaming.py.
