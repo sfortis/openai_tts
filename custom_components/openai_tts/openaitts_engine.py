@@ -437,7 +437,7 @@ class OpenAITTSEngine:
         )
         _LOGGER.debug(
             "TTS API request: model=%s, voice=%s, speed=%s",
-            payload["model"], payload["voice"], payload.get("speed", 1.0),
+            payload["model"], payload.get("voice"), payload.get("speed", 1.0),
         )
 
         attempt = 0
@@ -540,7 +540,7 @@ class OpenAITTSEngine:
         )
         _LOGGER.debug(
             "Streaming TTS API request: model=%s, voice=%s, speed=%s, format=%s",
-            payload["model"], payload["voice"], payload.get("speed", 1.0),
+            payload["model"], payload.get("voice"), payload.get("speed", 1.0),
             response_format,
         )
 
