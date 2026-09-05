@@ -240,7 +240,15 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Check for duplicate API key (only if API key is provided)
                 if api_key:
                     for entry in self._async_current_entries():
-                        if entry.data.get(CONF_API_KEY) == api_key:
+                        # Same key at a different endpoint is not a
+                        # duplicate. Two self-hosted servers behind one
+                        # reverse proxy share a static bearer token, and
+                        # rejecting the second one blocked a perfectly
+                        # ordinary setup.
+                        if (
+                            entry.data.get(CONF_API_KEY) == api_key
+                            and entry.data.get(CONF_URL) == api_url
+                        ):
                             _LOGGER.error("An entry with this API key already exists: %s", entry.title)
                             errors["base"] = "duplicate_api_key"
                             return self.async_show_form(
@@ -480,7 +488,11 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Check for duplicate API key (exclude current entry)
                 if api_key:
                     for entry in self._async_current_entries():
-                        if entry.entry_id != reconfigure_entry.entry_id and entry.data.get(CONF_API_KEY) == api_key:
+                        if (
+                            entry.entry_id != reconfigure_entry.entry_id
+                            and entry.data.get(CONF_API_KEY) == api_key
+                            and entry.data.get(CONF_URL) == api_url
+                        ):
                             _LOGGER.error("An entry with this API key already exists: %s", entry.title)
                             errors["base"] = "duplicate_api_key"
                             break
@@ -1136,10 +1148,19 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                     },
                 )
             ] = TemplateSelector()
+        # Keep the saved chime selectable even when the file is gone
+        # from the chime folder, the same way the model, voice and
+        # format fields do. Otherwise the form opens on a value that is
+        # not in its own option list and the submit rewrites it.
+        existing_chime = existing_data.get(CONF_CHIME_SOUND, "threetone.mp3")
+        chime_options = list(chime_opts)
+        if existing_chime and existing_chime not in chime_options:
+            chime_options.append(existing_chime)
+
         step2_fields.update({
             vol.Optional("chime", default=existing_data.get(CONF_CHIME_ENABLE, False)): selector({"boolean": {}}),
-            vol.Optional("chime_sound", default=existing_data.get(CONF_CHIME_SOUND, "threetone.mp3")): selector({
-                "select": {"options": chime_opts}
+            vol.Optional("chime_sound", default=existing_chime): selector({
+                "select": {"options": chime_options}
             }),
             vol.Optional("normalize_audio", default=existing_data.get(CONF_NORMALIZE_AUDIO, True)): selector({"boolean": {}}),
         })
