@@ -523,9 +523,6 @@ def async_setup_services(hass: HomeAssistant) -> None:
                     "validate: false to store it without checking."
                 ) from err
 
-        hass.config_entries.async_update_entry(
-            entry, data={**entry.data, CONF_API_KEY: api_key}
-        )
         # Writing the entry is synchronous; the reload that rebuilds the
         # engine with the new key is not. The entry's update listener
         # schedules it, and that listener declines to reload at all while
@@ -537,12 +534,24 @@ def async_setup_services(hass: HomeAssistant) -> None:
         # that does it is registered in ``async_setup_entry`` and torn
         # down on unload, so an entry that is disabled or failed to set
         # up has no listener at all and nothing will pick the key up.
+        #
+        # This has to be decided before the write, not after.
+        # ``async_update_entry`` fires the update listener as part of the
+        # call, so by the time it returns the entry is already
+        # ``UNLOAD_IN_PROGRESS``. Reading the state afterwards reported
+        # that nothing would reload while the reload was under way, and
+        # logged a warning saying so.
         active = (
             entry.state is ConfigEntryState.LOADED
             and hass.is_running
             and not hass.data.get(DOMAIN, {}).get(
                 migrating_flag(entry.entry_id)
             )
+        )
+        pre_write_state = entry.state
+
+        hass.config_entries.async_update_entry(
+            entry, data={**entry.data, CONF_API_KEY: api_key}
         )
         if active:
             _LOGGER.info("Stored a new API key for %s, reloading", entry.title)
@@ -552,7 +561,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
                 "reload right now: it is %s, Home Assistant running is "
                 "%s, migrating is %s. The key takes effect the next time "
                 "the entry is loaded.",
-                entry.title, entry.state, hass.is_running,
+                entry.title, pre_write_state, hass.is_running,
                 bool(hass.data.get(DOMAIN, {}).get(
                     migrating_flag(entry.entry_id)
                 )),
