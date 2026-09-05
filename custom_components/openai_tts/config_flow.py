@@ -399,8 +399,19 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 api_key = user_input.get(CONF_API_KEY)
                 api_url = self._reauth_entry.data.get(CONF_URL, "https://api.openai.com/v1/audio/speech")
 
-                # Validate the new API key
-                await async_validate_api_key(self.hass, api_key, api_url)
+                # Only probe OpenAI, the same rule the create and
+                # reconfigure steps follow. The probe asks for tts-1 with
+                # alloy in mp3, and a backend that has never heard of any
+                # of those answers 400, which reads here as a rejected
+                # key. Groq is the documented case: it accepts wav only.
+                # Probing a custom endpoint therefore made reauth
+                # impossible to complete with a perfectly good key.
+                if api_key and api_url != DEFAULT_URL:
+                    _LOGGER.debug(
+                        "Storing the new API key without probing %s", api_url
+                    )
+                elif api_key:
+                    await async_validate_api_key(self.hass, api_key, api_url)
 
                 # Update the entry with new credentials
                 self.hass.config_entries.async_update_entry(
