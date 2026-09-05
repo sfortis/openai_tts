@@ -167,7 +167,7 @@ class MessageDurationCache:
             message, voice, model, speed, instructions,
             chime, chime_sound, extra_payload,
         )
-        self._local[msg_hash] = duration_ms
+        self._remember_local(msg_hash, duration_ms)
         self._evict_local()
         self._publish_shared(msg_hash, duration_ms)
 
@@ -187,7 +187,7 @@ class MessageDurationCache:
     def mark_failed(self, message: str, **render_args) -> None:
         """Record that the last TTS attempt for ``message`` failed."""
         msg_hash = self._hash_kwargs(message, render_args)
-        self._local[msg_hash] = DURATION_FAILED_SENTINEL
+        self._remember_local(msg_hash, DURATION_FAILED_SENTINEL)
         self._evict_local()
         self._publish_shared(msg_hash, DURATION_FAILED_SENTINEL)
         _LOGGER.debug("Marked TTS as failed for hash %s", msg_hash)
@@ -207,6 +207,19 @@ class MessageDurationCache:
             kw.get("instructions"), kw.get("chime"),
             kw.get("chime_sound"), kw.get("extra_payload"),
         )
+
+    def _remember_local(self, msg_hash: str, value: int) -> None:
+        """Write an entry and move it to the end of the eviction order.
+
+        Reassigning an existing key leaves it where it was first
+        inserted, so the local dictionary evicted by original insertion
+        order while the shared one evicts by a timestamp refreshed on
+        every write. The two then disagreed about which entry was least
+        recently used, and the local dictionary is the one that survives
+        a restart.
+        """
+        self._local.pop(msg_hash, None)
+        self._local[msg_hash] = value
 
     def _evict_local(self) -> None:
         if len(self._local) > self._max_local:
