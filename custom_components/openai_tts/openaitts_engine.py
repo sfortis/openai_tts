@@ -158,7 +158,17 @@ def _classify_http_error(
     ``voice`` lets the engine pass the voice slug it was trying to use
     so a downstream Repairs issue can name the missing voice.
     """
-    detail = f" - {body_snippet[:200]}" if body_snippet and 400 <= status < 500 else ""
+    # An auth failure is the one 4xx whose body can echo the credential
+    # back, as OpenAI does with "Incorrect API key provided: sk-...".
+    # This message travels further than a log line: the health tracker
+    # keeps it as ``last_error_message`` and the API status sensor
+    # exposes it as an attribute, which the recorder then stores. The
+    # full body is still visible at DEBUG through the read-2048 path.
+    detail = (
+        f" - {body_snippet[:200]}"
+        if body_snippet and 400 <= status < 500 and status not in (401, 403)
+        else ""
+    )
     if status in (401, 403):
         return OpenAIAuthError(
             f"TTS authentication failed (HTTP {status}). Check your API key.{detail}"
