@@ -1382,7 +1382,20 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # downstream player needs a different container.
         delivered_format = audio_format
 
-        duration_ms = await self._record_duration(full_text, audio_data, resolved)
+        # The audio is finished and valid at this point, so a failure to
+        # measure it must not lose it. ffprobe missing or broken is the
+        # realistic cause, and the clip still plays without a recorded
+        # length; the restorer simply falls back to its own timing.
+        try:
+            duration_ms = await self._record_duration(
+                full_text, audio_data, resolved
+            )
+        except Exception:
+            _LOGGER.exception(
+                "Could not measure the finished clip; delivering it "
+                "without a recorded duration"
+            )
+            duration_ms = 0
         _LOGGER.info(
             "Atomic audio ready: %d bytes, %d ms (delivered as %s)",
             len(audio_data), duration_ms, delivered_format,
