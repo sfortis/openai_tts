@@ -200,7 +200,12 @@ def _strip_mp3_metadata(data: bytes) -> bytes:
             | ((data[8] & 0x7F) << 7)
             | (data[9] & 0x7F)
         )
-        start = min(size + 10, end)
+        # The syncsafe size covers the tag body only. A 2.4 tag may add
+        # a ten byte footer, announced by bit 0x10 of the flags, and the
+        # size field excludes it. Missing that left the footer sitting
+        # in front of the first frame of the batch.
+        footer = 10 if (data[5] & 0x10) else 0
+        start = min(size + 10 + footer, end)
 
     if end - start >= 128 and data[end - 128:end - 125] == b"TAG":
         end -= 128
