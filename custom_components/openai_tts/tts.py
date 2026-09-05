@@ -873,7 +873,23 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 collected.append(chunk)
                 yield chunk
         except OpenAITTSError as err:
+            # Only the single request run has a message to key the cache
+            # on, and it is set before synthesis starts, so it is already
+            # there when this fires. That run is the one
+            # ``openai_tts.say`` takes, and the sentinel is what stops
+            # ``volume_restore`` holding the speaker for audio that is
+            # never coming. A genuinely pipelined run has no single
+            # message and nothing waiting on its duration.
+            self._mark_failed_pipelined(stats, resolved)
             await self._handle_engine_error(err)
+            raise
+        except Exception as err:
+            # Anything the engine did not raise itself, ffmpeg through
+            # ``_apply_loudness`` most likely. Without this the health
+            # sensor never hears about it.
+            self._mark_failed_pipelined(stats, resolved)
+            if self._health_tracker is not None:
+                self._health_tracker.record_error(err)
             raise
         else:
             if self._health_tracker is not None:
@@ -1086,6 +1102,21 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             chime=r.get("chime_enable"), chime_sound=r.get("chime_sound"),
             extra_payload=r.get("extra_payload"),
         )
+
+    def _mark_failed_pipelined(
+        self,
+        stats: dict[str, Any],
+        resolved: dict[str, Any] | None,
+    ) -> None:
+        """Stamp a failure sentinel for a pipelined run, when it has a key.
+
+        ``raw_text`` is only present when the whole text went out as one
+        request. A run that really was split has no single message to
+        hash, so there is nothing to mark and nothing waiting on it.
+        """
+        raw_text = stats.get("raw_text") or ""
+        if raw_text:
+            self._mark_failed_with_resolved(raw_text, resolved)
 
     def _record_failure(
         self,
