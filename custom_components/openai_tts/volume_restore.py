@@ -1893,6 +1893,12 @@ async def announce(
         except Exception as err:
             if restorer is not None:
                 await restorer.restore_immediate(restore_volumes=restore_enabled)
+                # The unwind is done. Say so, or the ``finally`` runs it
+                # a second time, and it is not idempotent: the paused and
+                # stopped snapshots are never cleared, so a second pass
+                # replays the same media and seeks it back to the same
+                # stale position on a speaker that has already resumed.
+                restored = True
             raise HomeAssistantError(
                 f"TTS speak failed: {err}"
             ) from err
@@ -1927,6 +1933,7 @@ async def announce(
                 "without holding", tts_entity,
             )
             await restorer.restore_immediate(restore_volumes=restore_enabled)
+            restored = True
             raise HomeAssistantError(
                 f"TTS generation failed for {tts_entity}; no audio was "
                 "delivered to the speakers. Check the integration log for "
