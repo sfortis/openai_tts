@@ -6,6 +6,7 @@ from typing import Any
 from homeassistant.components.diagnostics import async_redact_data
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
+from homeassistant.helpers import entity_registry as er
 
 from .api_health import health_tracker_for
 from .const import CONF_API_KEY, DOMAIN, MESSAGE_DURATIONS_KEY
@@ -42,10 +43,21 @@ async def async_get_config_entry_diagnostics(
             }
             data["subentries"].append(subentry_info)
 
-    # Add TTS entity states
+    # Add TTS entity states, for this entry only. Matching on the
+    # entity_id prefix picked up every OpenAI TTS entity on the system,
+    # so a report downloaded for one entry carried the entities of every
+    # other entry as well.
+    entity_registry = er.async_get(hass)
+    own_entity_ids = {
+        entity.entity_id
+        for entity in er.async_entries_for_config_entry(
+            entity_registry, entry.entry_id
+        )
+        if entity.domain == "tts"
+    }
     tts_entities = []
     for state in hass.states.async_all("tts"):
-        if state.entity_id.startswith("tts.openai_tts"):
+        if state.entity_id in own_entity_ids:
             tts_entities.append({
                 "entity_id": state.entity_id,
                 "state": state.state,
