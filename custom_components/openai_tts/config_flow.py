@@ -414,20 +414,31 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # key. Groq is the documented case: it accepts wav only.
                 # Probing a custom endpoint therefore made reauth
                 # impossible to complete with a perfectly good key.
-                if api_key and api_url != DEFAULT_URL:
+                api_key = (api_key or "").strip()
+                if not api_key:
+                    # Reauth exists to replace a key that stopped
+                    # working. Saving nothing would replace it with
+                    # nothing and then report success, so refuse here.
+                    # The parent reconfigure step has its own guard for
+                    # this in ``validate_user_input``; reauth does not.
+                    errors["base"] = "wrong_api_key"
+                elif api_url != DEFAULT_URL:
                     _LOGGER.debug(
                         "Storing the new API key without probing %s", api_url
                     )
-                elif api_key:
+                else:
                     await async_validate_api_key(self.hass, api_key, api_url)
 
-                # Update the entry with new credentials
-                self.hass.config_entries.async_update_entry(
-                    self._reauth_entry,
-                    data={**self._reauth_entry.data, CONF_API_KEY: api_key},
-                )
-                await self.hass.config_entries.async_reload(self._reauth_entry.entry_id)
-                return self.async_abort(reason="reauth_successful")
+                if not errors:
+                    # Update the entry with new credentials
+                    self.hass.config_entries.async_update_entry(
+                        self._reauth_entry,
+                        data={**self._reauth_entry.data, CONF_API_KEY: api_key},
+                    )
+                    await self.hass.config_entries.async_reload(
+                        self._reauth_entry.entry_id
+                    )
+                    return self.async_abort(reason="reauth_successful")
 
             except OpenAIAuthError:
                 errors["base"] = "invalid_api_key"
@@ -1402,10 +1413,21 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                 default=self._config_entry.options.get(CONF_CHIME_ENABLE, self._config_entry.data.get(CONF_CHIME_ENABLE, False)),
             )] = selector({"boolean": {}})
 
+            # Same protection the profile form has: a chime file that
+            # is no longer in the folder must stay selectable, or the
+            # form opens on a value outside its own option list and any
+            # submit rewrites it.
+            legacy_chime = self._config_entry.options.get(
+                CONF_CHIME_SOUND,
+                self._config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3"),
+            )
+            legacy_chime_options = list(chime_opts)
+            if legacy_chime and legacy_chime not in legacy_chime_options:
+                legacy_chime_options.append(legacy_chime)
             schema_dict[vol.Optional(
                 "chime_sound",  # Use strings directly
-                default=self._config_entry.options.get(CONF_CHIME_SOUND, self._config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3")),
-            )] = selector({"select": {"options": chime_opts}})
+                default=legacy_chime,
+            )] = selector({"select": {"options": legacy_chime_options}})
 
             schema_dict[vol.Optional(
                 "normalize_audio",  # Use strings directly
