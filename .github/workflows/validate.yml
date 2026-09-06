@@ -24,6 +24,20 @@ jobs:
       - name: Ruff
         run: ruff check --output-format=github .
 
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+      # Pinned for the same reason ruff is: a new pytest release should
+      # not turn this job red on its own.
+      - name: Install pytest
+        run: pip install pytest==9.0.2
+      - name: Tests
+        run: pytest -q
+
   validate-hacs:
     runs-on: ubuntu-latest
     steps:

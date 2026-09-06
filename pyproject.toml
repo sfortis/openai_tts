@@ -30,3 +30,11 @@ select = [
 # annotated attributes, so marking them ClassVar in a subclass would
 # be wrong rather than merely noisy.
 ignore = ["RUF012"]
+
+[tool.pytest.ini_options]
+# The suite deliberately covers only logic that imports nothing from
+# Home Assistant, so it runs on a plain checkout with pytest alone. That
+# is a real limit, not an oversight: a suite that needs a Home Assistant
+# test harness would not have existed in time to catch the selector
+# defect that shipped in 3.9.
+testpaths = ["tests"]

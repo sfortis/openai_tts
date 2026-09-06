@@ -63,6 +63,7 @@ from .const import (
     voices_for_model,
 )
 from .exceptions import OpenAIAuthError, OpenAITTSError
+from .selector_options import ensure_selectable
 from .streaming import PIPELINEABLE_FORMATS
 from .voice_listing import async_fetch_voice_options
 
@@ -1196,13 +1197,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # appended a string to a list of dictionaries and the selector
         # refused the mixed list, which broke the form outright.
         existing_chime = existing_data.get(CONF_CHIME_SOUND, "threetone.mp3")
-        chime_options = list(chime_opts)
-        if existing_chime and not any(
-            opt["value"] == existing_chime for opt in chime_options
-        ):
-            chime_options.append(
-                {"value": existing_chime, "label": f"{existing_chime} (saved)"}
-            )
+        chime_options = ensure_selectable(chime_opts, existing_chime)
 
         step2_fields.update({
             vol.Optional("chime", default=existing_data.get(CONF_CHIME_ENABLE, False)): selector({"boolean": {}}),
@@ -1432,13 +1427,7 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                 CONF_CHIME_SOUND,
                 self._config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3"),
             )
-            legacy_chime_options = list(chime_opts)
-            if legacy_chime and not any(
-                opt["value"] == legacy_chime for opt in legacy_chime_options
-            ):
-                legacy_chime_options.append(
-                    {"value": legacy_chime, "label": f"{legacy_chime} (saved)"}
-                )
+            legacy_chime_options = ensure_selectable(chime_opts, legacy_chime)
             schema_dict[vol.Optional(
                 "chime_sound",  # Use strings directly
                 default=legacy_chime,
