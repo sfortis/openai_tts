@@ -1,3 +1,7 @@
+## v3.9.1
+
+- Fix the profile settings form refusing to open, which left the profile unavailable
+
 ## v3.9
 
 - Pick a provider from a list: OpenAI, Mistral, Groq, Lemonfox, Kokoro, Chatterbox or a custom endpoint
