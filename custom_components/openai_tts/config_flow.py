@@ -1188,10 +1188,21 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # from the chime folder, the same way the model, voice and
         # format fields do. Otherwise the form opens on a value that is
         # not in its own option list and the submit rewrites it.
+        #
+        # ``chime_opts`` holds ``{"value": ..., "label": ...}`` entries,
+        # so the saved name has to be compared against the values and
+        # appended in the same shape. Comparing the bare string against
+        # the dictionaries was always unequal, so every reconfigure
+        # appended a string to a list of dictionaries and the selector
+        # refused the mixed list, which broke the form outright.
         existing_chime = existing_data.get(CONF_CHIME_SOUND, "threetone.mp3")
         chime_options = list(chime_opts)
-        if existing_chime and existing_chime not in chime_options:
-            chime_options.append(existing_chime)
+        if existing_chime and not any(
+            opt["value"] == existing_chime for opt in chime_options
+        ):
+            chime_options.append(
+                {"value": existing_chime, "label": f"{existing_chime} (saved)"}
+            )
 
         step2_fields.update({
             vol.Optional("chime", default=existing_data.get(CONF_CHIME_ENABLE, False)): selector({"boolean": {}}),
@@ -1422,8 +1433,12 @@ class OpenAITTSOptionsFlow(OptionsFlow):
                 self._config_entry.data.get(CONF_CHIME_SOUND, "threetone.mp3"),
             )
             legacy_chime_options = list(chime_opts)
-            if legacy_chime and legacy_chime not in legacy_chime_options:
-                legacy_chime_options.append(legacy_chime)
+            if legacy_chime and not any(
+                opt["value"] == legacy_chime for opt in legacy_chime_options
+            ):
+                legacy_chime_options.append(
+                    {"value": legacy_chime, "label": f"{legacy_chime} (saved)"}
+                )
             schema_dict[vol.Optional(
                 "chime_sound",  # Use strings directly
                 default=legacy_chime,
