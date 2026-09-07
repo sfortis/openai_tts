@@ -68,6 +68,25 @@ def test_saved_value_is_always_selectable_afterwards():
             assert value in option_values(ensure_selectable(options, value))
 
 
+def test_empty_option_list_still_appends_a_mapping():
+    """A missing chime folder leaves no options to copy a shape from.
+
+    The chime picker is a mapping field, so the saved value has to be
+    appended as a mapping even when the scan returned nothing. A one
+    element list is never "mixed", so the uniformity test cannot catch
+    this on its own.
+    """
+    out = ensure_selectable([], "threetone.mp3")
+    assert out == [{"value": "threetone.mp3", "label": "threetone.mp3 (saved)"}]
+
+
+def test_appended_mapping_carries_both_keys():
+    """The selector needs value and label, not just one of them."""
+    out = ensure_selectable(MAPPINGS, "gone.mp3")
+    assert set(out[-1]) == {"value", "label"}
+    assert out[-1]["value"] == "gone.mp3"
+
+
 def test_empty_value_leaves_the_list_alone():
     assert ensure_selectable(MAPPINGS, None) == MAPPINGS
     assert ensure_selectable(MAPPINGS, "") == MAPPINGS
