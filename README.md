@@ -26,7 +26,9 @@ OpenAI TTS turns text into speech inside Home Assistant. It works with the offic
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [openai_tts.say service](#openai_ttssay-service)
+- [openai_tts.set_api_key action](#openai_ttsset_api_key-action)
 - [Custom backends](#custom-backends)
+- [Contributing](#contributing)
 - [Notes](#notes)
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
@@ -63,6 +65,10 @@ does while an announcement is playing.
 ## Core Features
 
 - **Text-to-Speech** via OpenAI's Audio Speech API or any compatible backend.
+- **Provider presets** for OpenAI, Mistral Voxtral, Groq, Lemonfox, Kokoro-FastAPI,
+  Chatterbox and a catch-all custom entry. The preset fills in the endpoint and the
+  models, and hides the settings a backend rejects, so a profile cannot be saved
+  with a combination that will fail at the first call.
 - **Multiple TTS agents** under one or more OpenAI accounts. Each agent has its own voice, model, speed, audio format and audio-processing settings.
 - **Models**: `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` (with custom speaking-style instructions).
 - **Voices**: full OpenAI catalog including `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, plus the `gpt-4o-mini-tts`-only voices `ballad`, `cedar`, `marin`, `verse`.
@@ -75,7 +81,8 @@ does while an announcement is playing.
   starts on the first finished sentence rather than the finished reply. Needs `mp3`
   or `pcm`, since the other formats cannot be joined end to end.
 - **Chime prefix** with a user-configurable library (drop your own mp3 in `config/custom_components/openai_tts/chime`).
-- **Loudness normalisation** for small speakers and mobile playback.
+- **Loudness normalisation** for small speakers and mobile playback, on by default
+  and applied while the audio streams.
 - **Volume restoration** to the original speaker level after the announcement.
 - **Media pause and resume** during the announcement on supported platforms.
 - **Sonos** announcement feature with native group handling.
@@ -110,6 +117,12 @@ Each integration entry stores the API credentials and endpoint. Each sub-entry (
 - **Custom instructions** (gpt-4o-mini-tts only) for speaking style.
 - **Extra JSON payload** for custom backends.
 - **Chime**, **chime sound** and **normalise audio** as defaults that the service call can override.
+- **Sentence streaming** (off by default) to start speaking on the first finished
+  sentence of an assistant reply instead of the finished reply.
+- **Stream the audio** (on by default). Turn it off for a backend whose streamed
+  response will not decode while the same request read in one go is fine.
+- **Send the voice name** (on by default). Turn it off for a backend that rejects
+  the `voice` field, such as audio.cpp serving Chatterbox or VoxCPM2.
 
 > Enabling chime disables streaming for that profile, since a chime has to be attached
 > to finished audio. Loudness normalisation does not: it runs on the stream for `mp3`,
@@ -146,12 +159,35 @@ data:
   extra_payload: '{"temperature": 0.8}'
 ```
 
+## `openai_tts.set_api_key` action
+
+Replaces the stored API key on an entry, so an automation can rotate a short
+lived token without anyone opening the settings. It needs an administrator, and
+it targets either `config_entry_id` or `tts_entity`, not both.
+
+The key is checked against the endpoint before it is stored, so a token the
+endpoint refuses leaves the working one in place. Add `validate: false` to store
+it without checking, which is what a backend that rejects the probe request
+needs. The entry reloads straight away, so no restart is required.
+
+```yaml
+action: openai_tts.set_api_key
+data:
+  config_entry_id: 01ABCDEF...
+  api_key: "{{ token.content.access_token }}"
+  # validate: false
+```
+
+With `response_variable` the call reports what it did: `changed` is false when the
+key was already the one stored, and `reloading` says whether the running entity
+picked it up or will do so at the next load.
+
 ## Custom backends
 
-The integration works with any OpenAI-compatible TTS endpoint. Mistral, Groq,
-Lemonfox and Kokoro have presets that fill in the endpoint and the catalogue for
-you, and anything else is configured as a custom endpoint. When the URL is not
-`api.openai.com`:
+The integration works with any OpenAI-compatible TTS endpoint. Mistral Voxtral,
+Groq, Lemonfox, Kokoro-FastAPI and Chatterbox have presets that fill in the
+endpoint and the catalogue for you, and anything else is configured as a custom
+endpoint. When the URL is not `api.openai.com`:
 
 - The API key field becomes optional.
 - The voice field accepts any backend-specific name.
