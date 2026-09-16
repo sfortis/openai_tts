@@ -63,7 +63,8 @@ async def async_fetch_voice_options(
         session = aiohttp_client.async_get_clientsession(hass)
         timeout = aiohttp.ClientTimeout(total=8)
         async with session.get(
-            voices_url, headers=headers, timeout=timeout
+            voices_url, headers=headers, timeout=timeout,
+            params={"limit": 100},
         ) as resp:
             if resp.status != 200:
                 _LOGGER.debug(
