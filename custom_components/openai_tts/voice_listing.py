@@ -34,6 +34,15 @@ VOICES_PATH = "voices"
 # the second.
 CATALOGUE_TTL_S = 1800.0
 
+# How many voices to ask for in a single request. Mistral paginates
+# ``GET /v1/audio/voices`` and defaults to ten per page, so a
+# parameterless fetch hid every voice past the first page from the
+# picker. The endpoint documents ``limit``, ``offset`` and ``type``,
+# and refuses a limit above this value with HTTP 422, so this is the
+# largest page it will serve. Backends that do not paginate declare no
+# such parameter and drop it, so sending it always costs them nothing.
+VOICE_PAGE_LIMIT = 100
+
 
 def voices_url_for(speech_url: str) -> str:
     """Return the voice-listing URL beside ``speech_url``.
@@ -63,8 +72,10 @@ async def async_fetch_voice_options(
         session = aiohttp_client.async_get_clientsession(hass)
         timeout = aiohttp.ClientTimeout(total=8)
         async with session.get(
-            voices_url, headers=headers, timeout=timeout,
-            params={"limit": 100},
+            voices_url,
+            headers=headers,
+            timeout=timeout,
+            params={"limit": VOICE_PAGE_LIMIT},
         ) as resp:
             if resp.status != 200:
                 _LOGGER.debug(
@@ -152,4 +163,31 @@ def voice_options_from_payload(
             continue
         label = v.get("name") or v.get("label") or voice_id
         options.append({"value": str(voice_id), "label": str(label)})
+
+    _log_if_truncated(payload, len(items), source_url)
     return options or None
+
+
+def _log_if_truncated(payload: Any, received: int, source_url: str) -> None:
+    """Say so when the backend held voices back on a later page.
+
+    A paginated backend reports how many voices it has in ``total``
+    while returning only the current page. We ask for the largest page
+    the endpoint allows, so this fires only for an account holding more
+    voices than that, and then the picker is genuinely incomplete.
+    Without this line the symptom reaching us is "some of my voices are
+    missing", which is indistinguishable from a voice that was never
+    cloned.
+    """
+    if not isinstance(payload, dict):
+        return
+    total = payload.get("total")
+    if not isinstance(total, int) or isinstance(total, bool):
+        return
+    if total <= received:
+        return
+    _LOGGER.debug(
+        "Voice listing at %s reports %d voices but served %d. The picker "
+        "shows the first page only; fetching the rest needs an offset walk.",
+        source_url, total, received,
+    )
