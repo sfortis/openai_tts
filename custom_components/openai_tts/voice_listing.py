@@ -37,10 +37,19 @@ CATALOGUE_TTL_S = 1800.0
 # How many voices to ask for in a single request. Mistral paginates
 # ``GET /v1/audio/voices`` and defaults to ten per page, so a
 # parameterless fetch hid every voice past the first page from the
-# picker. The endpoint documents ``limit``, ``offset`` and ``type``,
-# and refuses a limit above this value with HTTP 422, so this is the
-# largest page it will serve. Backends that do not paginate declare no
-# such parameter and drop it, so sending it always costs them nothing.
+# picker. The endpoint documents ``limit``, ``offset`` and ``type``
+# but states no maximum for any of them.
+#
+# A hundred is the ceiling reported on pull request #75, measured
+# against a live account: the full catalogue came back at a hundred and
+# anything above it answered HTTP 422. That was not re-verified here,
+# because the endpoint answers 401 before it validates query
+# parameters, so it cannot be probed without a key. Raising this value
+# on an untested guess would cost every Mistral user their voice
+# picker, since a rejected listing degrades to a free-text field.
+#
+# Backends that do not paginate declare no such parameter and drop it,
+# so sending it costs them nothing.
 VOICE_PAGE_LIMIT = 100
 
 
