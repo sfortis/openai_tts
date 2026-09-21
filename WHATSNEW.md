@@ -1,3 +1,7 @@
+## v3.9.2
+
+- Show every voice a Mistral account has, instead of only the first ten
+
 ## v3.9.1
 
 - Fix the profile settings form refusing to open, which left the profile unavailable
