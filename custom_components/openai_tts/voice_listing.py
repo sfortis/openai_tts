@@ -172,6 +172,4 @@ def voice_options_from_payload(
             continue
         label = v.get("name") or v.get("label") or voice_id
         options.append({"value": str(voice_id), "label": str(label)})
-
     return options or None
-
