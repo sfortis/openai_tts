@@ -8,7 +8,7 @@
 [![Stars](https://img.shields.io/github/stars/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/stargazers)
 [![HACS](https://img.shields.io/badge/HACS-Default-41BDF5.svg)](https://hacs.xyz/)
 [![Validate](https://img.shields.io/github/actions/workflow/status/sfortis/openai_tts/validate.yml?branch=main&label=validate&logo=github-actions)](https://github.com/sfortis/openai_tts/actions/workflows/validate.yml)
-![Home Assistant](https://img.shields.io/badge/HA-2025.7%2B-41BDF5?logo=home-assistant&logoColor=white)
+![Home Assistant](https://img.shields.io/badge/HA-2026.9.1%2B-41BDF5?logo=home-assistant&logoColor=white)
 [![License](https://img.shields.io/github/license/sfortis/openai_tts?logo=open-source-initiative&logoColor=white)](LICENSE)
 
 <a href="https://www.buymeacoffee.com/sfortis" target="_blank"><img src="https://cdn.buymeacoffee.com/buttons/v2/default-yellow.png" alt="Buy Me A Coffee" height="42" width="170"></a>
@@ -60,7 +60,7 @@ On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-
 
 ### Version 3.10 (beta)
 
-Version 3.10 is a beta. To try it, open the integration in HACS, choose **Redownload** and turn on **Show beta versions**.
+Version 3.10 is a beta and needs Home Assistant 2026.9.1 or later. To try it, open the integration in HACS, choose **Redownload** and turn on **Show beta versions**.
 
 - **OpenRouter preset**: the model picker lists the speech models OpenRouter offers, and the voice picker lists the voices of the chosen model.
 - **Gain** per profile, from -12 to +12 dB, to make a quiet voice louder or a loud one softer. It works with or without loudness normalisation, and a limiter stops a boost from clipping.
@@ -105,7 +105,7 @@ does while an announcement is playing.
 
 - Several TTS agents under one entry, each with its own model, voice, speed, audio format and audio processing.
 - Audio in `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, chosen per profile.
-- Streaming playback on Home Assistant 2025.7 and later, so audio plays as it arrives instead of after the whole clip is written. Streaming works with `mp3`, `opus`, `aac` and `pcm`. A `wav` or `flac` file states its length in a header before any audio exists, so those two formats are always assembled in full first.
+- Streaming playback, so audio plays as it arrives instead of after the whole clip is written. Streaming works with `mp3`, `opus`, `aac` and `pcm`. A `wav` or `flac` file states its length in a header before any audio exists, so those two formats are always assembled in full first.
 - Sentence streaming for the voice assistant, off by default and set per profile. Speech starts on the first finished sentence rather than on the finished reply. It needs `mp3` or `pcm`, because the other formats cannot be joined end to end.
 - Loudness normalisation for small speakers and mobile playback, on by default and applied while the audio streams.
 - A gain per profile, from -12 to +12 dB, with a limiter so a boost cannot clip (3.10 beta).

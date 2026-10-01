@@ -6,6 +6,7 @@
 - Play announcements on Sonos and Music Assistant speakers at the requested volume, ducking the music instead of pausing it
 - Let the voice picker take a typed voice on Kokoro and OpenRouter, for a voice mix such as `am_michael(1)+am_eric(2)`
 - Keep announcing on the speakers that work when one speaker in a group fails, and report which one failed
+- Require Home Assistant 2026.9.1 or later
 
 ## v3.9.2
 

@@ -1,8 +1,8 @@
 """TTS entity for the OpenAI TTS integration.
 
 The entity implements the streaming ``async_stream_tts_audio`` contract
-introduced in HA 2025.7, which is the minimum version this integration
-supports. The legacy ``async_get_tts_audio`` contract is deliberately
+introduced in HA 2025.7. The minimum supported version is 2026.9.1, the
+oldest one this release was tested on (see ``hacs.json``). The legacy ``async_get_tts_audio`` contract is deliberately
 absent: Home Assistant only falls back to it when an entity does not
 override the streaming method, so on every supported version it was
 unreachable code.

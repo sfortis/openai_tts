@@ -1,6 +1,6 @@
 {
     "name": "OpenAI TTS & compatible providers",
-    "homeassistant": "2025.7.0",
+    "homeassistant": "2026.9.1",
     "zip_release": true,
     "filename": "openai_tts.zip"
 }
