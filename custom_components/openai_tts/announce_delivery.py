@@ -23,7 +23,7 @@ from homeassistant.components.media_player import (
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
 from homeassistant.components.tts import generate_media_source_id
 from homeassistant.const import ATTR_ENTITY_ID
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 
 from .announce_routes import (
     EXTRA_ANNOUNCE_VOLUME,
@@ -60,7 +60,10 @@ def announcement_media_id(
 
 
 async def play_route(
-    hass: HomeAssistant, route: AnnounceRoute, media_id: str
+    hass: HomeAssistant,
+    route: AnnounceRoute,
+    media_id: str,
+    context: Context | None = None,
 ) -> None:
     """Send one route its ``play_media`` call, exactly once.
 
@@ -72,6 +75,10 @@ async def play_route(
     The call is blocking. How long that takes depends on the platform:
     Music Assistant returns when the announcement has finished, Sonos
     and Cast return once the device has the clip.
+
+    ``context`` is the context of the ``openai_tts.say`` call, passed on
+    as ``tts.speak`` passes its own, so the media player's state changes
+    are attributed to whoever made the announcement.
     """
     level = route.extra.get(EXTRA_ANNOUNCE_VOLUME)
     if level is not None and outside_default_clamp(level):
@@ -92,5 +99,6 @@ async def play_route(
     if route.extra:
         service_data[ATTR_MEDIA_EXTRA] = dict(route.extra)
     await hass.services.async_call(
-        MP_DOMAIN, SERVICE_PLAY_MEDIA, service_data, blocking=True,
+        MP_DOMAIN, SERVICE_PLAY_MEDIA, service_data,
+        blocking=True, context=context,
     )

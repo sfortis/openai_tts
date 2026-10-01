@@ -429,6 +429,7 @@ def async_setup_services(hass: HomeAssistant) -> None:
             tts_volume=tts_volume,
             pause_playback=pause_playback,
             announce=announce_mode,
+            context=call.context,
         )
 
     async def _handle_say(call: ServiceCall) -> dict[str, Any] | None:

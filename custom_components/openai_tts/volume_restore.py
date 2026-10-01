@@ -42,7 +42,7 @@ from homeassistant.const import (
     STATE_UNAVAILABLE,
     STATE_UNKNOWN,
 )
-from homeassistant.core import Event, HomeAssistant, callback
+from homeassistant.core import Context, Event, HomeAssistant, callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers import entity_registry
 from homeassistant.helpers.event import (
@@ -1622,6 +1622,7 @@ async def announce(
     tts_volume: Optional[float] = None,
     pause_playback: Optional[bool] = None,
     announce: Optional[bool] = None,
+    context: Optional[Context] = None,
 ) -> None:
     """Run a TTS announcement with automatic volume save/restore.
 
@@ -1931,7 +1932,7 @@ async def announce(
             )
             for route in native_routes:
                 native_tasks.append((route, asyncio.create_task(
-                    _play_route_timed(hass, route, media_id),
+                    _play_route_timed(hass, route, media_id, context),
                     name="openai_tts native announce",
                 )))
             if managed_route is None:
@@ -1944,7 +1945,7 @@ async def announce(
                 # is where the paused music finishes fading out. See
                 # ``apply_deferred_volume``.
                 managed_task = asyncio.create_task(
-                    play_route(hass, managed_route, media_id),
+                    play_route(hass, managed_route, media_id, context),
                     name="openai_tts announce",
                 )
             try:
@@ -2201,14 +2202,17 @@ def _filter_available(hass: HomeAssistant, media_players: List[str]) -> List[str
 
 
 async def _play_route_timed(
-    hass: HomeAssistant, route: AnnounceRoute, media_id: str
+    hass: HomeAssistant,
+    route: AnnounceRoute,
+    media_id: str,
+    context: Context | None,
 ) -> float:
     """Play a native route and return the loop time its call returned.
 
     A route whose platform returns before playback (Sonos) keeps the
     speaker gate for the clip's length from that moment.
     """
-    await play_route(hass, route, media_id)
+    await play_route(hass, route, media_id, context)
     return asyncio.get_running_loop().time()
 
 
