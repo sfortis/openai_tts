@@ -53,7 +53,9 @@ DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 # endpoint URL, the voice and model catalogues, the audio formats the
 # backend accepts, and which fields to render. ``catalogue_source``
 # says where the live model and voice lists come from, and is absent for
-# every preset that uses the plain ``/v1/audio/voices`` listing. The
+# every preset that uses the plain ``/v1/audio/voices`` listing.
+# ``title_name``, ``self_hosted`` and ``title_shows_host`` shape the
+# entry title, as described in ``entry_titles.py``. The
 # engine reads none of it; request shaping there is provider-agnostic.
 # Add new providers by
 # extending this dict; nothing else in the codebase should need a
@@ -71,6 +73,9 @@ DEFAULT_PROVIDER = PROVIDER_OPENAI
 PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     PROVIDER_OPENAI: {
         "label": "OpenAI",
+        "title_name": "OpenAI",
+        "self_hosted": False,
+        "title_shows_host": False,
         "url": DEFAULT_URL,
         "default_model": "gpt-4o-mini-tts",
         "default_format": "mp3",
@@ -103,6 +108,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     },
     PROVIDER_MISTRAL: {
         "label": "Mistral Voxtral",
+        "title_name": "Mistral",
+        "self_hosted": False,
+        "title_shows_host": False,
         "url": "https://api.mistral.ai/v1/audio/speech",
         "default_model": "voxtral-mini-tts-latest",
         "model_catalog": ["voxtral-mini-tts-latest"],
@@ -146,6 +154,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # (abdullah, fahad, sultan, lulwa, noura, aisha) via the
         # custom-voice free-text field.
         "label": "Groq (Orpheus TTS)",
+        "title_name": "Groq",
+        "self_hosted": False,
+        "title_shows_host": False,
         "url": "https://api.groq.com/openai/v1/audio/speech",
         "default_model": "canopylabs/orpheus-v1-english",
         "model_catalog": [
@@ -202,6 +213,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # prefixed slugs covering ES/FR/IT/PT/JA/ZH/HI etc.) can type
         # the full id via the custom-value path on the voice picker.
         "label": "Lemonfox.ai (Kokoro TTS)",
+        "title_name": "Lemonfox",
+        "self_hosted": False,
+        "title_shows_host": False,
         "url": "https://api.lemonfox.ai/v1/audio/speech",
         # Lemonfox runs a single underlying model; ``tts-1`` is the
         # OpenAI-compatible alias they accept and the value is
@@ -242,6 +256,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # K-RAD) explicitly asking for Kokoro-FastAPI integration;
         # this preset is the zero-config path that closes that loop.
         "label": "Kokoro-FastAPI (self-hosted Kokoro)",
+        "title_name": "Kokoro",
+        "self_hosted": True,
+        "title_shows_host": True,
         "url": "http://localhost:8880/v1/audio/speech",
         # Kokoro-FastAPI maps ``tts-1`` / ``tts-1-hd`` / ``kokoro`` to
         # the same underlying model in ``openai_mappings.json``. We
@@ -295,6 +312,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         #  - voices are published at ``/v1/audio/voices`` as file names
         #    such as ``Abigail.wav``.
         "label": "Chatterbox (self-hosted)",
+        "title_name": "Chatterbox",
+        "self_hosted": True,
+        "title_shows_host": True,
         "url": "http://localhost:8004/v1/audio/speech",
         "default_model": "chatterbox",
         "model_catalog": ["chatterbox"],
@@ -332,6 +352,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # The model list below is only the fallback for when that listing
         # cannot be reached.
         "label": "OpenRouter",
+        "title_name": "OpenRouter",
+        "self_hosted": False,
+        "title_shows_host": False,
         "url": "https://openrouter.ai/api/v1/audio/speech",
         "default_model": "hexgrad/kokoro-82m",
         "model_catalog": [
@@ -360,6 +383,9 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         # API key is optional because many self-hosted setups don't
         # gate the endpoint, while hosted proxies usually do.
         "label": "Custom / Self-hosted (any OpenAI-compatible endpoint)",
+        "title_name": "Custom",
+        "self_hosted": False,
+        "title_shows_host": True,
         "url": "",  # user enters
         "default_model": None,
         "model_catalog": None,

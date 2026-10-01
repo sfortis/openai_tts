@@ -1,3 +1,9 @@
+## v3.10b3
+
+- Name new entries after the provider, mark self-hosted ones, and leave the hostname out of cloud provider titles
+- Stop repeating the provider name in an entry title when the account name is the same
+- Title an entry Custom instead of OpenAI when a reconfigure moves it off its preset to another endpoint
+
 ## v3.10b2
 
 - Accept floors and labels as targets of `openai_tts.say`, next to entities, devices and areas

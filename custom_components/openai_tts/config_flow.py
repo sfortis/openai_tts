@@ -71,6 +71,7 @@ from .const import (
     voice_options,
     voices_for_model,
 )
+from .entry_titles import account_name_from_title, entry_title
 from .exceptions import OpenAIAuthError, OpenAITTSError
 from .selector_options import ensure_selectable
 from .streaming import PIPELINEABLE_FORMATS
@@ -294,19 +295,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # (no API key to compare).
                 self._abort_if_unique_id_configured()
                 hostname = urlparse(user_input[CONF_URL]).hostname
-                # Title uses the provider label as the prefix when a
-                # known preset was picked, falls back to "OpenAI TTS"
-                # for custom / unknown providers. The optional account
-                # name still suffixes the title so multi-account setups
-                # ("OpenAI - Personal" / "OpenAI - Work") keep working.
-                provider_label = preset["label"]
-                custom_name = (user_input.get("name") or "").strip()
-                if custom_name:
-                    title = f"{provider_label} - {custom_name}"
-                else:
-                    title = f"{provider_label} ({hostname})"
                 return self.async_create_entry(
-                    title=title,
+                    title=entry_title(preset, user_input.get("name"), hostname),
                     data=user_input,
                 )
             except data_entry_flow.AbortFlow:
@@ -529,10 +519,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     await self.async_set_unique_id(reconfigure_entry.unique_id)
                     self._abort_if_unique_id_mismatch()
 
-                    # Title prefix follows the entry's preset label
-                    # (Mistral, Groq, ...) instead of always saying
-                    # "OpenAI TTS", which made non-OpenAI entries
-                    # read as "OpenAI TTS - Mistral".
+                    # The title follows the entry's preset, see
+                    # entry_titles.py.
                     provider_key = reconfigure_entry.data.get(CONF_PROVIDER)
                     stored_preset = (
                         PROVIDER_PRESETS.get(provider_key) if provider_key
@@ -561,18 +549,18 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                         )
                         user_input[CONF_PROVIDER] = None
                         stored_preset = None
-                    preset = stored_preset or PROVIDER_PRESETS[PROVIDER_OPENAI]
-                    title_prefix = preset["label"]
-
-                    custom_name = (user_input.get("name") or "").strip()
-                    if custom_name:
-                        new_title = f"{title_prefix} - {custom_name}"
-                    else:
-                        new_title = f"{title_prefix} ({hostname})"
+                    # Without a stored preset, pick the one the entry
+                    # will resolve to from now on, as _parent_preset
+                    # does, so that a moved endpoint is not titled
+                    # "OpenAI".
+                    preset = stored_preset or PROVIDER_PRESETS[
+                        PROVIDER_OPENAI if is_openai_endpoint(api_url)
+                        else PROVIDER_CUSTOM
+                    ]
                     return self.async_update_reload_and_abort(
                         reconfigure_entry,
                         data_updates=user_input,
-                        title=new_title,
+                        title=entry_title(preset, user_input.get("name"), hostname),
                     )
 
             except OpenAIAuthError:
@@ -594,19 +582,12 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
         
         # Show the form with current values as suggested (not default)
         # Using suggested_value allows users to clear these fields.
-        # Pre-fill the name field by reverse-extracting it from the
-        # current title - keeps the disambiguation editable. Strip
-        # whichever known preset label currently fronts the title so
-        # both "OpenAI TTS - Foo" and "Mistral Voxtral - Foo" yield
-        # ``current_name == "Foo"``.
+        # Pre-fill the name field with the account name read back from
+        # the current title, so that reconfiguring keeps it.
         current_data = reconfigure_entry.data
-        current_title = reconfigure_entry.title or ""
-        current_name = ""
-        for _preset in PROVIDER_PRESETS.values():
-            prefix = f"{_preset['label']} - "
-            if current_title.startswith(prefix):
-                current_name = current_title[len(prefix):]
-                break
+        current_name = account_name_from_title(
+            reconfigure_entry.title or "", PROVIDER_PRESETS.values()
+        )
         schema = vol.Schema({
             vol.Optional("name", description={"suggested_value": current_name}): str,
             vol.Optional(CONF_API_KEY, description={"suggested_value": current_data.get(CONF_API_KEY, "")}): str,
