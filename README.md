@@ -26,10 +26,14 @@ OpenAI TTS turns text into speech inside Home Assistant. It began as a bridge to
 - [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
+- [Using It With the Voice Assistant](#using-it-with-the-voice-assistant)
 - [openai_tts.say service](#openai_ttssay-service)
+- [Choosing the Target Speaker](#choosing-the-target-speaker)
 - [openai_tts.set_api_key action](#openai_ttsset_api_key-action)
+- [Known Limitations](#known-limitations)
+- [Troubleshooting](#troubleshooting)
 - [Contributing](#contributing)
-- [Notes](#notes)
+- [API Keys and Costs](#api-keys-and-costs)
 
 ## Supported Providers
 
@@ -41,6 +45,7 @@ Each integration entry starts from a preset. The preset sets the endpoint, the m
 | Mistral Voxtral | Cloud | The voices on your account, read live | Required |
 | Groq (Orpheus) | Cloud | The voices Orpheus offers | Required |
 | Lemonfox.ai (Kokoro) | Cloud | The voices Lemonfox offers | Required |
+| OpenRouter (3.10 beta) | Cloud | The voices each speech model accepts, read live | Required |
 | Kokoro-FastAPI | Self-hosted | The voice packs installed on the server, read live | Optional |
 | Chatterbox | Self-hosted | The voices on the server, read live | Optional |
 | Custom | Cloud or self-hosted | Read live when the server lists its voices, typed otherwise | Optional |
@@ -52,6 +57,18 @@ The integration only uses the OpenAI speech API. A provider that offers speech t
 On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-mini-tts` also takes speaking-style instructions. The voices are `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage` and `shimmer`, and `gpt-4o-mini-tts` adds `ballad`, `cedar`, `marin` and `verse`.
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
+
+### Version 3.10 (beta)
+
+Version 3.10 is a beta. To try it, open the integration in HACS, choose **Redownload** and turn on **Show beta versions**.
+
+- **OpenRouter preset**: the model picker lists the speech models OpenRouter offers, and the voice picker lists the voices of the chosen model.
+- **Gain** per profile, from -12 to +12 dB, to make a quiet voice louder or a loud one softer. It works with or without loudness normalisation, and a limiter stops a boost from clipping.
+- **Announcement volume on Sonos and Music Assistant**: with a volume override, these speakers play the announcement at the requested level and duck their own music, instead of being paused and restored. A Music Assistant speaker that belongs to a group stays in its group.
+- **Typed voices** on Kokoro and OpenRouter: the voice picker also accepts a name that is not in the list, such as the Kokoro voice mix `am_michael(1)+am_eric(2)`.
+- **One failing speaker** in a group no longer stops the others. The rest play to the end, and the action then reports which speaker failed.
+
+### Version 3.9
 
 Version 3.9 is mostly about backends other than OpenAI, and about what a speaker
 does while an announcement is playing.
@@ -91,6 +108,7 @@ does while an announcement is playing.
 - Streaming playback on Home Assistant 2025.7 and later, so audio plays as it arrives instead of after the whole clip is written. Streaming works with `mp3`, `opus`, `aac` and `pcm`. A `wav` or `flac` file states its length in a header before any audio exists, so those two formats are always assembled in full first.
 - Sentence streaming for the voice assistant, off by default and set per profile. Speech starts on the first finished sentence rather than on the finished reply. It needs `mp3` or `pcm`, because the other formats cannot be joined end to end.
 - Loudness normalisation for small speakers and mobile playback, on by default and applied while the audio streams.
+- A gain per profile, from -12 to +12 dB, with a limiter so a boost cannot clip (3.10 beta).
 - A chime before the announcement, from a library you can extend by dropping your own mp3 files in `config/custom_components/openai_tts/chime`.
 - 54 languages through the Home Assistant Assist pipeline.
 
@@ -99,20 +117,24 @@ does while an announcement is playing.
 - Announcements on any media player, targeted by entity, device or area.
 - The speaker volume is restored to its original level after the announcement.
 - Music is paused and resumed on players that need it, and players that support announcements duck their own music instead.
-- Sonos announcements use the speaker's own announcement feature, with group handling.
+- Sonos speakers duck their own music during an announcement.
+- With a volume override, Sonos and Music Assistant speakers play the announcement at that level and duck their own music (3.10 beta).
 - Several Cast speakers are warmed up together so they start in sync.
 
 ### Monitoring
 
-- An API health sensor reports authentication, quota, rate limit and connectivity errors.
-- Repairs are raised when a voice disappears at the provider or an API key is rejected.
+- An API status sensor reports authentication, quota, rate limit and connectivity errors.
+- A repair is raised when a profile's voice no longer exists at the provider.
+- A rejected API key starts Home Assistant's re-authentication prompt, so the key can be replaced without removing the entry.
 
 ## Installation
 
 ### HACS (recommended)
 
-1. Open HACS in the sidebar.
-2. Search for **OpenAI TTS** in *Integrations*.
+[![Open your Home Assistant instance and open this repository in HACS.](https://my.home-assistant.io/badges/hacs_repository.svg)](https://my.home-assistant.io/redirect/hacs_repository/?owner=sfortis&repository=openai_tts&category=integration)
+
+1. Open HACS in the sidebar, or use the button above.
+2. Search for **OpenAI TTS**.
 3. Download the integration and restart Home Assistant.
 4. Add the integration via *Settings → Devices & Services → Add Integration → OpenAI TTS*, and pick the provider preset. Enter the API key if the provider needs one. A self-hosted server without authentication can leave it empty.
 5. Add one or more TTS agents (sub-entries) for the voice and audio configurations you want.
@@ -133,6 +155,7 @@ Each integration entry stores the provider, the endpoint and the API key. Add on
 - **Custom instructions** (gpt-4o-mini-tts only) for speaking style.
 - **Extra JSON payload** for custom backends.
 - **Chime**, **chime sound** and **normalise audio** as defaults that the service call can override.
+- **Gain** (3.10 beta), from -12 to +12 dB, applied with or without normalisation.
 - **Sentence streaming** (off by default) to start speaking on the first finished
   sentence of an assistant reply instead of the finished reply.
 - **Stream the audio** (on by default). Turn it off for a backend whose streamed
@@ -143,6 +166,21 @@ Each integration entry stores the provider, the endpoint and the API key. Add on
 > Enabling chime disables streaming for that profile, since a chime has to be attached
 > to finished audio. Loudness normalisation does not: it runs on the stream for `mp3`,
 > `opus`, `aac` and `pcm`.
+
+## Using It With the Voice Assistant
+
+Every TTS agent is a regular Home Assistant text-to-speech entity. To use one for spoken replies, open *Settings → Voice assistants*, pick the assistant and choose the agent under **Text-to-speech**. Sentence streaming in the profile starts the reply on its first finished sentence.
+
+The entities also work with Home Assistant's own `tts.speak` action. That action plays at the speaker's current volume, and on a speaker without its own announcement feature the music it replaces does not come back. Setting the volume and bringing the music back are what `openai_tts.say` adds.
+
+```yaml
+action: tts.speak
+target:
+  entity_id: tts.openai_tts_living_room
+data:
+  media_player_entity_id: media_player.kitchen
+  message: "The washing machine has finished"
+```
 
 ## `openai_tts.say` service
 
@@ -175,6 +213,14 @@ data:
   extra_payload: '{"temperature": 0.8}'
 ```
 
+With `response_variable` the action reports the outcome instead of raising an error. The response is `success: true`, or `success: false` together with an `error` message, so an automation can send a notification when an announcement did not play.
+
+## Choosing the Target Speaker
+
+Some speakers appear in Home Assistant more than once. A speaker that Music Assistant plays to usually has a Music Assistant entity and a second entity from its own integration, such as ESPHome or Cast. Target the Music Assistant entity. The pause and resume commands sent to the other entity reach Music Assistant indirectly, and on a speaker that belongs to a Music Assistant group they stop the whole group and restart the speaker on its own queue.
+
+On 3.9 a volume override on a grouped Music Assistant speaker stops the group in the same way. From 3.10 (beta) the level is handed to Music Assistant, which takes the speaker out of the group for the announcement and puts it back afterwards while the group keeps playing.
+
 ## `openai_tts.set_api_key` action
 
 Replaces the stored API key on an entry, so an automation can rotate a short
@@ -198,6 +244,27 @@ With `response_variable` the call reports what it did: `changed` is false when t
 key was already the one stored, and `reloading` says whether the running entity
 picked it up or will do so at the next load.
 
+## Known Limitations
+
+- Music Assistant keeps every announcement within a volume range set for each player, 15 to 75 percent by default. A requested level outside that range is changed by Music Assistant. From 3.10 (beta) the integration logs a warning when that happens.
+- The `announce` field changes nothing on Sonos and Music Assistant speakers, because they always announce on their own.
+- A chime turns streaming off for that profile, because the chime has to be joined to finished audio.
+- Groq accepts only `wav`, and OpenRouter accepts only `mp3` and `pcm`. The audio format selector offers only what the provider accepts.
+
+## Troubleshooting
+
+Turn on debug logging for the integration to see each request to the provider, which speakers are paused and how the volume is set and restored:
+
+```yaml
+logger:
+  logs:
+    custom_components.openai_tts: debug
+```
+
+Check the API status sensor of the entry. Its state names the last problem, such as `auth_failed` or `quota_exceeded`, and its attributes hold the last error message and when it happened.
+
+When you open an issue, attach the diagnostics file from *Settings → Devices & Services → OpenAI TTS → ⋮ → Download diagnostics*. The API key is removed from that file.
+
 ## Contributing
 
 Bug reports, backend reports and pull requests are all welcome. Pull
@@ -208,6 +275,6 @@ you write it. [CONTRIBUTING.md](CONTRIBUTING.md) has the details.
 If you use a backend that behaves differently from the others, saying so
 in an issue is useful on its own, even without a patch.
 
-## Notes
+## API Keys and Costs
 
-> Cloud providers need an API key on an account with available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>.
+Cloud providers need an API key on an account with available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>.
