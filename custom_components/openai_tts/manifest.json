@@ -16,7 +16,7 @@
     "sentence_stream"
   ],
   "requirements": [
-    "sentence-stream==1.3.0"
+    "sentence-stream>=1.3.0"
   ],
   "version": "3.10b1"
 }
