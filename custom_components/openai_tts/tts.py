@@ -33,6 +33,7 @@ from homeassistant.helpers.entity_platform import (
 )
 from homeassistant.helpers.restore_state import RestoreEntity
 from homeassistant.helpers.storage import Store
+from homeassistant.loader import async_get_loaded_integration
 from homeassistant.util import slugify
 
 from .api_health import OpenAITTSHealthTracker, health_tracker_for
@@ -61,6 +62,9 @@ from .const import (
     DEFAULT_SEND_VOICE,
     DEFAULT_STREAM_AUDIO,
     DOMAIN,
+    PROVIDER_CUSTOM,
+    PROVIDER_OPENAI,
+    PROVIDER_PRESETS,
     SUPPORTED_LANGUAGES,
     UNIQUE_ID,
     is_openai_endpoint,
@@ -302,7 +306,14 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             profile_name = self._config.data.get(CONF_PROFILE_NAME, "profile")
             safe = sanitize_profile_name(profile_name)
             self.entity_id = f"tts.openai_tts_{safe}" if safe else "tts.openai_tts"
-            self._attr_name = f"OpenAI TTS {profile_name}"
+            # The friendly name is the profile name alone. With
+            # has_entity_name the entity name was appended to the device
+            # name, giving "Mistral TTS OpenAI TTS Mistral TTS". A name of
+            # None is not possible instead, because the tts component
+            # refuses an engine without a name ("TTS engine name is not
+            # set"), so the entity names itself.
+            self._attr_has_entity_name = False
+            self._attr_name = profile_name
             return
 
         model = self._config.data.get(CONF_MODEL)
@@ -676,16 +687,16 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
         info: dict[str, Any] = {
             "identifiers": {(DOMAIN, device_unique_id)},
-            "manufacturer": "OpenAI",
-            "sw_version": "1.0",
+            "manufacturer": self._provider_title_name(),
+            "sw_version": async_get_loaded_integration(self.hass, DOMAIN).version,
         }
 
         if is_subentry(self._config):
-            agent_name = self._config.data.get(CONF_PROFILE_NAME, "default")
-            model = self._config.data.get(CONF_MODEL, "tts-1")
-            voice = self._config.data.get(CONF_VOICE, "unknown")
-            info["name"] = f"{agent_name} ({model}-{voice})"
-            info["model"] = f"{model} ({voice})"
+            # The voice stays out of the name and the model. Mistral
+            # voices are UUIDs, and the device was shown as
+            # "Mistral TTS (voxtral-mini-tts-latest-e3596645-...)".
+            info["name"] = self._config.data.get(CONF_PROFILE_NAME, "default")
+            info["model"] = self._config.data.get(CONF_MODEL, "tts-1")
         else:
             info["name"] = "OpenAI TTS"
             info["model"] = self._config.data.get(CONF_MODEL, "TTS API")
@@ -701,6 +712,21 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 return options_value
         data_value = self._config.data.get(key)
         return data_value if data_value is not None else default
+
+    def _provider_title_name(self) -> str:
+        """Short provider name for the device, as used in entry titles.
+
+        An entry without a recorded provider is named after its
+        endpoint, the same way the config flow resolves it, instead of
+        being called OpenAI whatever it points at.
+        """
+        provider = self._provider_key()
+        if provider:
+            return preset_for(provider)["title_name"]
+        parent = self._parent_entry or self._config
+        url = parent.data.get(CONF_URL) if parent is not None else None
+        key = PROVIDER_OPENAI if is_openai_endpoint(url) else PROVIDER_CUSTOM
+        return PROVIDER_PRESETS[key]["title_name"]
 
     def _provider_key(self) -> str | None:
         """The provider preset recorded on the parent entry, if any.

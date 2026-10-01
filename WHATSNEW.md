@@ -1,3 +1,9 @@
+## v3.10b4
+
+- Name each profile's device and entity after the profile alone, without the model and voice, and show the provider as its manufacturer and the integration version as its software version
+- Check Groq API keys with a Groq model, which the check could not do before because Groq answers an unknown model with 404
+- Let the update listener reload an entry after a reconfigure or a new API key, as Home Assistant 2026.12 will require, and stop reloading it twice after a new API key
+
 ## v3.10b3
 
 - Name new entries after the provider, mark self-hosted ones, and leave the hostname out of cloud provider titles

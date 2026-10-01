@@ -425,7 +425,10 @@ def async_setup_services(hass: HomeAssistant) -> None:
             # automation and a key that was never checked could stop
             # every announcement. See ``api_validation`` for the probe.
             try:
-                await async_validate_api_key(hass, api_key, url)
+                await async_validate_api_key(
+                    hass, api_key, url,
+                    preset_for(entry.data.get(CONF_PROVIDER)).get("default_model"),
+                )
             except OpenAIAuthError as err:
                 _LOGGER.error(
                     "%s rejected the new API key for %s: %s",

@@ -38,11 +38,13 @@ from .exceptions import (
 _LOGGER = logging.getLogger(__name__)
 
 # A request that passes authentication and then fails on its body, so
-# that no audio is ever produced. The model and voice only make the body
-# look like a speech request; a provider that knows neither still
-# refuses it after the key check.
+# that no audio is ever produced. The voice only makes the body look like
+# a speech request. The model has to be one the provider serves, because
+# Groq answers an unknown model with 404 even for a good key, and a 404
+# says nothing about the key. Callers therefore pass the preset's default
+# model, and ``tts-1`` is used only when there is none.
+_PROBE_MODEL = "tts-1"
 _PROBE_PAYLOAD = {
-    "model": "tts-1",
     "input": "",
     "voice": "alloy",
     "response_format": "mp3",
@@ -56,7 +58,7 @@ _TIMEOUT_S = 10
 
 
 async def async_validate_api_key(
-    hass: HomeAssistant, api_key: str, url: str
+    hass: HomeAssistant, api_key: str, url: str, model: str | None = None
 ) -> bool:
     """Return True when ``url`` accepts ``api_key``.
 
@@ -73,7 +75,7 @@ async def async_validate_api_key(
     try:
         async with session.post(
             url,
-            json=_PROBE_PAYLOAD,
+            json={**_PROBE_PAYLOAD, "model": model or _PROBE_MODEL},
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S),
         ) as response:
@@ -117,7 +119,7 @@ async def async_validate_api_key(
 
 
 async def async_ensure_key_not_rejected(
-    hass: HomeAssistant, api_key: str, url: str
+    hass: HomeAssistant, api_key: str, url: str, model: str | None = None
 ) -> None:
     """Raise ``OpenAIAuthError`` if ``url`` refuses ``api_key``.
 
@@ -129,7 +131,7 @@ async def async_ensure_key_not_rejected(
     is bad raises re-authentication at its first use.
     """
     try:
-        await async_validate_api_key(hass, api_key, url)
+        await async_validate_api_key(hass, api_key, url, model)
     except OpenAIAuthError:
         raise
     except OpenAITTSError as err:

@@ -68,6 +68,7 @@ from .const import (
     audio_format_options_for,
     is_openai_endpoint,
     model_supports_instructions,
+    preset_for,
     voice_options,
     voices_for_model,
 )
@@ -275,7 +276,9 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Check the key on every provider. The probe synthesises
                 # nothing, see ``api_validation``.
                 if api_key:
-                    await async_ensure_key_not_rejected(self.hass, api_key, api_url)
+                    await async_ensure_key_not_rejected(
+                        self.hass, api_key, api_url, preset.get("default_model")
+                    )
 
                 # Generate unique ID
                 import hashlib
@@ -424,18 +427,22 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     # this in ``validate_user_input``; reauth does not.
                     errors["base"] = "wrong_api_key"
                 else:
-                    await async_ensure_key_not_rejected(self.hass, api_key, api_url)
+                    await async_ensure_key_not_rejected(
+                        self.hass, api_key, api_url,
+                        preset_for(
+                            self._reauth_entry.data.get(CONF_PROVIDER)
+                        ).get("default_model"),
+                    )
 
                 if not errors:
-                    # Update the entry with new credentials
-                    self.hass.config_entries.async_update_entry(
+                    # The entry's update listener reloads it, so the flow
+                    # only writes. Reloading here as well loaded the
+                    # entry twice.
+                    return self.async_update_and_abort(
                         self._reauth_entry,
-                        data={**self._reauth_entry.data, CONF_API_KEY: api_key},
+                        data_updates={CONF_API_KEY: api_key},
+                        reason="reauth_successful",
                     )
-                    await self.hass.config_entries.async_reload(
-                        self._reauth_entry.entry_id
-                    )
-                    return self.async_abort(reason="reauth_successful")
 
             except OpenAIAuthError:
                 errors["base"] = "invalid_api_key"
@@ -508,7 +515,12 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # so reconfigure can't quietly save an invalid key that
                 # would only fail at runtime.
                 if not errors and api_key:
-                    await async_ensure_key_not_rejected(self.hass, api_key, api_url)
+                    await async_ensure_key_not_rejected(
+                        self.hass, api_key, api_url,
+                        preset_for(
+                            reconfigure_entry.data.get(CONF_PROVIDER)
+                        ).get("default_model"),
+                    )
 
                 if not errors:
                     # Update the entry using the recommended helper
@@ -557,7 +569,11 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                         PROVIDER_OPENAI if is_openai_endpoint(api_url)
                         else PROVIDER_CUSTOM
                     ]
-                    return self.async_update_reload_and_abort(
+                    # The entry's update listener reloads it. Home
+                    # Assistant warns that async_update_reload_and_abort
+                    # on an entry with a listener stops working in
+                    # 2026.12.
+                    return self.async_update_and_abort(
                         reconfigure_entry,
                         data_updates=user_input,
                         title=entry_title(preset, user_input.get("name"), hostname),
