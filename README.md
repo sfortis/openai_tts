@@ -1,8 +1,8 @@
 <div align="center">
 
-# OpenAI TTS for Home Assistant
+# OpenAI TTS
 
-**Text-to-Speech component that connects Home Assistant to OpenAI's TTS API and any OpenAI-compatible backend.**
+**Text-to-speech for Home Assistant from OpenAI, Mistral, Groq, Lemonfox, Kokoro, Chatterbox or any server that implements the OpenAI speech API.**
 
 [![Release](https://img.shields.io/github/v/release/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/releases/latest)
 [![Stars](https://img.shields.io/github/stars/sfortis/openai_tts?logo=github)](https://github.com/sfortis/openai_tts/stargazers)
@@ -17,19 +17,39 @@
 
 ---
 
-OpenAI TTS turns text into speech inside Home Assistant. It works with the official OpenAI Audio Speech API and any compatible self-hosted backend (Chatterbox, pocket-tts, LocalAI, TTS Web UI, and others). Configure one or more TTS agents per OpenAI account, target announcements at any media player, optionally prepend a chime, normalise loudness for small speakers, and have the original volume and music restored after the announcement.
+OpenAI TTS turns text into speech inside Home Assistant. It began as a bridge to OpenAI's speech API, and it now works with any cloud provider or self-hosted server that offers the same API. Presets for the common providers fill in the endpoint, the models and the voices, so a profile cannot be saved with settings the backend will reject. Announcements can target any media player, with an optional chime, loudness correction for small speakers, and the original volume and music restored afterwards.
 
 ## Contents
 
+- [Supported Providers](#supported-providers)
 - [What's New](#whats-new-)
-- [Core Features](#core-features)
+- [Features](#features)
 - [Installation](#installation)
 - [Configuration](#configuration)
 - [openai_tts.say service](#openai_ttssay-service)
 - [openai_tts.set_api_key action](#openai_ttsset_api_key-action)
-- [Custom backends](#custom-backends)
 - [Contributing](#contributing)
 - [Notes](#notes)
+
+## Supported Providers
+
+Each integration entry starts from a preset. The preset sets the endpoint, the models the provider offers and where the voice list comes from, and it hides the settings that provider rejects.
+
+| Provider | Where it runs | Voices in the picker | API key |
+|---|---|---|---|
+| OpenAI | Cloud | OpenAI's voices, filtered by model | Required |
+| Mistral Voxtral | Cloud | The voices on your account, read live | Required |
+| Groq (Orpheus) | Cloud | The voices Orpheus offers | Required |
+| Lemonfox.ai (Kokoro) | Cloud | The voices Lemonfox offers | Required |
+| Kokoro-FastAPI | Self-hosted | The voice packs installed on the server, read live | Optional |
+| Chatterbox | Self-hosted | The voices on the server, read live | Optional |
+| Custom | Cloud or self-hosted | Read live when the server lists its voices, typed otherwise | Optional |
+
+The **Custom** preset covers every other server that implements the OpenAI speech endpoint, such as LocalAI, pocket-tts or TTS Web UI. On a custom endpoint the voice field accepts any name the backend understands. The **audio format** selector helps with a backend that rejects mp3, and the **extra payload** field sends backend-specific JSON parameters with each request.
+
+The integration only uses the OpenAI speech API. A provider that offers speech through a different API of its own is not supported.
+
+On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-mini-tts` also takes speaking-style instructions. The voices are `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage` and `shimmer`, and `gpt-4o-mini-tts` adds `ballad`, `cedar`, `marin` and `verse`.
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
 
@@ -62,34 +82,30 @@ does while an announcement is playing.
 
 [WHATSNEW.md](WHATSNEW.md) lists every change, including the fixes.
 
-## Core Features
+## Features
 
-- **Text-to-Speech** via OpenAI's Audio Speech API or any compatible backend.
-- **Provider presets** for OpenAI, Mistral Voxtral, Groq, Lemonfox, Kokoro-FastAPI,
-  Chatterbox and a catch-all custom entry. The preset fills in the endpoint and the
-  models, and hides the settings a backend rejects, so a profile cannot be saved
-  with a combination that will fail at the first call.
-- **Multiple TTS agents** under one or more OpenAI accounts. Each agent has its own voice, model, speed, audio format and audio-processing settings.
-- **Models**: `tts-1`, `tts-1-hd`, `gpt-4o-mini-tts` (with custom speaking-style instructions).
-- **Voices**: full OpenAI catalog including `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage`, `shimmer`, plus the `gpt-4o-mini-tts`-only voices `ballad`, `cedar`, `marin`, `verse`.
-- **Audio formats**: `mp3`, `opus`, `aac`, `flac`, `wav`, `pcm` per profile.
-- **Streaming playback** with HA 2025.7+ for low first-audio latency. The audio is
-  played as it arrives instead of after the whole clip is written. Works with `mp3`,
-  `opus`, `aac` and `pcm`; `wav` and `flac` state their length in a header before any
-  audio exists, so they are always assembled in full first.
-- **Sentence streaming** (per profile, off by default) for the voice assistant. Speech
-  starts on the first finished sentence rather than the finished reply. Needs `mp3`
-  or `pcm`, since the other formats cannot be joined end to end.
-- **Chime prefix** with a user-configurable library (drop your own mp3 in `config/custom_components/openai_tts/chime`).
-- **Loudness normalisation** for small speakers and mobile playback, on by default
-  and applied while the audio streams.
-- **Volume restoration** to the original speaker level after the announcement.
-- **Media pause and resume** during the announcement on supported platforms.
-- **Sonos** announcement feature with native group handling.
-- **Multi-target playback** with cast warm-up sync to keep multiple speakers aligned.
-- **API health sensor** that surfaces auth, quota, rate-limit and connectivity errors.
-- **Custom-endpoint support** with optional API key, custom voice text input, and `extra_payload` for backend-specific JSON parameters.
-- **54 languages** available through the HA Assist pipeline.
+### Speech
+
+- Several TTS agents under one entry, each with its own model, voice, speed, audio format and audio processing.
+- Audio in `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, chosen per profile.
+- Streaming playback on Home Assistant 2025.7 and later, so audio plays as it arrives instead of after the whole clip is written. Streaming works with `mp3`, `opus`, `aac` and `pcm`. A `wav` or `flac` file states its length in a header before any audio exists, so those two formats are always assembled in full first.
+- Sentence streaming for the voice assistant, off by default and set per profile. Speech starts on the first finished sentence rather than on the finished reply. It needs `mp3` or `pcm`, because the other formats cannot be joined end to end.
+- Loudness normalisation for small speakers and mobile playback, on by default and applied while the audio streams.
+- A chime before the announcement, from a library you can extend by dropping your own mp3 files in `config/custom_components/openai_tts/chime`.
+- 54 languages through the Home Assistant Assist pipeline.
+
+### Announcements
+
+- Announcements on any media player, targeted by entity, device or area.
+- The speaker volume is restored to its original level after the announcement.
+- Music is paused and resumed on players that need it, and players that support announcements duck their own music instead.
+- Sonos announcements use the speaker's own announcement feature, with group handling.
+- Several Cast speakers are warmed up together so they start in sync.
+
+### Monitoring
+
+- An API health sensor reports authentication, quota, rate limit and connectivity errors.
+- Repairs are raised when a voice disappears at the provider or an API key is rejected.
 
 ## Installation
 
@@ -98,7 +114,7 @@ does while an announcement is playing.
 1. Open HACS in the sidebar.
 2. Search for **OpenAI TTS** in *Integrations*.
 3. Download the integration and restart Home Assistant.
-4. Add the integration via *Settings → Devices & Services → Add Integration → OpenAI TTS*. Enter the API key (or leave empty for a custom endpoint without auth).
+4. Add the integration via *Settings → Devices & Services → Add Integration → OpenAI TTS*, and pick the provider preset. Enter the API key if the provider needs one. A self-hosted server without authentication can leave it empty.
 5. Add one or more TTS agents (sub-entries) for the voice and audio configurations you want.
 
 ### Manual
@@ -109,7 +125,7 @@ does while an announcement is playing.
 
 ## Configuration
 
-Each integration entry stores the API credentials and endpoint. Each sub-entry (TTS agent) stores the per-profile settings:
+Each integration entry stores the provider, the endpoint and the API key. Add one entry per provider or per account. Each sub-entry (TTS agent) stores the per-profile settings:
 
 - **Model** and **voice** (filtered by model compatibility).
 - **Speed** (0.25 - 4.0).
@@ -182,19 +198,6 @@ With `response_variable` the call reports what it did: `changed` is false when t
 key was already the one stored, and `reloading` says whether the running entity
 picked it up or will do so at the next load.
 
-## Custom backends
-
-The integration works with any OpenAI-compatible TTS endpoint. Mistral Voxtral,
-Groq, Lemonfox, Kokoro-FastAPI and Chatterbox have presets that fill in the
-endpoint and the catalogue for you, and anything else is configured as a custom
-endpoint. When the URL is not `api.openai.com`:
-
-- The API key field becomes optional.
-- The voice field accepts any backend-specific name.
-- Use the **audio format** selector to negotiate around backends that reject mp3 (for example `pocket-tts` returning PCM).
-- The **extra payload** field forwards backend-specific JSON parameters with the request.
-- **Send the voice name** can be turned off for backends that reject the `voice` key.
-
 ## Contributing
 
 Bug reports, backend reports and pull requests are all welcome. Pull
@@ -207,4 +210,4 @@ in an issue is useful on its own, even without a patch.
 
 ## Notes
 
-> *For OpenAI, an API key with available balance is required.* Pricing: <https://platform.openai.com/docs/pricing>
+> Cloud providers need an API key on an account with available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>.
