@@ -306,6 +306,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_streaming": True,
         "supports_speed": True,
         "supports_extra_payload": True,
+        # The request may leave the ``voice`` key out. Only self-hosted
+        # servers need that: audio.cpp serving Chatterbox or VoxCPM2
+        # rejects any request that carries it (#71). Every hosted
+        # provider requires a voice, OpenRouter with HTTP 400.
+        "voice_optional": True,
         "supports_voice_listing": True,
     },
     PROVIDER_OPENROUTER: {
@@ -370,6 +375,11 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_streaming": True,
         "supports_speed": True,
         "supports_extra_payload": True,
+        # The request may leave the ``voice`` key out. Only self-hosted
+        # servers need that: audio.cpp serving Chatterbox or VoxCPM2
+        # rejects any request that carries it (#71). Every hosted
+        # provider requires a voice, OpenRouter with HTTP 400.
+        "voice_optional": True,
     },
 }
 
@@ -383,6 +393,18 @@ def preset_for(provider_key: str | None) -> dict[str, Any]:
     if not provider_key:
         return PROVIDER_PRESETS[PROVIDER_OPENAI]
     return PROVIDER_PRESETS.get(provider_key, PROVIDER_PRESETS[PROVIDER_OPENAI])
+
+
+def voice_may_be_omitted(provider_key: str | None) -> bool:
+    """True unless ``provider_key`` names a preset that requires a voice.
+
+    An entry without a provider was created before the presets existed,
+    and its stored setting is honoured as it is, because the preset
+    cannot be known for certain.
+    """
+    if not provider_key:
+        return True
+    return bool(preset_for(provider_key).get("voice_optional", False))
 
 
 def audio_format_options_for(preset: dict[str, Any]) -> list[dict[str, str]]:

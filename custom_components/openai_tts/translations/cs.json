@@ -88,7 +88,8 @@
             "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
             "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2.",
             "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje.",
-            "gain_db": "Zvýší nebo sníží hlasitost generované řeči v decibelech. Funguje s normalizací zvuku i bez ní a limiter zabrání přebuzení při zesílení. Hodnota 0 zvuk nemění."
+            "gain_db": "Zvýší nebo sníží hlasitost generované řeči v decibelech. Funguje s normalizací zvuku i bez ní a limiter zabrání přebuzení při zesílení. Hodnota 0 zvuk nemění.",
+            "chime_sound": "Vaše vlastní soubory mp3 ve složce /config/openai_tts/chime se zde zobrazují také, označené jako vlastní. Tato složka se při aktualizaci integrace zachová."
           }
         },
         "reconfigure": {
@@ -120,7 +121,8 @@
             "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
             "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2.",
             "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje.",
-            "gain_db": "Zvýší nebo sníží hlasitost generované řeči v decibelech. Funguje s normalizací zvuku i bez ní a limiter zabrání přebuzení při zesílení. Hodnota 0 zvuk nemění."
+            "gain_db": "Zvýší nebo sníží hlasitost generované řeči v decibelech. Funguje s normalizací zvuku i bez ní a limiter zabrání přebuzení při zesílení. Hodnota 0 zvuk nemění.",
+            "chime_sound": "Vaše vlastní soubory mp3 ve složce /config/openai_tts/chime se zde zobrazují také, označené jako vlastní. Tato složka se při aktualizaci integrace zachová."
           }
         }
       },
@@ -207,7 +209,7 @@
   "services": {
     "say": {
       "name": "OpenAI TTS Přehrát řeč",
-      "description": "Použije OpenAI TTS engine k vyslovení zprávy, s volitelným zvukem signálu, normalizací a ovládáním hlasitosti.",
+      "description": "Přehraje zprávu na přehrávačích médií pomocí jednoho z TTS agentů této integrace, volitelně se zvukem signálu, normalizací a nastavením hlasitosti.",
       "fields": {
         "tts_entity": {
           "name": "Entita TTS",
@@ -235,7 +237,7 @@
         },
         "language": {
           "name": "Jazyk",
-          "description": "Kód jazyka pro řeč."
+          "description": "Jazyk zprávy. Home Assistant podle něj hledá zvuk v mezipaměti. Poskytovateli se neodesílá, ten mluví jazykem, ve kterém je zpráva napsaná."
         },
         "chime": {
           "name": "Přehrát zvuk signálu",
@@ -243,7 +245,7 @@
         },
         "chime_sound": {
           "name": "Zvuk signálu",
-          "description": "Název souboru se zvukem signálu. Vypíná streaming, jako výše."
+          "description": "Název souboru se zvukem signálu, z vestavěných zvuků nebo z vlastních v /config/openai_tts/chime. Pokud není uveden, použije se nastavení profile."
         },
         "normalize_audio": {
           "name": "Normalizovat zvuk",
@@ -251,11 +253,11 @@
         },
         "volume": {
           "name": "Hlasitost",
-          "description": "Hlasitost pouze pro toto hlášení, 0.0 až 1.0, poté obnovena. Reproduktory Sonos a Music Assistant přehrají hlášení v této hlasitosti a hudbu ztlumí. Ostatní reproduktory hudbu místo toho pozastaví."
+          "description": "Hlasitost pouze pro toto hlášení, 0.0 až 1.0. Reproduktory Sonos a Music Assistant přehrají hlášení v této hlasitosti a hudbu si poté obnoví samy. Ostatní reproduktory se pozastaví, nastaví na tuto hlasitost a poté obnoví."
         },
         "announce": {
           "name": "Režim hlášení",
-          "description": "Ve výchozím nastavení zapnuto: reproduktory s podporou hlášení hudbu ztlumí, ostatní se pozastaví a poté pokračují. Vypnuto odešle zvuk jako běžné přehrávání. Reproduktory Sonos a Music Assistant hlásí vždy, takže na ně toto nastavení nemá vliv."
+          "description": "Ve výchozím nastavení zapnuto. Reproduktory s podporou hlášení si hudbu řídí vždy samy, bez ohledu na toto nastavení. U ostatních reproduktorů zapnuto hudbu pozastaví a poté obnoví, vypnuto přehraje zprávu místo toho, co hrálo, a původní přehrávání se neobnoví. Nastavená hlasitost tyto reproduktory pozastaví v obou případech."
         }
       }
     },

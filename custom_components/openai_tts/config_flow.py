@@ -5,7 +5,6 @@ Config flow for OpenAI TTS.
 from __future__ import annotations
 
 import logging
-import os
 import uuid
 from typing import Any
 from urllib.parse import urlparse
@@ -24,7 +23,7 @@ from homeassistant.core import callback
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import TemplateSelector, selector
 
-from .api_validation import async_validate_api_key
+from .api_validation import async_ensure_key_not_rejected
 from .audio_filters import (
     DEFAULT_GAIN_DB,
     GAIN_DB_MAX,
@@ -33,6 +32,7 @@ from .audio_filters import (
     clamp_gain_db,
 )
 from .catalogue_parsers import voice_picker_allows_typing
+from .chimes import USER_CHIME_DIR, chime_options
 from .const import (
     CONF_ANNOUNCE_MODE,
     CONF_API_KEY,
@@ -152,24 +152,11 @@ def validate_user_input(user_input: dict) -> str | None:
         return "api_key_required"
     return None
 
-def get_chime_options() -> list[dict[str, str]]:
-    """Scan chime folder and return dropdown options."""
-    chime_folder = os.path.join(os.path.dirname(__file__), "chime")
-    try:
-        files = os.listdir(chime_folder)
-    except Exception as err:
-        _LOGGER.error("Error listing chime folder: %s", err)
-        files = []
-    opts: list[dict[str,str]] = []
-    for file in files:
-        if file.lower().endswith(".mp3"):
-            opts.append({"value": file, "label": os.path.splitext(file)[0].title()})
-    opts.sort(key=lambda x: x["label"])
-    return opts
-
 async def async_get_chime_options(hass) -> list[dict[str, str]]:
-    """Scan chime folder and return dropdown options (async version)."""
-    return await hass.async_add_executor_job(get_chime_options)
+    """The built-in chimes and the user's own, as dropdown options."""
+    return await hass.async_add_executor_job(
+        chime_options, hass.config.path(USER_CHIME_DIR)
+    )
 
 class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
     """Handle a config flow for OpenAI TTS."""
@@ -262,7 +249,6 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                         description_placeholders={"provider": preset["label"]},
                     )
                 user_input[CONF_URL] = api_url
-                is_custom_endpoint = api_url != DEFAULT_URL
 
                 # Check for duplicate API key (only if API key is provided)
                 if api_key:
@@ -285,9 +271,10 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                                 description_placeholders={"provider": preset["label"]},
                             )
 
-                # Validate API key by making a test request (only for default OpenAI endpoint)
-                if api_key and not is_custom_endpoint:
-                    await async_validate_api_key(self.hass, api_key, api_url)
+                # Check the key on every provider. The probe synthesises
+                # nothing, see ``api_validation``.
+                if api_key:
+                    await async_ensure_key_not_rejected(self.hass, api_key, api_url)
 
                 # Generate unique ID
                 import hashlib
@@ -434,13 +421,10 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 api_key = user_input.get(CONF_API_KEY)
                 api_url = self._reauth_entry.data.get(CONF_URL, "https://api.openai.com/v1/audio/speech")
 
-                # Only probe OpenAI, the same rule the create and
-                # reconfigure steps follow. The probe asks for tts-1 with
-                # alloy in mp3, and a backend that has never heard of any
-                # of those answers 400, which reads here as a rejected
-                # key. Groq is the documented case: it accepts wav only.
-                # Probing a custom endpoint therefore made reauth
-                # impossible to complete with a perfectly good key.
+                # Every provider is checked, the same rule the create and
+                # reconfigure steps follow. A backend that has never heard
+                # of the probe's model answers 400 after the key check,
+                # which counts as accepted, see ``api_validation``.
                 api_key = (api_key or "").strip()
                 if not api_key:
                     # Reauth exists to replace a key that stopped
@@ -449,12 +433,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     # The parent reconfigure step has its own guard for
                     # this in ``validate_user_input``; reauth does not.
                     errors["base"] = "wrong_api_key"
-                elif api_url != DEFAULT_URL:
-                    _LOGGER.debug(
-                        "Storing the new API key without probing %s", api_url
-                    )
                 else:
-                    await async_validate_api_key(self.hass, api_key, api_url)
+                    await async_ensure_key_not_rejected(self.hass, api_key, api_url)
 
                 if not errors:
                     # Update the entry with new credentials
@@ -521,7 +501,6 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                     errors["base"] = "url_required"
                 api_url = api_url or DEFAULT_URL
                 user_input[CONF_URL] = api_url
-                is_custom_endpoint = api_url != DEFAULT_URL
 
                 # Check for duplicate API key (exclude current entry)
                 if api_key:
@@ -538,8 +517,8 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Validate the new API key the same way initial setup does,
                 # so reconfigure can't quietly save an invalid key that
                 # would only fail at runtime.
-                if not errors and api_key and not is_custom_endpoint:
-                    await async_validate_api_key(self.hass, api_key, api_url)
+                if not errors and api_key:
+                    await async_ensure_key_not_rejected(self.hass, api_key, api_url)
 
                 if not errors:
                     # Update the entry using the recommended helper
@@ -968,7 +947,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # serving Chatterbox or VoxCPM2 rejects the request when the key
         # is present and rejects a null value too, leaving no way to
         # suppress it (#71).
-        if not is_openai:
+        if not is_openai and preset.get("voice_optional", False):
             step2_fields[
                 vol.Optional("send_voice", default=True)
             ] = selector({"boolean": {}})
@@ -1300,7 +1279,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # serving Chatterbox or VoxCPM2 rejects the request when the key
         # is present and rejects a null value too, leaving no way to
         # suppress it (#71).
-        if not is_openai:
+        if not is_openai and preset.get("voice_optional", False):
             step2_fields[
                 vol.Optional(
                     "send_voice",

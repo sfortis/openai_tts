@@ -1,27 +1,44 @@
+## v3.10b2
+
+- Accept floors and labels as targets of `openai_tts.say`, next to entities, devices and areas
+- Refuse an `openai_tts.say` call whose target names no media player, with a message that says so
+- Read your own chime files from `/config/openai_tts/chime`, which an update does not touch
+- Refuse a chime name that is not a plain mp3 file name
+- Check API keys on every provider without producing audio, when an entry is created, when a key is re-entered and when `openai_tts.set_api_key` runs
+- Offer the switch that stops sending the voice name only on the Custom and Chatterbox presets, and always send the voice to providers that require one
+- Pass the caller of `openai_tts.say` on to the pause, volume and resume commands as well
+- Correct the descriptions of the language, announce, chime sound and volume fields
+- Rename the HACS entry to OpenAI TTS & compatible providers
+- Require Home Assistant 2026.9.1 or later
+
 ## v3.10b1
 
 - Add an OpenRouter preset, which lists the speech models OpenRouter offers and the voices each model accepts
 - Add a gain setting per profile, to raise or lower the speech volume with or without loudness correction
 - Offer the new model's voices when a profile changes model, instead of keeping a voice the new model does not accept
-- Play announcements on Sonos and Music Assistant speakers at the requested volume, ducking the music instead of pausing it
-- Let the voice picker take a typed voice on Kokoro and OpenRouter, for a voice mix such as `am_michael(1)+am_eric(2)`
-- Keep announcing on the speakers that work when one speaker in a group fails, and report which one failed
-- Require Home Assistant 2026.9.1 or later
+- Hand a volume override to Sonos and Music Assistant speakers, which play the announcement at that level instead of being paused and restored
+- Stop breaking up a Music Assistant group when one of its speakers announces with a volume override
+- Log a warning when a requested Music Assistant announcement volume is outside its default range of 15 to 75 percent
+- Let the voice picker take a typed voice when the provider lists voices by plain name, such as a Kokoro voice mix `am_michael(1)+am_eric(2)`
+- Keep announcing on the other speakers of a call with a volume override when its Music Assistant, Sonos or remaining speakers fail, and report the failure
+- Pass the caller of `openai_tts.say` on to the announcement, so the logbook shows who made it
+- Report a failed announcement as "TTS announcement failed" instead of "TTS speak failed"
+- Require sentence-stream as a minimum version instead of one exact version
 
 ## v3.9.2
 
-- Show every voice a Mistral account has, instead of only the first ten
+- Show up to a hundred voices of a Mistral account, instead of only the first ten
 
 ## v3.9.1
 
-- Fix the profile settings form refusing to open, which left the profile unavailable
+- Fix the settings form of an existing profile refusing to open
 
 ## v3.9
 
 - Pick a provider from a list: OpenAI, Mistral, Groq, Lemonfox, Kokoro, Chatterbox or a custom endpoint
-- Offer the voices the provider publishes, in the profile and in the voice picker
+- Offer the voices that Mistral, Kokoro, Chatterbox and custom endpoints publish, in the profile and in the voice picker
 - Start speaking before the reply is finished, sentence by sentence, as an option per profile
-- Let speakers that support announcements duck and resume the music themselves
+- Let speakers that support announcements duck and resume the music themselves when no volume override is given
 - Apply loudness correction while speech is streaming, and turn it on by default
 - Lift quiet words instead of levelling only the average of a clip
 - Start speech about a second sooner when correction is on
@@ -31,10 +48,10 @@
 - Raise a repair when a voice disappears at the provider, instead of failing on every call
 - Ask for a new API key when the current one is rejected
 - Support `response_variable` on `openai_tts.say`
-- Write a real length into wav and flac instead of the placeholder a streaming producer has to use, which strict players read as hours of audio
+- Produce wav and flac in full before playback, so their header states a real length instead of the placeholder that strict players read as hours of audio
 - Set the announcement volume while the audio is generated, so paused music is not heard rising to it
 - Wait for a speaker to report a volume instead of assuming the change landed
-- Refuse a profile that cannot stream and correct at once, instead of falling back silently at playback time
+- Refuse a profile that turns on sentence streaming together with a chime or a format other than MP3 or PCM, instead of falling back silently at playback time
 - Show the loudness correction setting on the entity, next to the other profile settings
 - Name the status sensor after its provider, and follow the interface language
 - Translate the fields of `openai_tts.say`
@@ -59,7 +76,7 @@
 - Recover from a blocked API once the block ages out, rather than on a reload
 - Fix speech failing on every call when a profile is set not to send the voice name
 - Keep the model, voice and speed that were set through the old options dialog when an older entry is migrated
-- Fix reauthentication being impossible on any endpoint other than OpenAI
+- Fix reauthentication refusing a working key on backends that do not accept OpenAI's default model, voice or format
 - Honour the switch that turns streaming off on the sentence streaming path as well
 - Fix music being restarted a second time when an announcement failed early
 - Report a failure when sentence streaming breaks, instead of holding the speaker

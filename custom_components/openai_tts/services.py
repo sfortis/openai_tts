@@ -30,12 +30,13 @@ from homeassistant.helpers import (
     config_validation as cv,
 )
 from homeassistant.helpers import (
-    device_registry as dr,
-)
-from homeassistant.helpers import (
     entity_registry as er,
 )
 from homeassistant.helpers.service import async_register_admin_service
+from homeassistant.helpers.target import (
+    TargetSelection,
+    async_extract_referenced_entity_ids,
+)
 
 from .api_validation import async_validate_api_key
 from .const import (
@@ -56,7 +57,6 @@ from .const import (
     voices_for_model,
 )
 from .exceptions import OpenAIAuthError
-from .utils import normalize_entity_ids
 from .volume_restore import announce
 
 _LOGGER = logging.getLogger(__name__)
@@ -115,9 +115,11 @@ SAY_SCHEMA = vol.Schema(
         # maps it onto ``announce`` when the new field is missing.
         vol.Optional("announce"): cv.boolean,
         vol.Optional("pause_playback"): cv.boolean,
-        vol.Optional("entity_id"): cv.entity_ids,  # For direct entity targeting
-        vol.Optional("device_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string])),  # For device targeting
-        vol.Optional("area_id"): vol.Any(cv.string, vol.All(cv.ensure_list, [cv.string]))     # For area targeting
+        # The target keys Home Assistant merges into the call data:
+        # entity, device, area, floor and label. ``entity_id`` keeps the
+        # stricter validator, which refuses ``all``.
+        **cv.ENTITY_SERVICE_FIELDS,
+        vol.Optional("entity_id"): cv.entity_ids,
     }, extra=vol.ALLOW_EXTRA
 )
 
@@ -181,99 +183,33 @@ def _validate_voice_compatibility(
     )
 
 
-def _get_entities_from_target(
-    hass: HomeAssistant, 
-    target: dict | None
+def _media_players_from_target(
+    hass: HomeAssistant, data: dict[str, Any]
 ) -> list[str]:
-    """
-    Extract entity IDs from service target more efficiently.
-    
-    Args:
-        hass: Home Assistant instance
-        target: Service call target dictionary
-        
-    Returns:
-        List of entity IDs
-    """
-    if not target:
-        return []
-    
-    _LOGGER.debug("Target: %s", target)
-    entities = []
-    
-    # Handle direct entity_ids - normalize to always work with lists.
-    # Only accept media_player entities here; passing e.g. a light or
-    # input_boolean as a direct target would otherwise sail through to
-    # tts.speak and blow up deep inside HA's TTS layer.
-    if entity_ids := target.get("entity_id"):
-        for entity_id in normalize_entity_ids(entity_ids):
-            if entity_id.startswith(f"{MP_DOMAIN}."):
-                entities.append(entity_id)
-            else:
-                _LOGGER.warning(
-                    "Ignoring non-media_player target %s (only media_player entities are valid)",
-                    entity_id,
-                )
-        _LOGGER.debug("Added entity_ids from target: %s", entities)
+    """Return the media players a call targets, sorted.
 
-    # Get entity registry only once if needed
-    entity_reg = None
-    device_reg = None
-
-    if any(key in target for key in ["area_id", "device_id"]):
-        entity_reg = er.async_get(hass)
-        device_reg = dr.async_get(hass)
-    
-    # Handle area_ids
-    if area_ids := target.get("area_id"):
-        # Normalize to always work with lists
-        area_ids = normalize_entity_ids(area_ids)
-        _LOGGER.debug("Processing area_ids: %s", area_ids)
-        
-        if entity_reg:
-            # First, get all device IDs in these areas
-            area_device_ids = set()
-            
-            # Find devices in these areas
-            if device_reg:
-                for device in device_reg.devices.values():
-                    if device.area_id in area_ids:
-                        area_device_ids.add(device.id)
-                _LOGGER.debug("Found devices in areas: %s", area_device_ids)
-            
-            # Get all media player entities for devices in these areas
-            for entry in entity_reg.entities.values():
-                # Check if entity is directly in area
-                if (entry.area_id in area_ids and 
-                    entry.domain == MP_DOMAIN and 
-                    entry.entity_id not in entities):
-                    entities.append(entry.entity_id)
-                    _LOGGER.debug("Added entity %s from area %s", entry.entity_id, entry.area_id)
-                
-                # Also check if entity's device is in area
-                elif (entry.device_id in area_device_ids and
-                      entry.domain == MP_DOMAIN and
-                      entry.entity_id not in entities):
-                    entities.append(entry.entity_id)
-                    _LOGGER.debug("Added entity %s from device %s in area", entry.entity_id, entry.device_id)
-    
-    # Handle device_ids
-    if device_ids := target.get("device_id"):
-        # Normalize to always work with lists
-        device_ids = normalize_entity_ids(device_ids)
-        _LOGGER.debug("Processing device_ids: %s", device_ids)
-        
-        if entity_reg:
-            # Get all media player entities for specified devices
-            for entry in entity_reg.entities.values():
-                if (entry.device_id in device_ids and 
-                    entry.domain == MP_DOMAIN and 
-                    entry.entity_id not in entities):
-                    entities.append(entry.entity_id)
-                    _LOGGER.debug("Added entity %s from device %s", entry.entity_id, entry.device_id)
-    
-    _LOGGER.debug("Final entities from target: %s", entities)
-    return entities
+    Home Assistant's own resolver expands devices, areas, floors and
+    labels, with the same rules every core action follows, including an
+    entity whose area differs from its device's. Only media players are
+    kept. One named directly that is not a media player is reported,
+    because the caller asked for it by name; one that came in through an
+    area or a label is not, because areas hold all kinds of entities.
+    """
+    selected = async_extract_referenced_entity_ids(hass, TargetSelection(data))
+    prefix = f"{MP_DOMAIN}."
+    for entity_id in sorted(selected.referenced):
+        if not entity_id.startswith(prefix):
+            _LOGGER.warning(
+                "Ignoring %s: only media_player entities can be targeted",
+                entity_id,
+            )
+    players = sorted(
+        entity_id
+        for entity_id in selected.referenced | selected.indirectly_referenced
+        if entity_id.startswith(prefix)
+    )
+    _LOGGER.debug("Media players from target: %s", players)
+    return players
 
 
 @callback
@@ -287,32 +223,18 @@ def async_setup_services(hass: HomeAssistant) -> None:
         """
         data = call.data
 
-        # Debug logging
         _LOGGER.debug("Service call data: %s", data)
-        _LOGGER.debug("Service call target: %s", getattr(call, 'target', None))
 
-        # Extract media players from target and data
-        media_players = []
-
-        # Combine target from both places (call.target attribute and data)
-        target_data = {}
-
-        # First check call.target attribute (preferred way)
-        if hasattr(call, "target") and call.target:
-            # Convert call.target to dict if it's not already
-            target_data = dict(call.target) if not isinstance(call.target, dict) else call.target
-            _LOGGER.debug("Processing target from call.target: %s", target_data)
-
-        # Also check data for targeting parameters
-        for target_key in ["entity_id", "device_id", "area_id"]:
-            if target_key in data:
-                target_data[target_key] = data[target_key]
-                _LOGGER.debug("Found %s in data: %s", target_key, data[target_key])
-
-        # Extract entities using our helper
-        if target_data:
-            media_players = _get_entities_from_target(hass, target_data)
-            _LOGGER.debug("Media players from target data: %s", media_players)
+        # Home Assistant merges ``target:`` into the call data, so the
+        # data holds every way the caller named the speakers.
+        media_players = _media_players_from_target(hass, dict(data))
+        if not media_players:
+            # Said here rather than left to ``announce()``, whose message
+            # is about players that exist but are unavailable.
+            raise ServiceValidationError(
+                "The target names no media player. Target media_player "
+                "entities, or a device, area, floor or label that has one."
+            )
 
         # Validate TTS entity
         tts_entity = data["tts_entity"]
@@ -497,11 +419,11 @@ def async_setup_services(hass: HomeAssistant) -> None:
             #
             # The two ways this can fail are kept apart on purpose. Only
             # 401 and 403 mean the endpoint looked at the key and said no.
-            # Anything else, a timeout, a 5xx, or a 400 because the probe
-            # asks for tts-1 and alloy and a self-hosted backend has never
-            # heard of either, says nothing about the key. Reporting that
-            # as "rejected" would accuse a perfectly good key, and this
-            # action exists for exactly those custom endpoints.
+            # A timeout, a 5xx, a 429 or a 404 says nothing about the key,
+            # and reporting it as "rejected" would accuse a good key. It
+            # still keeps the old key, because nobody is watching an
+            # automation and a key that was never checked could stop
+            # every announcement. See ``api_validation`` for the probe.
             try:
                 await async_validate_api_key(hass, api_key, url)
             except OpenAIAuthError as err:

@@ -88,7 +88,8 @@
             "audio_format": "MP3 ist die sichere Voreinstellung. Ändern Sie es nur, wenn Ihr Backend ein anderes Format benötigt.",
             "send_voice": "Standardmäßig ein. Schalten Sie es aus für ein backend, das das Stimmenfeld ablehnt, etwa audio.cpp mit Chatterbox oder VoxCPM2.",
             "stream_audio": "Gibt das Audio wieder, während es ankommt, statt auf den ganzen Clip zu warten. Schalten Sie es aus, wenn ein Backend auf ein gestreamtes Lesen mit Audio antwortet, das sich nicht dekodieren lässt, während dieselbe Anfrage in einem Zug gelesen funktioniert.",
-            "gain_db": "Hebt oder senkt die Lautstärke der erzeugten Sprache in Dezibel. Funktioniert mit und ohne Audio-Normalisierung, und ein Limiter verhindert Übersteuerung beim Anheben. 0 lässt das Audio unverändert."
+            "gain_db": "Hebt oder senkt die Lautstärke der erzeugten Sprache in Dezibel. Funktioniert mit und ohne Audio-Normalisierung, und ein Limiter verhindert Übersteuerung beim Anheben. 0 lässt das Audio unverändert.",
+            "chime_sound": "Eigene mp3-Dateien in /config/openai_tts/chime werden hier ebenfalls angezeigt und als eigene gekennzeichnet. Dieser Ordner bleibt bei einem Update der Integration erhalten."
           }
         },
         "reconfigure": {
@@ -120,7 +121,8 @@
             "audio_format": "MP3 ist die sichere Voreinstellung. Ändern Sie es nur, wenn Ihr Backend ein anderes Format benötigt.",
             "send_voice": "Standardmäßig ein. Schalten Sie es aus für ein backend, das das Stimmenfeld ablehnt, etwa audio.cpp mit Chatterbox oder VoxCPM2.",
             "stream_audio": "Gibt das Audio wieder, während es ankommt, statt auf den ganzen Clip zu warten. Schalten Sie es aus, wenn ein Backend auf ein gestreamtes Lesen mit Audio antwortet, das sich nicht dekodieren lässt, während dieselbe Anfrage in einem Zug gelesen funktioniert.",
-            "gain_db": "Hebt oder senkt die Lautstärke der erzeugten Sprache in Dezibel. Funktioniert mit und ohne Audio-Normalisierung, und ein Limiter verhindert Übersteuerung beim Anheben. 0 lässt das Audio unverändert."
+            "gain_db": "Hebt oder senkt die Lautstärke der erzeugten Sprache in Dezibel. Funktioniert mit und ohne Audio-Normalisierung, und ein Limiter verhindert Übersteuerung beim Anheben. 0 lässt das Audio unverändert.",
+            "chime_sound": "Eigene mp3-Dateien in /config/openai_tts/chime werden hier ebenfalls angezeigt und als eigene gekennzeichnet. Dieser Ordner bleibt bei einem Update der Integration erhalten."
           }
         }
       },
@@ -207,7 +209,7 @@
   "services": {
     "say": {
       "name": "OpenAI TTS Sprachausgabe",
-      "description": "Verwendet die OpenAI TTS Engine, um eine Nachricht zu sprechen, mit optionalem Signalton, Normalisierung und Lautstärkeregelung.",
+      "description": "Spricht eine Nachricht auf Mediaplayern mit einem der TTS-Agenten dieser Integration, wahlweise mit Signalton, Normalisierung und Lautstärkeregelung.",
       "fields": {
         "tts_entity": {
           "name": "TTS-Entität",
@@ -235,7 +237,7 @@
         },
         "language": {
           "name": "Sprache",
-          "description": "Sprachcode für die Sprachausgabe."
+          "description": "Sprache der Nachricht. Home Assistant sucht damit das zwischengespeicherte Audio. Sie wird nicht an den Anbieter gesendet, der in der Sprache spricht, in der die Nachricht geschrieben ist."
         },
         "chime": {
           "name": "Signalton abspielen",
@@ -243,7 +245,7 @@
         },
         "chime_sound": {
           "name": "Signalton-Sound",
-          "description": "Dateiname des abzuspielenden Signaltons. Schaltet streaming aus, wie oben."
+          "description": "Dateiname des Signaltons, aus den eingebauten Tönen oder aus eigenen in /config/openai_tts/chime. Ohne Angabe gilt die Einstellung des profile."
         },
         "normalize_audio": {
           "name": "Audio normalisieren",
@@ -251,11 +253,11 @@
         },
         "volume": {
           "name": "Lautstärke",
-          "description": "Lautstärke nur für diese Durchsage, 0.0 bis 1.0, danach wiederhergestellt. Sonos- und Music-Assistant-Lautsprecher spielen die Durchsage in dieser Lautstärke und stellen die Musik leiser. Andere Lautsprecher pausieren stattdessen die Musik."
+          "description": "Lautstärke nur für diese Durchsage, 0.0 bis 1.0. Sonos- und Music-Assistant-Lautsprecher spielen die Durchsage in dieser Lautstärke und stellen ihre Musik danach selbst wieder her. Andere Lautsprecher werden pausiert, auf diese Lautstärke gesetzt und danach wiederhergestellt."
         },
         "announce": {
           "name": "Durchsagemodus",
-          "description": "Standardmäßig ein: Lautsprecher mit Durchsagefunktion stellen die Musik leiser, die übrigen werden pausiert und danach fortgesetzt. Aus sendet das Audio als normale Wiedergabe. Sonos- und Music-Assistant-Lautsprecher machen immer eine Durchsage, daher hat diese Einstellung dort keine Wirkung."
+          "description": "Standardmäßig ein. Lautsprecher mit Durchsagefunktion kümmern sich immer selbst um ihre Musik, unabhängig von dieser Einstellung. Bei anderen Lautsprechern pausiert Ein die Musik und setzt sie danach fort, Aus spielt die Nachricht anstelle dessen, was lief, und das Vorherige wird nicht fortgesetzt. Eine angegebene Lautstärke pausiert diese Lautsprecher in beiden Fällen."
         }
       }
     },

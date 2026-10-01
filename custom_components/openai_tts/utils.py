@@ -17,7 +17,7 @@ from homeassistant.components.media_player import (
     DOMAIN as MP_DOMAIN,
 )
 from homeassistant.const import ATTR_ENTITY_ID, STATE_UNAVAILABLE, STATE_UNKNOWN
-from homeassistant.core import HomeAssistant
+from homeassistant.core import Context, HomeAssistant
 from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.typing import StateType
 
@@ -545,6 +545,7 @@ async def set_media_player_volume(
     entity_id: str,
     volume_level: float,
     force: bool = False,
+    context: Optional[Context] = None,
 ) -> bool:
     """Fire-and-forget volume change.
 
@@ -602,6 +603,7 @@ async def set_media_player_volume(
                 ATTR_MEDIA_VOLUME_LEVEL: volume_level,
             },
             blocking=True,
+            context=context,
         )
         return True
     except Exception as err:
@@ -613,7 +615,8 @@ async def call_media_player_service(
     service: str,
     entity_id: Union[str, List[str]],
     extra_data: Optional[Dict[str, Any]] = None,
-    blocking: bool = True
+    blocking: bool = True,
+    context: Optional[Context] = None,
 ) -> None:
     """
     Call a media player service with standardized error handling.
@@ -624,6 +627,7 @@ async def call_media_player_service(
         entity_id: Entity ID or list of entity IDs
         extra_data: Additional service data
         blocking: Whether to wait for service completion
+        context: The context of the call this one is made on behalf of
     """
     service_data = {ATTR_ENTITY_ID: entity_id}
     
@@ -636,6 +640,7 @@ async def call_media_player_service(
             service,
             service_data,
             blocking=blocking,
+            context=context,
         )
     except Exception as err:
         entity_ids = normalize_entity_ids(entity_id)

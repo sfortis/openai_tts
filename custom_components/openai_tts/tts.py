@@ -15,7 +15,6 @@ from __future__ import annotations
 
 import asyncio
 import logging
-import os
 from datetime import datetime
 from functools import partial
 from typing import Any, AsyncGenerator, AsyncIterable
@@ -39,6 +38,7 @@ from homeassistant.util import slugify
 from .api_health import OpenAITTSHealthTracker, health_tracker_for
 from .audio_filters import DEFAULT_GAIN_DB, build_audio_filter, clamp_gain_db
 from .cache import MessageDurationCache
+from .chimes import USER_CHIME_DIR, chime_path
 from .const import (
     CONF_API_KEY,
     CONF_AUDIO_FORMAT,
@@ -65,6 +65,7 @@ from .const import (
     UNIQUE_ID,
     is_openai_endpoint,
     preset_for,
+    voice_may_be_omitted,
     voices_for_model,
 )
 from .entity_helpers import is_subentry, sanitize_profile_name
@@ -535,8 +536,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         Asking is the default. Only OpenAI opts out, and it does so
         because it demonstrably has no such endpoint.
         """
-        parent = self._parent_entry or self._config
-        provider = parent.data.get(CONF_PROVIDER) if parent is not None else None
+        provider = self._provider_key()
         if provider:
             return (
                 preset_for(provider).get("supports_voice_listing", True) is not False
@@ -702,6 +702,16 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         data_value = self._config.data.get(key)
         return data_value if data_value is not None else default
 
+    def _provider_key(self) -> str | None:
+        """The provider preset recorded on the parent entry, if any.
+
+        Entries created before the presets existed have none, and
+        ``preset_for(None)`` answers OpenAI, so callers that must not
+        treat those entries as OpenAI check for ``None`` themselves.
+        """
+        parent = self._parent_entry or self._config
+        return parent.data.get(CONF_PROVIDER) if parent is not None else None
+
     # --- TTS generation ----------------------------------------------------
 
     async def _get_audio_duration(self, audio_data: bytes) -> int:
@@ -798,11 +808,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         # actually reach.
         if not self._get_config_value(CONF_STREAM_AUDIO, DEFAULT_STREAM_AUDIO):
             return False
-        parent = self._parent_entry or self._config
-        provider_key = (
-            parent.data.get(CONF_PROVIDER) if parent is not None else None
-        )
-        if not preset_for(provider_key).get("supports_streaming", True):
+        if not preset_for(self._provider_key()).get("supports_streaming", True):
             return False
         return len(text) >= MIN_STREAMING_TEXT_LENGTH
 
@@ -841,11 +847,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             # A format it cannot filter on a pipe belongs on the atomic
             # path, where the filter runs against a finished file.
             return False
-        parent = self._parent_entry or self._config
-        provider_key = (
-            parent.data.get(CONF_PROVIDER) if parent is not None else None
+        return bool(
+            preset_for(self._provider_key()).get("supports_streaming", True)
         )
-        return bool(preset_for(provider_key).get("supports_streaming", True))
 
     async def _pipelined_stream(
         self,
@@ -935,6 +939,28 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                     stats.get("raw_text", ""), b"".join(collected), resolved
                 )
 
+    def _resolve_send_voice(self, opts: dict) -> bool:
+        """Whether this request carries the ``voice`` key.
+
+        The profile form offers the switch only on presets that can do
+        without a voice, but a profile may still hold ``False`` from a
+        provider it used before. Sending no voice to a provider that
+        requires one fails every request, so the stored value is
+        overruled there.
+        """
+        send_voice = (
+            opts[CONF_SEND_VOICE]
+            if CONF_SEND_VOICE in opts
+            else self._get_config_value(CONF_SEND_VOICE, DEFAULT_SEND_VOICE)
+        )
+        if send_voice is False and not voice_may_be_omitted(self._provider_key()):
+            _LOGGER.debug(
+                "%s requires a voice, sending it although the profile "
+                "says not to", self._provider_key(),
+            )
+            return True
+        return bool(send_voice)
+
     def _resolve_options(self, options: dict | None) -> dict[str, Any]:
         """Merge service-call options with entity defaults."""
         opts = options or {}
@@ -995,11 +1021,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             ),
             "normalize_audio": normalize_audio,
             "gain_db": gain_db,
-            "send_voice": (
-                opts[CONF_SEND_VOICE]
-                if CONF_SEND_VOICE in opts
-                else self._get_config_value(CONF_SEND_VOICE, DEFAULT_SEND_VOICE)
-            ),
+            "send_voice": self._resolve_send_voice(opts),
             "audio_format": (
                 opts.get(CONF_AUDIO_FORMAT)
                 or self._get_config_value(CONF_AUDIO_FORMAT)
@@ -1065,20 +1087,25 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         if not (chime_enable or audio_filter or repair_length):
             return audio_data
 
-        chime_path = None
+        chime_file = None
         if chime_enable and resolved["chime_sound"]:
-            chime_folder = os.path.join(os.path.dirname(__file__), "chime")
-            candidate = os.path.join(chime_folder, resolved["chime_sound"])
-            if os.path.exists(candidate):
-                chime_path = candidate
-            else:
-                _LOGGER.warning("Chime file not found: %s", candidate)
+            chime_file = await self.hass.async_add_executor_job(
+                chime_path,
+                resolved["chime_sound"],
+                self.hass.config.path(USER_CHIME_DIR),
+            )
+            if chime_file is None:
+                _LOGGER.warning(
+                    "Chime %r not found in %s or among the built-in sounds",
+                    resolved["chime_sound"],
+                    self.hass.config.path(USER_CHIME_DIR),
+                )
 
         _, processed_audio, _ = await process_audio(
             self.hass,
             audio_data,
             chime_enabled=chime_enable,
-            chime_path=chime_path,
+            chime_path=chime_file,
             audio_filter=audio_filter,
             input_format=requested_format,
         )
@@ -1264,10 +1291,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         )
 
         parent_entry = self._parent_entry or self._config
-        provider_key = (
-            parent_entry.data.get(CONF_PROVIDER) if parent_entry is not None else None
-        )
-        preset = preset_for(provider_key)
+        preset = preset_for(self._provider_key())
         endpoint_url = (
             parent_entry.data.get(CONF_URL) if parent_entry is not None else None
         )

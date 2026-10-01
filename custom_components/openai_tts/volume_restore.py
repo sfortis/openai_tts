@@ -597,9 +597,14 @@ class _VolumeRestorer:
         hass: HomeAssistant,
         entity_ids: List[str],
         entry: ConfigEntry | None = None,
+        context: Context | None = None,
     ) -> None:
         self.hass = hass
         self.entity_ids = entity_ids
+        # The context of the ``openai_tts.say`` call. Every pause, volume
+        # and resume command carries it, as the announcement itself does,
+        # so the logbook shows one caller for all of them.
+        self._context = context
         # The config entry that owns the TTS profile behind this
         # announcement. Background work is registered against it so
         # Home Assistant cancels anything still running when the entry
@@ -655,6 +660,27 @@ class _VolumeRestorer:
         # ``apply_deferred_volume``.
         self._deferred_volume: Optional[float] = None
 
+
+    async def _service(
+        self,
+        service: str,
+        entity_id: str | List[str],
+        extra_data: Optional[Dict[str, Any]] = None,
+        blocking: bool = True,
+    ) -> None:
+        """Call a media player service with this announcement's context."""
+        await call_media_player_service(
+            self.hass, service, entity_id, extra_data, blocking,
+            context=self._context,
+        )
+
+    async def _set_volume(
+        self, entity_id: str, volume_level: float, force: bool = False
+    ) -> bool:
+        """Set a volume with this announcement's context."""
+        return await set_media_player_volume(
+            self.hass, entity_id, volume_level, force, context=self._context,
+        )
     def _spawn(self, coro: Any, name: str) -> None:
         """Run ``coro`` in the background, tied to the config entry.
 
@@ -802,7 +828,7 @@ class _VolumeRestorer:
                 )
                 if needs_power:
                     turn_on_tasks.append(
-                        call_media_player_service(self.hass, "turn_on", entity_id)
+                        self._service("turn_on", entity_id)
                     )
                 # Record inactive native-announce targets before skipping
                 # the rest. These are exactly the ones the auto-resume
@@ -836,7 +862,7 @@ class _VolumeRestorer:
 
             if state.lower() == "off":
                 turn_on_tasks.append(
-                    call_media_player_service(self.hass, "turn_on", entity_id)
+                    self._service("turn_on", entity_id)
                 )
 
             # Idle device with a queued media URL: send ``media_stop`` so
@@ -864,8 +890,7 @@ class _VolumeRestorer:
                     entity_id,
                 )
                 pause_tasks.append(
-                    call_media_player_service(
-                        self.hass, "media_stop", entity_id
+                    self._service("media_stop", entity_id
                     )
                 )
 
@@ -906,8 +931,7 @@ class _VolumeRestorer:
                             "media_position": attrs.get("media_position") or 0,
                         }
                         pause_tasks.append(
-                            call_media_player_service(
-                                self.hass, "media_stop", entity_id
+                            self._service("media_stop", entity_id
                             )
                         )
                     else:
@@ -922,8 +946,7 @@ class _VolumeRestorer:
                         )
                         self._paused_media[entity_id] = _pause_snapshot(attrs)
                         pause_tasks.append(
-                            call_media_player_service(
-                                self.hass, SERVICE_MEDIA_PAUSE, entity_id
+                            self._service(SERVICE_MEDIA_PAUSE, entity_id
                             )
                         )
                 elif _is_ma_platform(self.hass, entity_id):
@@ -936,13 +959,13 @@ class _VolumeRestorer:
                     action = "media_stop" if can_stop else SERVICE_MEDIA_PAUSE
                     self._paused_media[entity_id] = _pause_snapshot(attrs)
                     pause_tasks.append(
-                        call_media_player_service(self.hass, action, entity_id)
+                        self._service(action, entity_id)
                     )
                 else:
                     action = SERVICE_MEDIA_PAUSE if can_pause else "media_stop"
                     self._paused_media[entity_id] = _pause_snapshot(attrs)
                     pause_tasks.append(
-                        call_media_player_service(self.hass, action, entity_id)
+                        self._service(action, entity_id)
                     )
 
         if turn_on_tasks:
@@ -1105,7 +1128,7 @@ class _VolumeRestorer:
                     "Setting volume for %s -> %.2f", entity_id, target
                 )
                 self._volume_changed.add(entity_id)
-                tasks.append(set_media_player_volume(self.hass, entity_id, target))
+                tasks.append(self._set_volume(entity_id, target))
         if tasks:
             await asyncio.gather(*tasks, return_exceptions=True)
             applied = {
@@ -1253,8 +1276,7 @@ class _VolumeRestorer:
         """
         try:
             if entity_id in self._volume_changed:
-                await set_media_player_volume(
-                    self.hass, entity_id, original_volume, force=True
+                await self._set_volume(entity_id, original_volume, force=True
                 )
                 return True
             state, attrs = await get_media_player_state(self.hass, entity_id)
@@ -1265,7 +1287,7 @@ class _VolumeRestorer:
                 return False
             if abs(float(current) - original_volume) <= 0.01:
                 return True
-            await set_media_player_volume(self.hass, entity_id, original_volume)
+            await self._set_volume(entity_id, original_volume)
             return True
         except Exception as exc:
             _LOGGER.error("Failed to restore volume for %s: %s", entity_id, exc)
@@ -1349,7 +1371,7 @@ class _VolumeRestorer:
             return _TTS_PROXY_MARKER in content_id
 
         async def _pause_now(eid: str, action: str) -> None:
-            await call_media_player_service(self.hass, action, eid)
+            await self._service(action, eid)
 
         # Immediate check: MA may have already resumed by the time we
         # got here (race with the hold window). Catch those first.
@@ -1526,8 +1548,7 @@ class _VolumeRestorer:
                     )
                     await _replay_one(eid, snapshot)
                 return
-            await call_media_player_service(
-                self.hass, SERVICE_MEDIA_PLAY, eid
+            await self._service(SERVICE_MEDIA_PLAY, eid
             )
 
         async def _replay_one(eid: str, snapshot: Dict[str, Any]) -> None:
@@ -1543,6 +1564,7 @@ class _VolumeRestorer:
                     "media_content_type": snapshot["media_content_type"],
                 },
                 blocking=True,
+                context=self._context,
             )
             # ``play_media`` restarts the item from the beginning. Seek
             # back to where the user was, so a stopped 40-minute
@@ -1563,6 +1585,7 @@ class _VolumeRestorer:
                     "media_player", "media_seek",
                     {"entity_id": eid, "seek_position": position},
                     blocking=False,
+                    context=self._context,
                 )
             except HomeAssistantError as err:
                 _LOGGER.debug(
@@ -1754,7 +1777,7 @@ async def announce(
         restore_enabled or pause_for_manual or force_manual
     )
     restorer = (
-        _VolumeRestorer(hass, manual_players, owning_entry)
+        _VolumeRestorer(hass, manual_players, owning_entry, context)
         if needs_restorer
         else None
     )

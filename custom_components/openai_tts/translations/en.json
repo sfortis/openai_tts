@@ -88,7 +88,8 @@
             "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
             "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2.",
             "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine.",
-            "gain_db": "Raises or lowers the volume of the generated speech, in decibels. It works with or without audio normalization, and a limiter stops a boost from clipping. 0 leaves the audio unchanged."
+            "gain_db": "Raises or lowers the volume of the generated speech, in decibels. It works with or without audio normalization, and a limiter stops a boost from clipping. 0 leaves the audio unchanged.",
+            "chime_sound": "Your own mp3 files in /config/openai_tts/chime are listed here too, marked as your own. That folder is kept when the integration is updated."
           }
         },
         "reconfigure": {
@@ -120,7 +121,8 @@
             "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
             "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2.",
             "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine.",
-            "gain_db": "Raises or lowers the volume of the generated speech, in decibels. It works with or without audio normalization, and a limiter stops a boost from clipping. 0 leaves the audio unchanged."
+            "gain_db": "Raises or lowers the volume of the generated speech, in decibels. It works with or without audio normalization, and a limiter stops a boost from clipping. 0 leaves the audio unchanged.",
+            "chime_sound": "Your own mp3 files in /config/openai_tts/chime are listed here too, marked as your own. That folder is kept when the integration is updated."
           }
         }
       },
@@ -188,7 +190,7 @@
   "services": {
     "say": {
       "name": "OpenAI TTS Speak",
-      "description": "Uses the OpenAI TTS engine to speak a message, with optional chime, normalisation and volume control.",
+      "description": "Speaks a message on media players with one of this integration's TTS agents, with optional chime, normalisation and volume control.",
       "fields": {
         "tts_entity": {
           "name": "TTS entity",
@@ -216,7 +218,7 @@
         },
         "language": {
           "name": "Language",
-          "description": "Language code for the speech."
+          "description": "Language of the message. Home Assistant uses it to find the cached audio. It is not sent to the provider, which speaks the language the message is written in."
         },
         "chime": {
           "name": "Play chime",
@@ -224,7 +226,7 @@
         },
         "chime_sound": {
           "name": "Chime sound",
-          "description": "Filename of the chime to play. Turns streaming off, as above."
+          "description": "File name of the chime, from the built-in sounds or your own in /config/openai_tts/chime. Falls back to the profile setting when omitted."
         },
         "normalize_audio": {
           "name": "Normalise audio",
@@ -232,11 +234,11 @@
         },
         "volume": {
           "name": "Volume",
-          "description": "Volume for this announcement only, 0.0 to 1.0, restored afterwards. Sonos and Music Assistant speakers play the announcement at this level and duck the music. Other speakers pause the music instead."
+          "description": "Volume for this announcement only, 0.0 to 1.0. Sonos and Music Assistant speakers play the announcement at this level and bring their music back themselves. Other speakers are paused, set to this level and restored afterwards."
         },
         "announce": {
           "name": "Announcement mode",
-          "description": "On by default: speakers that support announcements duck the music, the rest are paused and resumed. Off sends the audio as ordinary media. Sonos and Music Assistant speakers always announce, so this has no effect on them."
+          "description": "On by default. Speakers that support announcements always handle their own music, whatever this is set to. On other speakers, on pauses the music and resumes it afterwards, and off plays the message in place of what they were playing, which does not come back. A volume override pauses those speakers either way."
         }
       }
     },
