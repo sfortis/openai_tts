@@ -10,7 +10,9 @@ without re-running the engine. Ordering:
    surfaces the problem to the caller.
 2. Snapshot original volumes, turn cold devices on, optionally pause
    currently-playing media, set the announcement volume.
-3. Call ``tts.speak``.
+3. Send ``play_media`` with ``announce`` set, one call per route (see
+   ``announce_routes``). This is what ``tts.speak`` does, plus the level
+   for the platforms that can take one.
 4. If the entity marked the message as failed, restore now and
    raise - no audio is coming.
 5. Otherwise look up the audio duration (cache → media_player
@@ -31,7 +33,6 @@ from homeassistant.components.media_player import (
     STATE_PLAYING,
     MediaPlayerEntityFeature,
 )
-from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
 from homeassistant.config_entries import ConfigEntry
 from homeassistant.const import (
     ATTR_SUPPORTED_FEATURES,
@@ -49,6 +50,8 @@ from homeassistant.helpers.event import (
     async_track_state_change_event,
 )
 
+from .announce_delivery import announcement_media_id, play_route
+from .announce_routes import AnnounceRoute, plan_routes
 from .api_health import OpenAITTSHealthTracker, health_tracker_for
 from .cache import DURATION_FAILED_SENTINEL, clear_stale_failure, lookup_duration
 from .const import (
@@ -679,11 +682,10 @@ class _VolumeRestorer:
         Native-announce targets are ALWAYS skipped by the manual flow.
         Those are the ones ``_native_announce_targets`` identifies:
         Sonos and Music Assistant by platform, plus anything that
-        advertises ``MEDIA_ANNOUNCE`` at runtime. There is a single
-        ``tts.speak`` call for every target regardless of platform;
-        what differs is that HA's speak already carries
-        ``announce=True`` into ``play_media``, so those devices duck
-        and restore on their own. A parallel ``volume_set`` from this
+        advertises ``MEDIA_ANNOUNCE`` at runtime. Every target this
+        restorer manages is reached by one ``play_media`` call with
+        ``announce=True``, so those devices duck and restore on their
+        own. A parallel ``volume_set`` from this
         side would just spike the underlying music a second time.
 
         The ``announce_mode`` flag still controls behaviour for the
@@ -702,14 +704,13 @@ class _VolumeRestorer:
         # Native-announce targets are owned by the device's
         # announcement layer when no explicit volume override is in
         # play. With a service-call volume present we instead force
-        # all targets onto the manual pause + speak + resume flow:
-        # MA's native announce_volume hits the same global volume as
-        # a manual volume_set on speakers without per-stream support
-        # (JBL Authentics et al), so the user couldn't actually
-        # control the announcement loudness. Pausing first and
-        # bumping the volume after avoids the audible spike and
-        # gives reliable per-call volume control - we trade MA's
-        # auto-ducking for it on this single announcement.
+        # all targets onto the manual pause + speak + resume flow,
+        # because the managed ``play_media`` call carries no level.
+        # Pausing first and bumping the volume after avoids the
+        # audible spike and gives reliable per-call volume control.
+        # Music Assistant and Sonos players never reach this with an
+        # override: ``announce()`` hands them the level in ``extra``
+        # and leaves them out of the restorer.
         if force_manual:
             skip_protection: Set[str] = set()
             _LOGGER.debug(
@@ -1643,7 +1644,7 @@ async def announce(
 
     Raises ``HomeAssistantError`` when the call cannot complete - either
     because the API is in a persistent failure state, or because the
-    underlying ``tts.speak`` exhausted its retries. Silent success-on-
+    underlying ``play_media`` call failed on any route. Silent success-on-
     failure was the previous behaviour and made automations think a
     speech happened when nothing reached the speakers.
     """
@@ -1702,6 +1703,26 @@ async def announce(
         len(available_players), "" if restore_enabled else "out",
     )
 
+    # With a volume override, Music Assistant and Sonos players are
+    # handed the level in ``extra`` and run the announcement themselves:
+    # they duck, play at that level and resume on their own. Everything
+    # below that pauses, sets and restores is then only for the managed
+    # route. Doing it ourselves on MA gave the wrong level, because MA
+    # applies its own strategy on top of whatever volume the player has,
+    # and our stop and ``media_play`` restarted a queue MA reported as
+    # playing while the speaker was silent. See ``announce_routes``.
+    routes = plan_routes(
+        available_players, lambda eid: _platform_of(hass, eid), tts_volume
+    )
+    native_routes = [route for route in routes if route.native]
+    managed_route = next((route for route in routes if not route.native), None)
+    manual_players = list(managed_route.players) if managed_route else []
+    for route in native_routes:
+        _LOGGER.debug(
+            "Handing the announcement volume to %s through %s",
+            ", ".join(route.players), route.extra,
+        )
+
     # Build a restorer when ANY of the manual-protection features
     # is requested. Even when ``announce_enabled=True`` we still need
     # the restorer to handle non-native targets (Cast / Bluetooth):
@@ -1709,12 +1730,12 @@ async def announce(
     # the user's music isn't lost. ``pause_playback=True`` is the
     # legacy path that always pauses; we collapse it onto the same
     # manual flow.
-    # Explicit per-call volume override forces all targets through
-    # the manual pause+volume+resume path. This gives the user
-    # reliable per-announcement volume control even on MA-served
-    # speakers without per-stream volume support (JBL Authentics,
-    # most consumer Cast wraps), at the cost of losing MA's
-    # native auto-ducking for this single announcement.
+    # Explicit per-call volume override forces every manual target
+    # through the pause+volume+resume path. This gives the user
+    # reliable per-announcement volume control on speakers that have
+    # no way to be told the level, most consumer Cast wraps among
+    # them. Music Assistant players are not in ``manual_players`` at
+    # this point: they were given the level directly above.
     #
     # A volume override also implies pause: bumping the device
     # volume while the music is still playing audibly spikes it for
@@ -1728,9 +1749,11 @@ async def announce(
         or stored_pause_playback
         or force_manual
     )
-    needs_restorer = restore_enabled or pause_for_manual or force_manual
+    needs_restorer = bool(manual_players) and (
+        restore_enabled or pause_for_manual or force_manual
+    )
     restorer = (
-        _VolumeRestorer(hass, available_players, owning_entry)
+        _VolumeRestorer(hass, manual_players, owning_entry)
         if needs_restorer
         else None
     )
@@ -1785,7 +1808,7 @@ async def announce(
     # because wall time inside speak means completely different things
     # on a fire-and-forget target and on a blocking one.
     if restorer is not None:
-        watcher = _TtsPlaybackWatcher(hass, available_players)
+        watcher = _TtsPlaybackWatcher(hass, manual_players)
 
     # Drop any failure sentinel left over from an earlier attempt BEFORE
     # speaking. That turns an ambiguous "is this sentinel current?"
@@ -1824,6 +1847,65 @@ async def announce(
         )
         return cached == DURATION_FAILED_SENTINEL
 
+    native_tasks: list[tuple[AnnounceRoute, asyncio.Task[float]]] = []
+    native_reported = False
+    cancelled = False
+
+    async def _finish_native_routes(duration_ms: int | None) -> None:
+        """Wait for the native routes and raise if any of them failed.
+
+        Runs after the managed route is finished with, so a native
+        failure never cuts that route's hold short or rolls back a
+        speaker that is still announcing. A route that returned before
+        its speaker played (Sonos) keeps the speaker gate for the clip's
+        length, as the manual flow did, so the next announcement does
+        not start on top of this one.
+        """
+        nonlocal native_reported
+        if not native_tasks:
+            return
+        await asyncio.wait([task for _, task in native_tasks])
+        native_reported = True
+        failed: list[str] = []
+        returned_at: list[float] = []
+        for route, task in native_tasks:
+            err = None if task.cancelled() else task.exception()
+            if task.cancelled() or err is not None:
+                _LOGGER.error(
+                    "The announcement did not play on %s: %s",
+                    ", ".join(route.players), err or "cancelled",
+                )
+                failed.extend(route.players)
+            elif route.returns_before_playback:
+                returned_at.append(task.result())
+        if returned_at:
+            if duration_ms is None:
+                duration_ms = await _wait_for_duration_ms(
+                    hass, tts_entity, message, options, timeout_s=60.0,
+                )
+            # The sentinel is zero, so test it before the fallback. It
+            # means no audio was produced, and there is nothing to wait
+            # for.
+            if duration_ms != DURATION_FAILED_SENTINEL:
+                if duration_ms is None or duration_ms < 0:
+                    duration_ms = _DEFAULT_FALLBACK_DURATION_MS
+                loop = asyncio.get_running_loop()
+                hold_until = max(returned_at) + (
+                    duration_ms + _NATIVE_HOLD_BUFFER_MS
+                ) / 1000.0
+                remaining = hold_until - loop.time()
+                if remaining > 0:
+                    _LOGGER.debug(
+                        "Keeping the speaker gate for %.1fs while the "
+                        "native announcement plays", remaining,
+                    )
+                    await asyncio.sleep(remaining)
+        if failed:
+            raise HomeAssistantError(
+                "The announcement did not play on "
+                f"{', '.join(failed)}. Check the log for the error."
+            )
+
     try:
         if restorer is not None:
             await restorer.prepare(
@@ -1837,64 +1919,83 @@ async def announce(
             watcher.start()
 
         try:
-            # Speak and the deferred volume run together on purpose. The
-            # level has to be right when the announcement reaches the
-            # speaker, not before the audio for it has been asked for,
-            # and the gap between the two is where the paused music
-            # finishes fading out. See ``apply_deferred_volume``.
-            speak_task = asyncio.create_task(
-                _call_tts_speak(hass, tts_entity, message, language,
-                                options, available_players,
-                                tts_volume=tts_volume),
-                name="openai_tts speak",
+            # Every route plays the same media-source id and runs as its
+            # own task. The managed route's volume window, hold and
+            # restore follow only its own call. A Music Assistant route
+            # blocks until its announcement has finished and a Sonos
+            # route returns at once, and neither says anything about
+            # when the managed targets finish. Native routes are
+            # awaited later, in ``_finish_native_routes``.
+            media_id = announcement_media_id(
+                hass, tts_entity, message, language, options
             )
+            for route in native_routes:
+                native_tasks.append((route, asyncio.create_task(
+                    _play_route_timed(hass, route, media_id),
+                    name="openai_tts native announce",
+                )))
+            if managed_route is None:
+                managed_task = None
+            else:
+                # The managed route and the deferred volume run together
+                # on purpose. The level has to be right when the
+                # announcement reaches the speaker, not before the audio
+                # for it has been asked for, and the gap between the two
+                # is where the paused music finishes fading out. See
+                # ``apply_deferred_volume``.
+                managed_task = asyncio.create_task(
+                    play_route(hass, managed_route, media_id),
+                    name="openai_tts announce",
+                )
             try:
-                if restorer is not None:
+                if restorer is not None and managed_task is not None:
                     # Wait out the window, then set the level. It is
-                    # tempting to stop as soon as ``speak_task`` is
+                    # tempting to stop as soon as ``managed_task`` is
                     # done, and that is what this used to do, but the
                     # task finishing says nothing about when sound
-                    # reaches the speaker: ``tts.speak`` hands the audio
-                    # over and returns, in single-digit milliseconds on
-                    # every platform measured here. Stopping on it gave
-                    # the window away entirely and put the volume change
-                    # back on top of the music still draining out of the
-                    # speaker we had just paused.
+                    # reaches the speaker: ``play_media`` hands the
+                    # audio over and returns, in single-digit
+                    # milliseconds on every platform measured here.
+                    # Stopping on it gave the window away entirely and
+                    # put the volume change back on top of the music
+                    # still draining out of the speaker we had just
+                    # paused.
                     #
-                    # A speak that has already failed is the one case
+                    # A call that has already failed is the one case
                     # worth cutting short: there is no announcement left
                     # to set a level for.
                     loop = asyncio.get_running_loop()
                     deadline = loop.time() + VOLUME_APPLY_WINDOW_S
                     done, _ = await asyncio.wait(
-                        {speak_task}, timeout=VOLUME_APPLY_WINDOW_S
+                        {managed_task}, timeout=VOLUME_APPLY_WINDOW_S
                     )
                     # ``.exception()`` re-raises on a cancelled
                     # task, so ask about cancellation first.
                     failed = bool(done) and (
-                        speak_task.cancelled()
-                        or speak_task.exception() is not None
+                        managed_task.cancelled()
+                        or managed_task.exception() is not None
                     )
                     if not failed:
                         remaining = deadline - loop.time()
                         if remaining > 0:
                             await asyncio.sleep(remaining)
                         await restorer.apply_deferred_volume()
-                await speak_task
+                if managed_task is not None:
+                    await managed_task
             finally:
-                # A failure on either side must not leave the other
+                # A failure here must not leave the managed call
                 # running unattended.
-                if not speak_task.done():
-                    speak_task.cancel()
+                if managed_task is not None and not managed_task.done():
+                    managed_task.cancel()
                     try:
-                        await speak_task
+                        await managed_task
                     except asyncio.CancelledError:
                         pass
                     except Exception:
                         # Swallowing this silently would hide a real
-                        # speak failure behind whatever sent us here.
+                        # failure behind whatever sent us here.
                         _LOGGER.exception(
-                            "tts.speak failed while it was being "
+                            "play_media failed while it was being "
                             "cancelled"
                         )
         except Exception as err:
@@ -1907,7 +2008,7 @@ async def announce(
                 # stale position on a speaker that has already resumed.
                 restored = True
             raise HomeAssistantError(
-                f"TTS speak failed: {err}"
+                f"TTS announcement failed: {err}"
             ) from err
 
         if restorer is None:
@@ -1921,6 +2022,7 @@ async def announce(
                     "delivered to the speakers. Check the integration log "
                     "for the provider error."
                 )
+            await _finish_native_routes(None)
             return
 
         # Named for what it is rather than where it came from: this may
@@ -1980,7 +2082,7 @@ async def announce(
         # when it stopped. Cast surfaces the URL, so ask Cast to prove
         # it; anything already observed on the URL qualifies too.
         expect_drain = watcher.any_seen_tts() or any(
-            _is_cast_platform(hass, eid) for eid in available_players
+            _is_cast_platform(hass, eid) for eid in manual_players
         )
         if expect_drain:
             drain_timeout_s = max(30.0, (duration_ms + 5000) / 1000.0)
@@ -1992,7 +2094,7 @@ async def announce(
             # whole clip, and the hold collapsed underneath audio that
             # may still have been going.
             elapsed_ms = duration_ms if drained else 0
-        elif _all_targets_sync_speak(hass, available_players):
+        elif _all_targets_sync_speak(hass, manual_players):
             # Music Assistant: speak's blocking already covered the
             # entire announcement, audio is already done. Collapse the
             # hold to the unmute buffer only, otherwise we'd add a
@@ -2015,6 +2117,10 @@ async def announce(
             restore_volumes=restore_enabled,
         )
         restored = True
+        await _finish_native_routes(duration_ms)
+    except asyncio.CancelledError:
+        cancelled = True
+        raise
     finally:
         _release_claim()
         try:
@@ -2039,6 +2145,16 @@ async def announce(
             if restorer is not None:
                 with contextlib.suppress(asyncio.CancelledError):
                     await asyncio.shield(restorer.await_volume_settled())
+            # A native route still playing keeps its speaker, so the
+            # next announcement waits for it. This only has work to do
+            # when the managed route failed or we were cancelled; on
+            # success ``_finish_native_routes`` already waited.
+            with contextlib.suppress(asyncio.CancelledError):
+                await _settle_native_tasks(
+                    native_tasks,
+                    cancel=cancelled,
+                    log_failures=not native_reported,
+                )
             _release_speaker_gate(gated_players)
 
 
@@ -2084,49 +2200,59 @@ def _filter_available(hass: HomeAssistant, media_players: List[str]) -> List[str
     return out
 
 
-async def _call_tts_speak(
-    hass: HomeAssistant,
-    tts_entity: str,
-    message: str,
-    language: str,
-    options: Dict[str, Any],
-    media_players: List[str],
-    tts_volume: Optional[float] = None,
-) -> None:
-    """Invoke HA's ``tts.speak`` exactly once.
+async def _play_route_timed(
+    hass: HomeAssistant, route: AnnounceRoute, media_id: str
+) -> float:
+    """Play a native route and return the loop time its call returned.
 
-    Engine-level retries already happen inside
-    ``async_stream_tts_audio``, where they're safe (audio hasn't been
-    delivered to a speaker yet). Retrying at the speak level instead can
-    replay audio that already started playing on one of the targets - a
-    blocking ``tts.speak`` waits for playback completion, so by the time
-    we'd see an exception (e.g. an internal ``quote_from_bytes`` bug in
-    HA's URL helper) the message is often already audible. Surfacing the
-    failure once is preferable to playing it twice.
-
-    Every target goes through this one call - there is no per-platform
-    announcement service. HA's ``tts.speak`` sets ``announce=True`` on
-    the resulting ``play_media``, which is what lets devices exposing
-    ``MEDIA_ANNOUNCE`` duck and restore by themselves.
-
-    ``tts_volume`` is accepted for symmetry with the caller's signature
-    but isn't used here: HA's ``tts.speak`` doesn't carry per-call
-    volume to ``play_media``, so the actual loudness control happens in
-    the manual pause+volume+resume flow inside ``_VolumeRestorer``.
+    A route whose platform returns before playback (Sonos) keeps the
+    speaker gate for the clip's length from that moment.
     """
-    service_data = {
-        "message": message,
-        "language": language,
-        "options": options,
-        "media_player_entity_id": media_players,
-    }
-    await hass.services.async_call(
-        TTS_DOMAIN, "speak", service_data,
-        target={"entity_id": tts_entity}, blocking=True,
-    )
+    await play_route(hass, route, media_id)
+    return asyncio.get_running_loop().time()
+
+
+async def _settle_native_tasks(
+    native_tasks: list[tuple[AnnounceRoute, asyncio.Task[float]]],
+    *,
+    cancel: bool,
+    log_failures: bool,
+) -> None:
+    """Leave no native route running unattended.
+
+    On cancellation the pending calls are cancelled. Otherwise they are
+    awaited, so the speaker gate is released only after them. When the
+    announcement is already failing for another reason, a native
+    failure is logged here rather than raised over the first error.
+    """
+    pending = [task for _, task in native_tasks if not task.done()]
+    if cancel:
+        for task in pending:
+            task.cancel()
+    if pending:
+        await asyncio.wait(pending)
+    for route, task in native_tasks:
+        if task.cancelled():
+            continue
+        err = task.exception()
+        if err is not None and log_failures:
+            _LOGGER.error(
+                "The announcement did not play on %s: %s",
+                ", ".join(route.players), err,
+            )
+
+
+def _platform_of(hass: HomeAssistant, entity_id: str) -> str | None:
+    """Return the integration that owns ``entity_id``, if registered."""
+    entry = entity_registry.async_get(hass).async_get(entity_id)
+    return entry.platform if entry else None
 
 
 _DEFAULT_FALLBACK_DURATION_MS = 10_000
+
+# Added to the clip length while a native route that returned before
+# playback keeps the speaker gate. The same margin the managed hold uses.
+_NATIVE_HOLD_BUFFER_MS = 1500
 
 
 def _resolved_render_args(
@@ -2299,10 +2425,10 @@ _NATIVE_ANNOUNCE_PLATFORMS: frozenset[str] = frozenset({
     # behaves better than our manual stop+speak+resume - the latter
     # fights MA's internal ANNOUNCEMENT_IN_PROGRESS lock and ends up
     # leaving the queue idle or advanced when our resume gets
-    # ignored. We trust MA's native flow here. Volume overrides
-    # still force the manual path via ``force_manual=True`` in
-    # ``announce()`` so explicit per-call volume control keeps
-    # working.
+    # ignored. We trust MA's native flow here. With a volume
+    # override, ``announce()`` sends MA and Sonos their own route
+    # with the level in ``extra`` (see ``announce_routes``), so they
+    # never reach the manual path either.
     "music_assistant",
 })
 

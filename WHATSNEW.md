@@ -1,3 +1,12 @@
+## v3.10b1
+
+- Add an OpenRouter preset, which lists the speech models OpenRouter offers and the voices each model accepts
+- Add a gain setting per profile, to raise or lower the speech volume with or without loudness correction
+- Offer the new model's voices when a profile changes model, instead of keeping a voice the new model does not accept
+- Play announcements on Sonos and Music Assistant speakers at the requested volume, ducking the music instead of pausing it
+- Let the voice picker take a typed voice on Kokoro and OpenRouter, for a voice mix such as `am_michael(1)+am_eric(2)`
+- Keep announcing on the speakers that work when one speaker in a group fails, and report which one failed
+
 ## v3.9.2
 
 - Show every voice a Mistral account has, instead of only the first ten

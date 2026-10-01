@@ -10,20 +10,38 @@ the backend reports.
 
 Both the config flow, which fills the voice picker, and the TTS entity,
 which answers Home Assistant's own voice dropdown, read the catalogue
-from here so there is one transport and one set of response shapes to
-maintain.
+from here so there is one transport to maintain. The response shapes
+are parsed in ``catalogue_parsers``.
+
+Two sources exist, and a provider preset names its source in
+``catalogue_source``. Most backends publish their voices beside the
+speech endpoint, at ``/v1/audio/voices``. OpenRouter does not: it
+answers 404 there, and publishes its speech models together with the
+voices each one accepts at ``/api/v1/models``. Its voices therefore
+depend on the model, which the first source knows nothing about.
 """
 from __future__ import annotations
 
 import asyncio
 import logging
+import time
 from typing import Any
 
 import aiohttp
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import aiohttp_client
 
+from .catalogue_parsers import (
+    openrouter_catalogue_from_payload,
+    voice_options_for_model,
+    voice_options_from_payload,
+)
+
 _LOGGER = logging.getLogger(__name__)
+
+# The values a preset may give ``catalogue_source``.
+CATALOGUE_VOICES_ENDPOINT = "voices_endpoint"
+CATALOGUE_OPENROUTER = "openrouter_models"
 
 # The listing endpoint sits beside the configured speech endpoint.
 VOICES_PATH = "voices"
@@ -63,16 +81,25 @@ def voices_url_for(speech_url: str) -> str:
     return speech_url.rsplit("/", 1)[0] + f"/{VOICES_PATH}"
 
 
-async def async_fetch_voice_options(
-    hass: HomeAssistant, speech_url: str, api_key: str | None
-) -> list[dict[str, str]] | None:
-    """Fetch the catalogue, or return None if it cannot be had.
+def openrouter_models_url_for(speech_url: str) -> str:
+    """Return OpenRouter's model listing URL for ``speech_url``.
 
-    Never raises. A backend that is unreachable, slow, or answering
-    something unexpected has to degrade to a typed voice name rather
-    than break the config flow or the entity.
+    ``https://openrouter.ai/api/v1/audio/speech`` becomes
+    ``https://openrouter.ai/api/v1/models``.
     """
-    voices_url = voices_url_for(speech_url)
+    base = speech_url.rstrip("/")
+    if base.endswith("/audio/speech"):
+        base = base[: -len("/audio/speech")]
+    return f"{base}/models"
+
+
+async def _async_get_json(
+    hass: HomeAssistant,
+    url: str,
+    api_key: str | None,
+    params: dict[str, Any] | None = None,
+) -> Any | None:
+    """GET ``url`` and return its JSON body, or ``None`` on any failure."""
     headers = {"User-Agent": "HomeAssistant-OpenAI-TTS"}
     if api_key:
         headers["Authorization"] = f"Bearer {api_key}"
@@ -81,15 +108,12 @@ async def async_fetch_voice_options(
         session = aiohttp_client.async_get_clientsession(hass)
         timeout = aiohttp.ClientTimeout(total=8)
         async with session.get(
-            voices_url,
-            headers=headers,
-            timeout=timeout,
-            params={"limit": VOICE_PAGE_LIMIT},
+            url, headers=headers, timeout=timeout, params=params
         ) as resp:
             if resp.status != 200:
                 _LOGGER.debug(
-                    "Voice listing returned HTTP %s for %s",
-                    resp.status, voices_url,
+                    "Catalogue listing returned HTTP %s for %s",
+                    resp.status, url,
                 )
                 return None
             # ``content_type=None`` disables aiohttp's strict
@@ -97,79 +121,79 @@ async def async_fetch_voice_options(
             # serve the voice list as text/plain and would
             # otherwise raise ContentTypeError on a perfectly
             # valid JSON body.
-            payload = await resp.json(content_type=None)
+            return await resp.json(content_type=None)
     except (aiohttp.ClientError, asyncio.TimeoutError, ValueError) as err:
-        _LOGGER.debug("Voice listing fetch failed for %s: %s", voices_url, err)
+        _LOGGER.debug("Catalogue fetch failed for %s: %s", url, err)
         return None
     except Exception:  # pragma: no cover - defensive
-        _LOGGER.debug(
-            "Voice listing fetch raised for %s", voices_url, exc_info=True
-        )
+        _LOGGER.debug("Catalogue fetch raised for %s", url, exc_info=True)
         return None
 
-    return voice_options_from_payload(payload, voices_url)
+
+# OpenRouter answers for every model at once, and several readers want
+# the same answer within seconds of each other: the model step and the
+# voice step of one config flow, and every profile on one parent entry
+# when Home Assistant starts. One fetch serves them all for a while.
+_MODEL_CATALOGUE_CACHE: dict[str, tuple[float, dict[str, list[str]]]] = {}
 
 
-def voice_options_from_payload(
-    payload: Any, source_url: str = ""
-) -> list[dict[str, str]] | None:
-    """Turn a voice-listing response into selector options.
+async def async_fetch_model_catalogue(
+    hass: HomeAssistant,
+    speech_url: str,
+    api_key: str | None,
+    source: str | None,
+) -> dict[str, list[str]] | None:
+    """Return ``{model id: [voices]}`` for this source, or ``None``.
 
-    Returns options of the form ``[{"value": <id>, "label": <name>},
-    ...]`` or ``None`` when the payload holds nothing usable. Never
-    raises: a backend we have never seen must degrade to the free-text
-    voice field, not break the config flow.
-
-    Response shapes seen in the wild:
-
-    * Mistral:        ``{"items": [{"id": uuid, "name": "..."}], "total": N}``
-    * OpenAI-style:   ``{"data":  [{"id": str,  "name": "..."}]}``
-    * Kokoro-FastAPI: ``{"voices": ["af_bella", "am_adam", ...]}``
-    * bare list:      ``["af_bella", ...]`` or ``[{"id": ...}, ...]``
-
-    The bare-list shapes matter because several OpenAI-compatible
-    self-hosted servers answer ``GET /v1/audio/voices`` with a
-    top-level JSON array. Calling ``.get()`` on that raised
-    ``AttributeError`` out of the config flow before this helper
-    existed.
+    Only the OpenRouter source can list models. Every other source
+    answers ``None``, and the caller keeps the preset's static list.
+    Never raises.
     """
-    if isinstance(payload, list):
-        items: Any = payload
-    elif isinstance(payload, dict):
-        items = (
-            payload.get("items")
-            or payload.get("data")
-            or payload.get("voices")
-            or []
-        )
-    else:
-        _LOGGER.debug(
-            "Voice listing at %s returned an unsupported top-level type: %s",
-            source_url, type(payload).__name__,
-        )
+    if source != CATALOGUE_OPENROUTER:
         return None
+    url = openrouter_models_url_for(speech_url)
+    cached = _MODEL_CATALOGUE_CACHE.get(url)
+    if cached is not None and time.monotonic() - cached[0] < CATALOGUE_TTL_S:
+        return cached[1]
+    payload = await _async_get_json(
+        hass, url, api_key, params={"output_modalities": "speech"}
+    )
+    catalogue = (
+        openrouter_catalogue_from_payload(payload) if payload is not None else None
+    )
+    if catalogue is None:
+        # Keep an older answer rather than none at all. A listing that is
+        # briefly unreachable should not empty the model picker.
+        return cached[1] if cached is not None else None
+    _MODEL_CATALOGUE_CACHE[url] = (time.monotonic(), catalogue)
+    return catalogue
 
-    if not isinstance(items, list):
-        _LOGGER.debug(
-            "Voice listing at %s held a non-list voice collection: %s",
-            source_url, type(items).__name__,
+
+async def async_fetch_voice_options(
+    hass: HomeAssistant,
+    speech_url: str,
+    api_key: str | None,
+    *,
+    model: str | None = None,
+    source: str | None = None,
+) -> list[dict[str, str]] | None:
+    """Fetch the voice catalogue, or return None if it cannot be had.
+
+    ``model`` matters only to a source whose voices depend on it, which
+    today is OpenRouter. Never raises. A backend that is unreachable,
+    slow, or answering something unexpected has to degrade to a typed
+    voice name rather than break the config flow or the entity.
+    """
+    if source == CATALOGUE_OPENROUTER:
+        catalogue = await async_fetch_model_catalogue(
+            hass, speech_url, api_key, source
         )
-        return None
+        return voice_options_for_model(catalogue, model)
 
-    options: list[dict[str, str]] = []
-    for v in items:
-        if isinstance(v, str):
-            # Plain string voice name (Kokoro-FastAPI). value == label
-            # is fine because the slug is what the user reads in the
-            # UI ("af_bella") and what the request needs.
-            if v:
-                options.append({"value": v, "label": v})
-            continue
-        if not isinstance(v, dict):
-            continue
-        voice_id = v.get("id") or v.get("voice_id") or v.get("value")
-        if not voice_id:
-            continue
-        label = v.get("name") or v.get("label") or voice_id
-        options.append({"value": str(voice_id), "label": str(label)})
-    return options or None
+    voices_url = voices_url_for(speech_url)
+    payload = await _async_get_json(
+        hass, voices_url, api_key, params={"limit": VOICE_PAGE_LIMIT}
+    )
+    if payload is None:
+        return None
+    return voice_options_from_payload(payload, voices_url)

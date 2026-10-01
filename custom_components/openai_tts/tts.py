@@ -37,6 +37,7 @@ from homeassistant.helpers.storage import Store
 from homeassistant.util import slugify
 
 from .api_health import OpenAITTSHealthTracker, health_tracker_for
+from .audio_filters import DEFAULT_GAIN_DB, build_audio_filter, clamp_gain_db
 from .cache import MessageDurationCache
 from .const import (
     CONF_API_KEY,
@@ -44,6 +45,7 @@ from .const import (
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_EXTRA_PAYLOAD,
+    CONF_GAIN_DB,
     CONF_INSTRUCTIONS,
     CONF_MODEL,
     CONF_NORMALIZE_AUDIO,
@@ -74,7 +76,7 @@ from .exceptions import (
     OpenAITTSError,
     OpenAIVoiceDeletedError,
 )
-from .loudness import can_normalize_stream, normalize_stream
+from .loudness import can_filter_stream, filter_stream
 from .openaitts_engine import OpenAITTSEngine
 from .repairs import create_voice_deleted_issue
 from .streaming import (
@@ -83,7 +85,6 @@ from .streaming import (
     pipelined_audio_stream,
 )
 from .utils import (
-    LOUDNESS_FILTER,
     is_valid_audio,
     measure_audio_duration,
     process_audio,
@@ -462,6 +463,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             "current_normalize_audio": self._get_config_value(
                 CONF_NORMALIZE_AUDIO, True
             ),
+            "current_gain_db": clamp_gain_db(
+                self._get_config_value(CONF_GAIN_DB, DEFAULT_GAIN_DB)
+            ),
             "current_extra_payload": self._get_config_value(CONF_EXTRA_PAYLOAD),
         }
 
@@ -575,8 +579,15 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 return
             parent = self._parent_entry or self._config
             api_key = parent.data.get(CONF_API_KEY) if parent is not None else None
+            provider = parent.data.get(CONF_PROVIDER) if parent is not None else None
+            # OpenRouter's voices depend on the model, so the profile's
+            # model goes along. Every other source ignores it.
             options = await async_fetch_voice_options(
-                self.hass, speech_url, api_key
+                self.hass,
+                speech_url,
+                api_key,
+                model=self._get_config_value(CONF_MODEL) or self._engine._model,
+                source=preset_for(provider).get("catalogue_source"),
             )
             if options is None:
                 # Keep whatever was there. A backend that is briefly
@@ -608,6 +619,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_CHIME_ENABLE,
             CONF_CHIME_SOUND,
             CONF_NORMALIZE_AUDIO,
+            CONF_GAIN_DB,
             CONF_INSTRUCTIONS,
             CONF_EXTRA_PAYLOAD,
             CONF_AUDIO_FORMAT,
@@ -639,6 +651,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_CHIME_ENABLE: self._get_config_value(CONF_CHIME_ENABLE, False),
             CONF_CHIME_SOUND: self._get_config_value(CONF_CHIME_SOUND, "threetone.mp3"),
             CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, True),
+            CONF_GAIN_DB: clamp_gain_db(
+                self._get_config_value(CONF_GAIN_DB, DEFAULT_GAIN_DB)
+            ),
             CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
             CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
             CONF_AUDIO_FORMAT: audio_format,
@@ -702,45 +717,68 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         )
         return int(duration_seconds * 1000)
 
+    @staticmethod
+    def _audio_filter(resolved: dict[str, Any]) -> str | None:
+        """The ffmpeg filter chain this request needs, or ``None``.
+
+        Every decision about filtering goes through here, on both the
+        atomic and the streaming path, so the two cannot disagree about
+        whether normalisation or a gain applies.
+        """
+        return build_audio_filter(
+            bool(resolved.get("normalize_audio")),
+            resolved.get("gain_db", DEFAULT_GAIN_DB),
+        )
+
+    def _filter_blocks_streaming(
+        self, options: dict, audio_format: str
+    ) -> bool:
+        """True when a filter is wanted that this format cannot take on a pipe.
+
+        Such a request belongs on the atomic path, where the filter runs
+        against a finished file.
+        """
+        return (
+            self._audio_filter(self._resolve_options(options)) is not None
+            and not can_filter_stream(audio_format)
+        )
+
     def _will_filter_stream(
         self, resolved: dict[str, Any], audio_format: str
     ) -> bool:
-        """Whether a loudness filter goes in front of this stream."""
-        return bool(
-            resolved.get("normalize_audio")
-            and can_normalize_stream(audio_format)
+        """Whether a filter chain goes in front of this stream."""
+        return (
+            self._audio_filter(resolved) is not None
+            and can_filter_stream(audio_format)
         )
 
-    def _apply_loudness(
+    def _apply_audio_filter(
         self,
         source: AsyncGenerator[bytes, None],
         resolved: dict[str, Any],
         audio_format: str,
     ) -> AsyncGenerator[bytes, None]:
-        """Put the loudness filter in front of a stream when asked to.
+        """Put the filter chain in front of a stream when one is needed.
 
         Returns ``source`` untouched when nothing is to be done, so
         callers can wrap unconditionally.
         """
-        if not self._will_filter_stream(resolved, audio_format):
+        audio_filter = self._audio_filter(resolved)
+        if audio_filter is None or not can_filter_stream(audio_format):
             return source
         ffmpeg_bin, _ = resolve_ffmpeg_paths(self.hass)
-        return normalize_stream(
-            source, audio_format, ffmpeg_bin, LOUDNESS_FILTER
-        )
+        return filter_stream(source, audio_format, ffmpeg_bin, audio_filter)
 
     def _can_use_streaming(
         self, text: str, options: dict, audio_format: str
     ) -> bool:
         # A chime has to be attached to finished audio, so it still
-        # forces the atomic path. Normalisation no longer does: the
-        # filter corrects continuously and runs on a pipe, for the
-        # formats ``can_normalize_stream`` accepts.
+        # forces the atomic path. Normalisation and gain no longer do:
+        # the filter chain runs on a pipe, for the formats
+        # ``can_filter_stream`` accepts.
         if options.get(CONF_CHIME_ENABLE):
             return False
-        if options.get(CONF_NORMALIZE_AUDIO) and not can_normalize_stream(
-            audio_format
-        ):
+        if self._filter_blocks_streaming(options, audio_format):
             return False
         if audio_format in SELF_DESCRIBING_LENGTH_FORMATS:
             # The header would have to state a length that is not known
@@ -798,10 +836,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             # A chime is attached to finished audio, so there is nothing
             # to gain from producing that audio in pieces.
             return False
-        if options.get(CONF_NORMALIZE_AUDIO) and not can_normalize_stream(
-            audio_format
-        ):
-            # Normalisation itself streams, but not in every container.
+        if self._filter_blocks_streaming(options, audio_format):
+            # The filter chain itself streams, but not in every container.
             # A format it cannot filter on a pipe belongs on the atomic
             # path, where the filter runs against a finished file.
             return False
@@ -867,7 +903,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             source = pipelined_audio_stream(
                 message_gen, _synthesize, audio_format, _spawn, stats
             )
-            async for chunk in self._apply_loudness(
+            async for chunk in self._apply_audio_filter(
                 source, resolved, audio_format
             ):
                 collected.append(chunk)
@@ -885,7 +921,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             raise
         except Exception as err:
             # Anything the engine did not raise itself, ffmpeg through
-            # ``_apply_loudness`` most likely. Without this the health
+            # ``_apply_audio_filter`` most likely. Without this the health
             # sensor never hears about it.
             self._mark_failed_pipelined(stats, resolved)
             if self._health_tracker is not None:
@@ -929,6 +965,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             if CONF_NORMALIZE_AUDIO in opts
             else self._get_config_value(CONF_NORMALIZE_AUDIO, True)
         )
+        gain_db = clamp_gain_db(
+            opts[CONF_GAIN_DB]
+            if CONF_GAIN_DB in opts
+            else self._get_config_value(CONF_GAIN_DB, DEFAULT_GAIN_DB)
+        )
 
         return {
             "voice": (
@@ -953,6 +994,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 or self._get_config_value(CONF_CHIME_SOUND)
             ),
             "normalize_audio": normalize_audio,
+            "gain_db": gain_db,
             "send_voice": (
                 opts[CONF_SEND_VOICE]
                 if CONF_SEND_VOICE in opts
@@ -996,7 +1038,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     async def _maybe_post_process(
         self, audio_data: bytes, resolved: dict[str, Any]
     ) -> bytes:
-        """Apply chime + normalization, and repair a declared length.
+        """Apply the chime and the filter chain, and repair a declared length.
 
         When there is nothing to apply the engine bytes are returned
         unchanged, and delivery is left to the streaming path or to
@@ -1016,11 +1058,11 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         for speed.
         """
         chime_enable = resolved["chime_enable"]
-        normalize_audio = resolved["normalize_audio"]
+        audio_filter = self._audio_filter(resolved)
         requested_format = resolved.get("audio_format", DEFAULT_AUDIO_FORMAT)
         repair_length = requested_format in SELF_DESCRIBING_LENGTH_FORMATS
 
-        if not (chime_enable or normalize_audio or repair_length):
+        if not (chime_enable or audio_filter or repair_length):
             return audio_data
 
         chime_path = None
@@ -1037,7 +1079,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             audio_data,
             chime_enabled=chime_enable,
             chime_path=chime_path,
-            normalize_audio=normalize_audio,
+            audio_filter=audio_filter,
             input_format=requested_format,
         )
         if not processed_audio:
@@ -1502,12 +1544,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
     async def _validated_stream(
         self, text: str, resolved: dict[str, Any], audio_format: str
     ) -> AsyncGenerator[bytes, None]:
-        """Validated provider stream, loudness-corrected when asked.
+        """Validated provider stream, filtered when asked.
 
         When nothing is put in front of the provider, the inner
         generator does its own bookkeeping and this adds no buffering.
 
-        When the loudness filter is in front, the bookkeeping moves out
+        When the filter chain is in front, the bookkeeping moves out
         here, because the inner generator finishes as soon as the last
         provider byte is read, which is before ffmpeg has produced,
         or failed to produce, anything. Recording success there marked
@@ -1523,7 +1565,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 yield chunk
             return
 
-        filtered = self._apply_loudness(
+        filtered = self._apply_audio_filter(
             self._stream_with_validation(
                 text, resolved, audio_format, record_success=False
             ),

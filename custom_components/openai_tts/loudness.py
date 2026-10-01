@@ -1,4 +1,4 @@
-"""Loudness correction applied to a stream, without buffering it.
+"""The audio filter chain applied to a stream, without buffering it.
 
 The atomic path hands ffmpeg a finished file, so it can use any filter
 it likes. This module exists for the other path, where audio is
@@ -8,12 +8,13 @@ finished file to hand anywhere.
 An ffmpeg process is kept open for the life of the stream. Chunks are
 written to its standard input by one task while another reads its
 standard output, which is what keeps a large clip from deadlocking on a
-full pipe buffer. The filter is the one defined in ``utils``, chosen
-because it corrects continuously rather than computing a single offset
-from the whole file, so it needs neither a second pass nor an end.
+full pipe buffer. The chain comes from ``audio_filters``. Its loudness
+correction was chosen because it corrects continuously rather than
+computing a single offset from the whole file, so it needs neither a
+second pass nor an end, and a gain and a limiter need neither either.
 
 Only formats ffmpeg can read from a pipe without seeking are
-supported. Callers ask with :func:`can_normalize_stream` first and fall
+supported. Callers ask with :func:`can_filter_stream` first and fall
 back to the atomic path when the answer is no.
 """
 from __future__ import annotations
@@ -76,25 +77,25 @@ _STDERR_KEEP_BYTES = 4096
 _REAP_TIMEOUT_S = 5.0
 
 
-def can_normalize_stream(audio_format: str) -> bool:
-    """Whether this format can be corrected without buffering it."""
+def can_filter_stream(audio_format: str) -> bool:
+    """Whether this format can be filtered without buffering it."""
     return audio_format in _PIPE_ARGS
 
 
-async def normalize_stream(
+async def filter_stream(
     source: AsyncIterable[bytes],
     audio_format: str,
     ffmpeg_bin: str,
-    loudness_filter: str,
+    audio_filter: str,
 ) -> AsyncGenerator[bytes, None]:
-    """Yield ``source`` with its loudness corrected, still as a stream.
+    """Yield ``source`` through ``audio_filter``, still as a stream.
 
     Raises ``ValueError`` for a format that cannot be piped, and
     ``RuntimeError`` when ffmpeg exits non-zero. The caller should treat
     the latter like any other synthesis failure: what came out is
     incomplete and must not be cached.
     """
-    if not can_normalize_stream(audio_format):
+    if not can_filter_stream(audio_format):
         raise ValueError(
             f"format {audio_format!r} cannot be filtered on a stream"
         )
@@ -105,7 +106,7 @@ async def normalize_stream(
         ffmpeg_bin, "-hide_banner", "-loglevel", "error",
         *_FAST_START,
         *pipe_args["read"], "-i", "pipe:0",
-        "-af", loudness_filter,
+        "-af", audio_filter,
         "-ac", "1", "-ar", "24000",
         *encoder["codec_args"],
         *pipe_args["write"], "pipe:1",
@@ -181,7 +182,7 @@ async def normalize_stream(
         if returncode != 0:
             detail = bytes(errors).decode(errors="replace").strip()
             raise RuntimeError(
-                f"loudness filter failed (exit {returncode}): {detail[-300:]}"
+                f"audio filter failed (exit {returncode}): {detail[-300:]}"
             )
     finally:
         # Runs on success, on failure, and when the consumer abandons

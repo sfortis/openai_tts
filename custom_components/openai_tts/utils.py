@@ -25,30 +25,6 @@ from .const import AUDIO_FORMAT_ENCODER
 
 _LOGGER = logging.getLogger(__name__)
 
-# Loudness correction for speech.
-#
-# Two filters in series, and both are needed for different reasons.
-#
-# ``dynaudnorm`` replaced ``loudnorm=I=-16:TP=-1:LRA=5``. Measured
-# against three engines on 2026-08-29, loudnorm made a short OpenAI clip
-# six decibels QUIETER than it started (-24.25 LUFS in, -30.20 out): it
-# is designed to run in two passes, and given only one it has not
-# converged before a two second announcement ends. dynaudnorm corrects
-# continuously instead, so it needs neither a second pass nor a complete
-# file, which is also what lets normalisation run on a stream.
-#
-# ``acompressor`` in front of it answers a separate complaint: the clip
-# was loud enough on average while individual words were still swallowed.
-# Levelling the average does not lift a quiet syllable, and a fast
-# compressor does. Measured on a thirteen second announcement, the
-# quiet passages rose from -17.4 to -14.8 LUFS with the loudness range
-# unchanged at 1.9 LU.
-#
-# The peak target is 0.85 rather than the filter's own 0.95 default.
-# At 0.95 two of the three engines came out above -0.5 dBTP once the mp3
-# encoder had added its overshoot, which clips. At 0.85 the worst of the
-# three sits at -1.29 dBTP with the quiet passages only half a decibel
-# lower, which is a good trade.
 # Containers whose header states a total length that a streaming
 # producer cannot know, so it writes a placeholder instead: wav writes
 # 0xFFFFFFFF, flac writes zero samples. Decoders that honour the field
@@ -56,11 +32,6 @@ _LOGGER = logging.getLogger(__name__)
 # is what fixes it, because ffmpeg can seek back and write the real
 # figure once the audio has been written.
 _REWRITE_HEADER_FORMATS = frozenset({"wav", "flac"})
-
-LOUDNESS_FILTER = (
-    "acompressor=threshold=-28dB:ratio=4:attack=3:release=60,"
-    "dynaudnorm=p=0.85:m=20:f=40:g=5"
-)
 
 
 def resolve_ffmpeg_paths(hass: HomeAssistant) -> Tuple[str, str]:
@@ -275,7 +246,7 @@ def _remove_quietly(path: str) -> None:
 def build_ffmpeg_command(
     output_path: str,
     input_paths: List[str],
-    normalize_audio: bool = False,
+    audio_filter: Optional[str] = None,
     tts_input_format: Optional[str] = None,
     output_format: str = "mp3",
     ffmpeg: str = "ffmpeg",
@@ -286,7 +257,8 @@ def build_ffmpeg_command(
     Args:
         output_path: Path to output file
         input_paths: List of input file paths
-        normalize_audio: Whether to apply audio normalization
+        audio_filter: The chain from ``audio_filters.build_audio_filter``,
+            applied to the TTS audio only, or ``None`` for no filter.
         tts_input_format: Explicit format hint for the LAST input path (the
             TTS audio). Only meaningful for headerless formats like ``pcm``;
             for everything else ffmpeg auto-detects from the file header
@@ -306,11 +278,12 @@ def build_ffmpeg_command(
             ])
         cmd.extend(["-i", input_path])
     
-    # Filter graph for chime+TTS mixing or single-input normalization.
+    # Filter graph for chime+TTS mixing or a single filtered input.
     # Both streams are forced to a common PCM layout before concat so
-    # the operation is codec-agnostic.
+    # the operation is codec-agnostic. The filter touches the TTS audio
+    # only, so the chime keeps its own level.
     if len(input_paths) > 1:
-        norm_step = f",{LOUDNESS_FILTER}" if normalize_audio else ""
+        norm_step = f",{audio_filter}" if audio_filter else ""
         common = "aresample=24000:async=1,aformat=sample_fmts=fltp:channel_layouts=mono"
         cmd.extend([
             "-filter_complex",
@@ -321,8 +294,8 @@ def build_ffmpeg_command(
             ),
             "-map", "[out]",
         ])
-    elif normalize_audio:
-        cmd.extend(["-af", LOUDNESS_FILTER])
+    elif audio_filter:
+        cmd.extend(["-af", audio_filter])
 
     # Output side: pick codec and muxer for the requested format. Always a
     # real re-encode. There used to be a ``-c copy`` remux path here for a
@@ -347,18 +320,19 @@ async def process_audio(
     audio_content: bytes,
     chime_enabled: bool = False,
     chime_path: Optional[str] = None,
-    normalize_audio: bool = False,
+    audio_filter: Optional[str] = None,
     input_format: Optional[str] = None,
 ) -> Tuple[str, bytes, float]:
     """
-    Process audio content with optional chime and normalization.
+    Process audio content with an optional chime and filter chain.
 
     Args:
         hass: HomeAssistant instance
         audio_content: Raw audio content bytes
         chime_enabled: Whether to add chime
         chime_path: Path to chime file (MP3)
-        normalize_audio: Whether to normalize audio
+        audio_filter: The chain from ``audio_filters.build_audio_filter``,
+            or ``None`` when neither normalisation nor gain applies.
         input_format: Explicit format hint (mp3/wav/opus/aac/flac/pcm).
             Required for ``pcm`` since it has no header to auto-detect.
             Falls back to magic-byte detection when omitted.
@@ -417,7 +391,7 @@ async def process_audio(
         #                  the Xing/Info header from the chime no longer
         #                  matched the combined frame layout. A single
         #                  fresh encode keeps the bitstream consistent.
-        #   norm-only    → single-input loudnorm (decode/encode)
+        #   filter-only  → single-input filter chain (decode/encode)
         #   neither      → a plain re-encode, which is not a no-op for
         #                  the formats that declare a total length in
         #                  their header. A provider streaming wav or
@@ -430,16 +404,16 @@ async def process_audio(
             cmd = build_ffmpeg_command(
                 final_output_path,
                 [actual_chime_path, tts_path],
-                normalize_audio=normalize_audio,
+                audio_filter=audio_filter,
                 tts_input_format=audio_format,
                 output_format=audio_format,
                 ffmpeg=ffmpeg,
             )
-        elif normalize_audio:
+        elif audio_filter:
             cmd = build_ffmpeg_command(
                 final_output_path,
                 [tts_path],
-                normalize_audio=True,
+                audio_filter=audio_filter,
                 tts_input_format=audio_format,
                 output_format=audio_format,
                 ffmpeg=ffmpeg,
@@ -448,13 +422,13 @@ async def process_audio(
             cmd = build_ffmpeg_command(
                 final_output_path,
                 [tts_path],
-                normalize_audio=False,
+                audio_filter=None,
                 tts_input_format=audio_format,
                 output_format=audio_format,
                 ffmpeg=ffmpeg,
             )
         else:
-            # Neither chime nor normalize, and a format that carries no
+            # Neither chime nor filter, and a format that carries no
             # total length to correct: return the native bytes. Faster
             # than a no-op ffmpeg roundtrip and it keeps the original
             # encoder output byte for byte.

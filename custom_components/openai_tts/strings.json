@@ -100,6 +100,7 @@
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
+            "gain_db": "Gain",
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format",
@@ -111,7 +112,8 @@
             "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3 or PCM.",
             "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
             "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2.",
-            "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine."
+            "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine.",
+            "gain_db": "Raises or lowers the volume of the generated speech, in decibels. It works with or without audio normalization, and a limiter stops a boost from clipping. 0 leaves the audio unchanged."
           }
         },
         "reconfigure": {
@@ -130,6 +132,7 @@
             "chime": "Enable chime sound",
             "chime_sound": "Chime sound",
             "normalize_audio": "Normalize audio volume",
+            "gain_db": "Gain",
             "instructions": "Voice instructions",
             "extra_payload": "Extra JSON payload (for custom TTS backends)",
             "audio_format": "Audio format",
@@ -141,7 +144,8 @@
             "stream_pipelining": "Starts speaking as soon as the first sentence is ready, instead of waiting for the whole reply to be written. Only affects the voice assistant, and needs MP3 or PCM.",
             "audio_format": "MP3 is the safe default. Change it only if your backend requires another format.",
             "send_voice": "On by default. Turn it off for a backend that rejects the voice field, such as audio.cpp serving Chatterbox or VoxCPM2.",
-            "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine."
+            "stream_audio": "Plays the audio as it arrives instead of waiting for the whole clip. Turn it off for a backend that answers a streamed read with audio that will not decode, while the same request read in one go is fine.",
+            "gain_db": "Raises or lowers the volume of the generated speech, in decibels. It works with or without audio normalization, and a limiter stops a boost from clipping. 0 leaves the audio unchanged."
           }
         }
       },
@@ -228,11 +232,11 @@
         },
         "volume": {
           "name": "Volume",
-          "description": "Volume for this announcement only, 0.0 to 1.0, restored afterwards. Setting it pauses the music instead of ducking it."
+          "description": "Volume for this announcement only, 0.0 to 1.0, restored afterwards. Sonos and Music Assistant speakers play the announcement at this level and duck the music. Other speakers pause the music instead."
         },
         "announce": {
           "name": "Announcement mode",
-          "description": "On by default: speakers that support announcements duck the music, the rest are paused and resumed. Off sends the audio as ordinary media."
+          "description": "On by default: speakers that support announcements duck the music, the rest are paused and resumed. Off sends the audio as ordinary media. Sonos and Music Assistant speakers always announce, so this has no effect on them."
         }
       }
     },

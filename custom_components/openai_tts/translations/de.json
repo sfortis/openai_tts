@@ -75,6 +75,7 @@
             "chime": "Signalton aktivieren",
             "chime_sound": "Signalton-Sound",
             "normalize_audio": "Audiolautstärke normalisieren",
+            "gain_db": "Verstärkung (Gain)",
             "instructions": "Sprachanweisungen",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
             "audio_format": "Audioformat",
@@ -86,7 +87,8 @@
             "stream_pipelining": "Beginnt zu sprechen, sobald der erste Satz fertig ist, statt auf die vollständige Antwort zu warten. Betrifft nur den Sprachassistenten und erfordert MP3 oder PCM.",
             "audio_format": "MP3 ist die sichere Voreinstellung. Ändern Sie es nur, wenn Ihr Backend ein anderes Format benötigt.",
             "send_voice": "Standardmäßig ein. Schalten Sie es aus für ein backend, das das Stimmenfeld ablehnt, etwa audio.cpp mit Chatterbox oder VoxCPM2.",
-            "stream_audio": "Gibt das Audio wieder, während es ankommt, statt auf den ganzen Clip zu warten. Schalten Sie es aus, wenn ein Backend auf ein gestreamtes Lesen mit Audio antwortet, das sich nicht dekodieren lässt, während dieselbe Anfrage in einem Zug gelesen funktioniert."
+            "stream_audio": "Gibt das Audio wieder, während es ankommt, statt auf den ganzen Clip zu warten. Schalten Sie es aus, wenn ein Backend auf ein gestreamtes Lesen mit Audio antwortet, das sich nicht dekodieren lässt, während dieselbe Anfrage in einem Zug gelesen funktioniert.",
+            "gain_db": "Hebt oder senkt die Lautstärke der erzeugten Sprache in Dezibel. Funktioniert mit und ohne Audio-Normalisierung, und ein Limiter verhindert Übersteuerung beim Anheben. 0 lässt das Audio unverändert."
           }
         },
         "reconfigure": {
@@ -105,6 +107,7 @@
             "chime": "Signalton aktivieren",
             "chime_sound": "Signalton-Sound",
             "normalize_audio": "Audiolautstärke normalisieren",
+            "gain_db": "Verstärkung (Gain)",
             "instructions": "Sprachanweisungen",
             "extra_payload": "Extra JSON payload (für custom TTS backends)",
             "audio_format": "Audioformat",
@@ -116,7 +119,8 @@
             "stream_pipelining": "Beginnt zu sprechen, sobald der erste Satz fertig ist, statt auf die vollständige Antwort zu warten. Betrifft nur den Sprachassistenten und erfordert MP3 oder PCM.",
             "audio_format": "MP3 ist die sichere Voreinstellung. Ändern Sie es nur, wenn Ihr Backend ein anderes Format benötigt.",
             "send_voice": "Standardmäßig ein. Schalten Sie es aus für ein backend, das das Stimmenfeld ablehnt, etwa audio.cpp mit Chatterbox oder VoxCPM2.",
-            "stream_audio": "Gibt das Audio wieder, während es ankommt, statt auf den ganzen Clip zu warten. Schalten Sie es aus, wenn ein Backend auf ein gestreamtes Lesen mit Audio antwortet, das sich nicht dekodieren lässt, während dieselbe Anfrage in einem Zug gelesen funktioniert."
+            "stream_audio": "Gibt das Audio wieder, während es ankommt, statt auf den ganzen Clip zu warten. Schalten Sie es aus, wenn ein Backend auf ein gestreamtes Lesen mit Audio antwortet, das sich nicht dekodieren lässt, während dieselbe Anfrage in einem Zug gelesen funktioniert.",
+            "gain_db": "Hebt oder senkt die Lautstärke der erzeugten Sprache in Dezibel. Funktioniert mit und ohne Audio-Normalisierung, und ein Limiter verhindert Übersteuerung beim Anheben. 0 lässt das Audio unverändert."
           }
         }
       },
@@ -247,11 +251,11 @@
         },
         "volume": {
           "name": "Lautstärke",
-          "description": "Lautstärke nur für diese Durchsage, 0.0 bis 1.0, danach wiederhergestellt. Wird sie gesetzt, wird die Musik pausiert statt leiser gestellt."
+          "description": "Lautstärke nur für diese Durchsage, 0.0 bis 1.0, danach wiederhergestellt. Sonos- und Music-Assistant-Lautsprecher spielen die Durchsage in dieser Lautstärke und stellen die Musik leiser. Andere Lautsprecher pausieren stattdessen die Musik."
         },
         "announce": {
           "name": "Durchsagemodus",
-          "description": "Standardmäßig ein: Lautsprecher mit Durchsagefunktion stellen die Musik leiser, die übrigen werden pausiert und danach fortgesetzt. Aus sendet das Audio als normale Wiedergabe."
+          "description": "Standardmäßig ein: Lautsprecher mit Durchsagefunktion stellen die Musik leiser, die übrigen werden pausiert und danach fortgesetzt. Aus sendet das Audio als normale Wiedergabe. Sonos- und Music-Assistant-Lautsprecher machen immer eine Durchsage, daher hat diese Einstellung dort keine Wirkung."
         }
       }
     },

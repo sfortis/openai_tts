@@ -75,6 +75,7 @@
             "chime": "Povolit zvukový signál",
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
+            "gain_db": "Zesílení (gain)",
             "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Formát zvuku",
@@ -86,7 +87,8 @@
             "stream_pipelining": "Začne mluvit hned, jak je hotová první věta, místo čekání na dokončení celé odpovědi. Ovlivňuje pouze hlasového asistenta a vyžaduje MP3 nebo PCM.",
             "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
             "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2.",
-            "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje."
+            "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje.",
+            "gain_db": "Zvýší nebo sníží hlasitost generované řeči v decibelech. Funguje s normalizací zvuku i bez ní a limiter zabrání přebuzení při zesílení. Hodnota 0 zvuk nemění."
           }
         },
         "reconfigure": {
@@ -105,6 +107,7 @@
             "chime": "Povolit zvukový signál",
             "chime_sound": "Zvuk signálu",
             "normalize_audio": "Normalizovat hlasitost audia",
+            "gain_db": "Zesílení (gain)",
             "instructions": "Pokyny pro hlas",
             "extra_payload": "Extra JSON payload (pro custom TTS backends)",
             "audio_format": "Formát zvuku",
@@ -116,7 +119,8 @@
             "stream_pipelining": "Začne mluvit hned, jak je hotová první věta, místo čekání na dokončení celé odpovědi. Ovlivňuje pouze hlasového asistenta a vyžaduje MP3 nebo PCM.",
             "audio_format": "MP3 je bezpečná výchozí volba. Změňte ji jen pokud váš backend vyžaduje jiný formát.",
             "send_voice": "Ve výchozím nastavení zapnuto. Vypněte pro backend, který pole hlasu odmítá, například audio.cpp s Chatterbox nebo VoxCPM2.",
-            "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje."
+            "stream_audio": "Přehrává zvuk, jak přichází, místo čekání na celou nahrávku. Vypněte, pokud backend na streamované čtení odpoví zvukem, který nelze dekódovat, zatímco stejný požadavek přečtený najednou funguje.",
+            "gain_db": "Zvýší nebo sníží hlasitost generované řeči v decibelech. Funguje s normalizací zvuku i bez ní a limiter zabrání přebuzení při zesílení. Hodnota 0 zvuk nemění."
           }
         }
       },
@@ -247,11 +251,11 @@
         },
         "volume": {
           "name": "Hlasitost",
-          "description": "Hlasitost pouze pro toto hlášení, 0.0 až 1.0, poté obnovena. Pokud ji nastavíte, hudba se pozastaví místo ztlumení."
+          "description": "Hlasitost pouze pro toto hlášení, 0.0 až 1.0, poté obnovena. Reproduktory Sonos a Music Assistant přehrají hlášení v této hlasitosti a hudbu ztlumí. Ostatní reproduktory hudbu místo toho pozastaví."
         },
         "announce": {
           "name": "Režim hlášení",
-          "description": "Ve výchozím nastavení zapnuto: reproduktory s podporou hlášení hudbu ztlumí, ostatní se pozastaví a poté pokračují. Vypnuto odešle zvuk jako běžné přehrávání."
+          "description": "Ve výchozím nastavení zapnuto: reproduktory s podporou hlášení hudbu ztlumí, ostatní se pozastaví a poté pokračují. Vypnuto odešle zvuk jako běžné přehrávání. Reproduktory Sonos a Music Assistant hlásí vždy, takže na ně toto nastavení nemá vliv."
         }
       }
     },

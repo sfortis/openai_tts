@@ -51,8 +51,11 @@ DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 # typing the right URL, voice-field name, and audio_format defaults
 # from memory. Each entry is a recipe read by the config flow: the
 # endpoint URL, the voice and model catalogues, the audio formats the
-# backend accepts, and which fields to render. The engine reads none of
-# it; request shaping there is provider-agnostic. Add new providers by
+# backend accepts, and which fields to render. ``catalogue_source``
+# says where the live model and voice lists come from, and is absent for
+# every preset that uses the plain ``/v1/audio/voices`` listing. The
+# engine reads none of it; request shaping there is provider-agnostic.
+# Add new providers by
 # extending this dict; nothing else in the codebase should need a
 # branch on the provider key.
 PROVIDER_OPENAI = "openai"
@@ -61,6 +64,7 @@ PROVIDER_GROQ = "groq"
 PROVIDER_LEMONFOX = "lemonfox"
 PROVIDER_KOKORO = "kokoro"
 PROVIDER_CHATTERBOX = "chatterbox"
+PROVIDER_OPENROUTER = "openrouter"
 PROVIDER_CUSTOM = "custom"
 DEFAULT_PROVIDER = PROVIDER_OPENAI
 
@@ -302,6 +306,42 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_streaming": True,
         "supports_speed": True,
         "supports_extra_payload": True,
+        "supports_voice_listing": True,
+    },
+    PROVIDER_OPENROUTER: {
+        # OpenRouter routes one OpenAI compatible speech endpoint to many
+        # hosted models. Measured with a real key on 2026-09-30:
+        #  - ``response_format`` accepts mp3 and pcm only. Anything else
+        #    is refused with HTTP 400 naming the two.
+        #  - the body arrives progressively: an 11 second Kokoro clip
+        #    came in 17 chunks, the first after 0.43 s.
+        #  - ``speed`` is honoured by Kokoro (1.5 gave a clip 38% shorter)
+        #    and accepted without error by Voxtral.
+        #  - a voice is mandatory. Without one the answer is HTTP 400
+        #    "An explicit voice is required", so the send voice switch
+        #    must stay on.
+        #  - a bad key answers HTTP 401.
+        #  - ``/api/v1/audio/voices`` answers 404. Models and their voices
+        #    are published together at ``/api/v1/models``, which is what
+        #    ``catalogue_source`` below points the listing at.
+        # The model list below is only the fallback for when that listing
+        # cannot be reached.
+        "label": "OpenRouter",
+        "url": "https://openrouter.ai/api/v1/audio/speech",
+        "default_model": "hexgrad/kokoro-82m",
+        "model_catalog": [
+            "hexgrad/kokoro-82m",
+            "mistralai/voxtral-mini-tts-2603",
+        ],
+        "catalogue_source": "openrouter_models",
+        "default_format": "mp3",
+        "voice_catalog": None,
+        "requires_api_key": True,
+        "allowed_formats": ["mp3", "pcm"],
+        "max_text_length": None,
+        "supports_streaming": True,
+        "supports_speed": True,
+        "supports_extra_payload": False,
         "supports_voice_listing": True,
     },
 
@@ -552,6 +592,8 @@ SUPPORTED_LANGUAGES = [
 CONF_CHIME_ENABLE = "chime"
 CONF_CHIME_SOUND = "chime_sound"
 CONF_NORMALIZE_AUDIO = "normalize_audio"
+# Per profile gain in dB. The range and the filter live in ``audio_filters``.
+CONF_GAIN_DB = "gain_db"
 CONF_INSTRUCTIONS = "instructions"
 CONF_EXTRA_PAYLOAD = "extra_payload"  # JSON string for custom TTS backend parameters
 CONF_AUDIO_FORMAT = "audio_format"   # mp3 (default) / wav / opus, for custom backends

@@ -25,6 +25,14 @@ from homeassistant.exceptions import HomeAssistantError
 from homeassistant.helpers.selector import TemplateSelector, selector
 
 from .api_validation import async_validate_api_key
+from .audio_filters import (
+    DEFAULT_GAIN_DB,
+    GAIN_DB_MAX,
+    GAIN_DB_MIN,
+    GAIN_DB_STEP,
+    clamp_gain_db,
+)
+from .catalogue_parsers import voice_picker_allows_typing
 from .const import (
     CONF_ANNOUNCE_MODE,
     CONF_API_KEY,
@@ -32,6 +40,7 @@ from .const import (
     CONF_CHIME_ENABLE,
     CONF_CHIME_SOUND,
     CONF_EXTRA_PAYLOAD,
+    CONF_GAIN_DB,
     CONF_INSTRUCTIONS,
     CONF_MODEL,
     CONF_NORMALIZE_AUDIO,
@@ -65,9 +74,26 @@ from .const import (
 from .exceptions import OpenAIAuthError, OpenAITTSError
 from .selector_options import ensure_selectable
 from .streaming import PIPELINEABLE_FORMATS
-from .voice_listing import async_fetch_voice_options
+from .voice_listing import (
+    CATALOGUE_OPENROUTER,
+    async_fetch_model_catalogue,
+    async_fetch_voice_options,
+)
 
 SUBENTRY_TYPE_PROFILE = "profile"
+
+
+def _gain_selector() -> Any:
+    """The gain slider shared by the create and the reconfigure forms."""
+    return selector({
+        "number": {
+            "min": GAIN_DB_MIN,
+            "max": GAIN_DB_MAX,
+            "step": GAIN_DB_STEP,
+            "unit_of_measurement": "dB",
+            "mode": "slider",
+        }
+    })
 
 
 class _PipeliningConflict(Exception):
@@ -686,8 +712,39 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         if not speech_url:
             return None
         return await async_fetch_voice_options(
-            self.hass, speech_url, parent_entry.data.get(CONF_API_KEY)
+            self.hass,
+            speech_url,
+            parent_entry.data.get(CONF_API_KEY),
+            model=self._step1_model,
+            source=preset.get("catalogue_source"),
         )
+
+    async def _model_options(self, keep: str | None) -> list[str]:
+        """Model ids for the picker, live when the provider publishes them.
+
+        ``keep`` is the value the form will default to. It is appended
+        when the list lacks it, because a select whose default is not
+        among its own options rewrites the saved value on submit.
+        """
+        preset = self._parent_preset()
+        catalogue: dict[str, list[str]] | None = None
+        parent_entry = self._get_entry()
+        speech_url = parent_entry.data.get(CONF_URL) if parent_entry else None
+        if parent_entry and speech_url:
+            catalogue = await async_fetch_model_catalogue(
+                self.hass,
+                speech_url,
+                parent_entry.data.get(CONF_API_KEY),
+                preset.get("catalogue_source"),
+            )
+        options = (
+            sorted(catalogue)
+            if catalogue
+            else list(preset.get("model_catalog") or MODELS)
+        )
+        if keep and keep not in options:
+            options.append(keep)
+        return options
 
     async def async_step_user(self, user_input: dict[str, Any] | None = None) -> SubentryFlowResult:
         """Step 1 of profile creation: profile name + model.
@@ -730,11 +787,12 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # to the model name baked into the preset so users don't have to
         # remember the exact slug. OpenAI / unknown presets keep "tts-1".
         default_model = preset.get("default_model") or "tts-1"
-        # Model catalogue mirrors voice_catalog: presets that know
-        # their model list (Mistral, Groq) provide it, otherwise the
+        # Model catalogue mirrors voice_catalog: a provider that
+        # publishes its models (OpenRouter) is asked, presets that know
+        # their model list (Mistral, Groq) provide it, and otherwise the
         # OpenAI default ``MODELS`` is used. ``custom_value`` is on so
         # self-hosted users can still type their own model name.
-        model_options = preset.get("model_catalog") or MODELS
+        model_options = await self._model_options(keep=default_model)
         step1_schema = vol.Schema({
             vol.Required(CONF_PROFILE_NAME): str,
             vol.Required(CONF_MODEL, default=default_model): selector({
@@ -851,17 +909,15 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             })
             default_voice = preset_voices[0]
         elif remote_voices:
-            # Live catalogue from the provider (Mistral's user-cloned
-            # voices). Submit the voice ID, show the user-given name.
-            # ``custom_value`` is OFF so the HA frontend renders the
-            # ``label`` ("Paul - Sad") in the selected state; with it
-            # ON the picker shows the raw UUID after a click.
+            # Live catalogue from the provider. Submit the voice ID,
+            # show the label. ``custom_value`` is on only when every
+            # label is its own value, see ``voice_picker_allows_typing``.
             voice_field = selector({
                 "select": {
                     "options": remote_voices,
                     "mode": "dropdown",
                     "sort": False,
-                    "custom_value": False,
+                    "custom_value": voice_picker_allows_typing(remote_voices),
                 }
             })
             default_voice = remote_voices[0]["value"]
@@ -897,6 +953,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "select": {"options": chime_opts}
             }),
             vol.Optional("normalize_audio", default=True): selector({"boolean": {}}),
+            vol.Optional(CONF_GAIN_DB, default=DEFAULT_GAIN_DB): _gain_selector(),
         })
         # ``extra_payload`` is the value-add of self-hosted / custom
         # presets (e.g. Chatterbox ``seed``, TTS Web UI speaker_id).
@@ -993,13 +1050,10 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 errors["base"] = "unknown_error"
 
         existing_model = existing_data.get(CONF_MODEL, "tts-1")
-        preset = self._parent_preset()
-        model_options = list(preset.get("model_catalog") or MODELS)
-        # Make sure the saved model is selectable so an entry that
-        # was created before the preset's catalogue existed (or
-        # whose model was renamed upstream) still loads cleanly.
-        if existing_model and existing_model not in model_options:
-            model_options.append(existing_model)
+        # The saved model is kept selectable so an entry that was
+        # created before the preset's catalogue existed (or whose model
+        # was renamed or withdrawn upstream) still loads cleanly.
+        model_options = await self._model_options(keep=existing_model)
         step1_schema = vol.Schema({
             vol.Required(CONF_MODEL, default=existing_model): selector({
                 "select": {
@@ -1140,30 +1194,52 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             # value is appended when missing so an existing entry
             # whose voice was deleted upstream still loads instead of
             # tripping the schema; user can then pick a current one.
-            # ``custom_value`` stays OFF (frontend shows the label in
-            # the selected state) - the appended ``(saved)`` row
-            # already covers the "voice deleted upstream" edge case
-            # without needing free-text input.
+            # ``custom_value`` follows ``voice_picker_allows_typing``,
+            # decided before the ``(saved)`` row is added, because that
+            # row's label differs from its value on purpose.
+            #
+            # That only holds while the model is the same. On a
+            # provider whose voices depend on the model (OpenRouter), a
+            # voice saved under the previous model is simply wrong for
+            # the new one, and defaulting to it lets one careless
+            # submit break the profile. The new model's first voice is
+            # the default then.
             options = list(remote_voices)
+            allows_typing = voice_picker_allows_typing(options)
             if not any(opt["value"] == existing_voice for opt in options):
-                options.append({
-                    "value": existing_voice,
-                    "label": f"{existing_voice} (saved)",
-                })
+                if self._step1_model == existing_data.get(CONF_MODEL):
+                    options.append({
+                        "value": existing_voice,
+                        "label": f"{existing_voice} (saved)",
+                    })
+                else:
+                    default_voice = options[0]["value"]
             voice_field = selector({
                 "select": {
                     "options": options,
                     "mode": "dropdown",
                     "sort": False,
-                    "custom_value": False,
+                    "custom_value": allows_typing,
                 }
             })
         else:
             voice_field = selector({"text": {}})
+            # The same rule as the dropdown above, for a model that
+            # lists no voices: when voices depend on the model, the
+            # saved one belongs to the previous model, and the field is
+            # left empty so the user has to type one for the new model.
+            if (
+                preset.get("catalogue_source") == CATALOGUE_OPENROUTER
+                and self._step1_model != existing_data.get(CONF_MODEL)
+            ):
+                default_voice = None
 
-        step2_fields: dict[Any, Any] = {
-            vol.Required(CONF_VOICE, default=default_voice): voice_field,
-        }
+        voice_key = (
+            vol.Required(CONF_VOICE)
+            if default_voice is None
+            else vol.Required(CONF_VOICE, default=default_voice)
+        )
+        step2_fields: dict[Any, Any] = {voice_key: voice_field}
         # ``speed`` and ``extra_payload`` are gated by the preset
         # capability flags (see notes in async_step_voice_audio).
         # Saved values on profiles that switched to a non-supporting
@@ -1205,6 +1281,10 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
                 "select": {"options": chime_options}
             }),
             vol.Optional("normalize_audio", default=existing_data.get(CONF_NORMALIZE_AUDIO, True)): selector({"boolean": {}}),
+            vol.Optional(
+                CONF_GAIN_DB,
+                default=clamp_gain_db(existing_data.get(CONF_GAIN_DB, DEFAULT_GAIN_DB)),
+            ): _gain_selector(),
         })
         if preset.get("supports_extra_payload", False):
             step2_fields[
