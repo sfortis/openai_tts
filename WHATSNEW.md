@@ -1,3 +1,7 @@
+## v3.10b6
+
+- Show the OpenAI retirement warning from 2026-12-23, two weeks before the shutdown, instead of from the day it was announced
+
 ## v3.10b5
 
 - Warn in Repairs about every profile that calls OpenAI with `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts`, which OpenAI stops serving on 2027-01-06

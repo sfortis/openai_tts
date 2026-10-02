@@ -42,8 +42,8 @@ from .const import (
 from .repairs import (
     ISSUE_MODEL_RETIREMENT,
     ISSUE_VOICE_DELETED,
+    async_track_model_retirement,
     clear_repairs_for_entry,
-    sync_model_retirement_issues,
 )
 from .services import async_setup_services
 from .tts import STORAGE_KEY, STORAGE_VERSION
@@ -409,7 +409,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Legacy entries create entities directly
         # Modern parents will have their subentries processed by the platform
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
-        sync_model_retirement_issues(hass)
+        entry.async_on_unload(async_track_model_retirement(hass))
         
         if is_modern_parent:
             _LOGGER.info("Modern parent entry forwarded to platforms (will process subentries)")

@@ -9,15 +9,22 @@ recommended replacement, ``gpt-realtime-2.1-mini``, runs on the Realtime
 API, which this integration does not use, and no replacement model was
 announced for the speech endpoint.
 
+The warning appears ``WARNING_LEAD`` before the shutdown and stays after
+it, because from then on the profile no longer speaks. Raising it on the
+day of the announcement would leave a warning in the Repairs panel for
+three months that nobody can act on yet.
+
 A date applies only to OpenAI's own endpoint. Many self-hosted servers,
 Kokoro-FastAPI among them, accept ``tts-1`` as an alias for their own
 model, and OpenAI retiring the name changes nothing for them.
 """
 from __future__ import annotations
 
-from datetime import date
+from datetime import date, timedelta
 
 DEPRECATIONS_URL = "https://developers.openai.com/api/docs/deprecations"
+
+WARNING_LEAD = timedelta(days=14)
 
 _SHUTDOWN_DATES: dict[str, date] = {
     "tts-1": date(2027, 1, 6),
@@ -40,3 +47,9 @@ def shutdown_date(model: str | None, on_openai: bool) -> date | None:
         if name == base or name.startswith(f"{base}-"):
             return when
     return None
+
+
+def warning_start(model: str | None, on_openai: bool) -> date | None:
+    """Return the first day the warning for ``model`` is shown, or None."""
+    when = shutdown_date(model, on_openai)
+    return when - WARNING_LEAD if when is not None else None

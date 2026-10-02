@@ -27,15 +27,21 @@ directly.
 """
 from __future__ import annotations
 
-from collections.abc import Iterable
+import logging
+from collections.abc import Callable, Iterable
+from datetime import date
 
 from homeassistant.components.repairs import ConfirmRepairFlow, RepairsFlow
 from homeassistant.config_entries import ConfigEntry
-from homeassistant.core import HomeAssistant
+from homeassistant.core import HomeAssistant, callback
 from homeassistant.helpers import issue_registry as ir
+from homeassistant.helpers.event import async_track_point_in_time
+from homeassistant.util import dt as dt_util
 
 from .const import CONF_MODEL, CONF_PROFILE_NAME, CONF_URL, DOMAIN, is_openai_endpoint
-from .model_retirement import DEPRECATIONS_URL, shutdown_date
+from .model_retirement import DEPRECATIONS_URL, shutdown_date, warning_start
+
+_LOGGER = logging.getLogger(__name__)
 
 
 async def async_create_fix_flow(
@@ -158,23 +164,33 @@ def create_voice_deleted_issue(
     )
 
 
-def sync_model_retirement_issues(hass: HomeAssistant) -> None:
-    """Warn about every profile that uses a model OpenAI is retiring.
+def sync_model_retirement_issues(hass: HomeAssistant) -> date | None:
+    """Warn about every profile whose OpenAI model is about to retire.
 
-    The issues are derived from the configuration alone, so this runs on
-    every entry setup and rebuilds them for all entries of the domain.
-    Home Assistant reloads an entry after any change to its profiles,
-    which means a profile that moved to another model or was deleted
-    loses its warning at the next setup without anyone tracking it.
+    The issues are derived from the configuration and today's date, so
+    this runs on every entry setup and rebuilds them for all entries of
+    the domain. Home Assistant reloads an entry after any change to its
+    profiles, which means a profile that moved to another model or was
+    deleted loses its warning at the next setup without anyone tracking
+    it.
+
+    Returns the earliest day after today on which another warning
+    starts, or None, so that the caller can come back on that day.
     """
+    today = dt_util.now().date()
+    upcoming: date | None = None
     wanted: dict[str, dict[str, str]] = {}
     for entry in hass.config_entries.async_entries(DOMAIN):
         on_openai = is_openai_endpoint(entry.data.get(CONF_URL))
         for subentry_id, subentry in (getattr(entry, "subentries", None) or {}).items():
             model = subentry.data.get(CONF_MODEL)
-            when = shutdown_date(model, on_openai)
-            if when is None:
+            start = warning_start(model, on_openai)
+            if start is None:
                 continue
+            if start > today:
+                upcoming = start if upcoming is None else min(upcoming, start)
+                continue
+            when = shutdown_date(model, on_openai)
             wanted[subentry_id] = {
                 "profile": subentry.data.get(CONF_PROFILE_NAME) or subentry.title,
                 "model": model,
@@ -200,3 +216,39 @@ def sync_model_retirement_issues(hass: HomeAssistant) -> None:
             severity=ir.IssueSeverity.WARNING,
             learn_more_url=DEPRECATIONS_URL,
         )
+    return upcoming
+
+
+def async_track_model_retirement(hass: HomeAssistant) -> Callable[[], None]:
+    """Sync the retirement warnings now and again when the next one starts.
+
+    A warning is due on a calendar day, and Home Assistant may run for
+    weeks without a restart, so a check at setup alone would miss it.
+    The returned callable cancels the pending timer, for the entry's
+    unload. Every entry keeps its own timer, which is harmless because
+    each one rebuilds the same set of issues.
+    """
+    cancel: Callable[[], None] | None = None
+
+    @callback
+    def _sync(_now=None) -> None:
+        nonlocal cancel
+        upcoming = sync_model_retirement_issues(hass)
+        if upcoming is not None:
+            _LOGGER.debug("Next model retirement check on %s", upcoming)
+        cancel = (
+            async_track_point_in_time(
+                hass, _sync, dt_util.start_of_local_day(upcoming)
+            )
+            if upcoming is not None
+            else None
+        )
+
+    _sync()
+
+    @callback
+    def _cancel() -> None:
+        if cancel is not None:
+            cancel()
+
+    return _cancel

@@ -58,7 +58,7 @@ Speech is always requested through the OpenAI speech API. Voice and model lists 
 
 On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-mini-tts` also takes speaking-style instructions. The voices are `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage` and `shimmer`, and `gpt-4o-mini-tts` adds `ballad`, `cedar`, `marin` and `verse`.
 
-> **OpenAI is retiring all three models.** OpenAI announced on 1 October 2026 that `tts-1`, `tts-1-hd` and every snapshot of `gpt-4o-mini-tts` stop working on 6 January 2027 ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)). The replacement OpenAI recommends, `gpt-realtime-2.1-mini`, runs on its Realtime API, which this integration does not use, and OpenAI has not announced a replacement for its speech API. Unless it does, OpenAI profiles stop speaking on that date, and moving them to another provider is the way to keep them working. From 3.10 (beta), every profile that calls OpenAI with one of these models raises a warning in **Settings > Repairs**. Profiles on other providers are not affected, including self-hosted servers that accept `tts-1` as a model name.
+> **OpenAI is retiring all three models.** OpenAI announced on 1 October 2026 that `tts-1`, `tts-1-hd` and every snapshot of `gpt-4o-mini-tts` stop working on 6 January 2027 ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)). The replacement OpenAI recommends, `gpt-realtime-2.1-mini`, runs on its Realtime API, which this integration does not use, and OpenAI has not announced a replacement for its speech API. Unless it does, OpenAI profiles stop speaking on that date, and moving them to another provider is the way to keep them working. From 3.10 (beta), every profile that calls OpenAI with one of these models raises a warning in **Settings > Repairs** two weeks before the shutdown, from 23 December 2026. Profiles on other providers are not affected, including self-hosted servers that accept `tts-1` as a model name.
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
 
@@ -76,7 +76,7 @@ Version 3.10 is a beta and needs Home Assistant 2026.9.1 or later. To try it, op
 - **Your own chimes survive updates**: mp3 files in `/config/openai_tts/chime` are listed next to the built-in sounds, and that folder is not touched by an update.
 - **API keys are checked on every provider**, when an entry is created, when a key is re-entered and when `openai_tts.set_api_key` runs. The check produces no audio and costs nothing.
 - **Send the voice name** is offered only on the Custom and Chatterbox presets, because every hosted provider requires a voice.
-- **OpenAI retirement warning**: a profile that calls OpenAI with `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts` raises a warning in **Settings > Repairs** with the shutdown date, 6 January 2027.
+- **OpenAI retirement warning**: a profile that calls OpenAI with `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts` raises a warning in **Settings > Repairs** from 23 December 2026, two weeks before OpenAI's shutdown on 6 January 2027.
 - **The logbook shows who made an announcement**, for the announcement itself and for the pause, volume and resume commands around it.
 
 ### Version 3.9

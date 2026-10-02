@@ -7,7 +7,7 @@ import pytest
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "custom_components" / "openai_tts"))
 
-from model_retirement import shutdown_date
+from model_retirement import shutdown_date, warning_start
 
 SHUTDOWN = date(2027, 1, 6)
 
@@ -40,3 +40,13 @@ def test_same_names_elsewhere_are_not_retired(model):
 )
 def test_other_models_are_not_retired(model):
     assert shutdown_date(model, on_openai=True) is None
+
+
+def test_warning_starts_fourteen_days_before_the_shutdown():
+    """The user asked for a warning a few days ahead, not from the announcement."""
+    assert warning_start("gpt-4o-mini-tts", on_openai=True) == date(2026, 12, 23)
+
+
+def test_no_warning_where_nothing_retires():
+    assert warning_start("tts-1", on_openai=False) is None
+    assert warning_start("kokoro", on_openai=True) is None
