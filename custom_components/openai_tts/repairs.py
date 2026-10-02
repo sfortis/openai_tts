@@ -34,7 +34,8 @@ from homeassistant.config_entries import ConfigEntry
 from homeassistant.core import HomeAssistant
 from homeassistant.helpers import issue_registry as ir
 
-from .const import DOMAIN
+from .const import CONF_MODEL, CONF_PROFILE_NAME, CONF_URL, DOMAIN, is_openai_endpoint
+from .model_retirement import DEPRECATIONS_URL, shutdown_date
 
 
 async def async_create_fix_flow(
@@ -58,6 +59,7 @@ async def async_create_fix_flow(
 # Keep them snake_case and stable: the registry persists issue ids
 # across restarts, so renaming a token leaves stale issues hanging.
 ISSUE_VOICE_DELETED = "voice_deleted"
+ISSUE_MODEL_RETIREMENT = "model_retirement"
 
 
 def _issue_id(token: str, scope_id: str) -> str:
@@ -154,3 +156,47 @@ def create_voice_deleted_issue(
             "profile": profile_name,
         },
     )
+
+
+def sync_model_retirement_issues(hass: HomeAssistant) -> None:
+    """Warn about every profile that uses a model OpenAI is retiring.
+
+    The issues are derived from the configuration alone, so this runs on
+    every entry setup and rebuilds them for all entries of the domain.
+    Home Assistant reloads an entry after any change to its profiles,
+    which means a profile that moved to another model or was deleted
+    loses its warning at the next setup without anyone tracking it.
+    """
+    wanted: dict[str, dict[str, str]] = {}
+    for entry in hass.config_entries.async_entries(DOMAIN):
+        on_openai = is_openai_endpoint(entry.data.get(CONF_URL))
+        for subentry_id, subentry in (getattr(entry, "subentries", None) or {}).items():
+            model = subentry.data.get(CONF_MODEL)
+            when = shutdown_date(model, on_openai)
+            if when is None:
+                continue
+            wanted[subentry_id] = {
+                "profile": subentry.data.get(CONF_PROFILE_NAME) or subentry.title,
+                "model": model,
+                "date": when.isoformat(),
+            }
+
+    prefix = _issue_id(ISSUE_MODEL_RETIREMENT, "")
+    registry = ir.async_get(hass)
+    for domain, issue_id in list(registry.issues):
+        if (
+            domain == DOMAIN
+            and issue_id.startswith(prefix)
+            and issue_id[len(prefix):] not in wanted
+        ):
+            ir.async_delete_issue(hass, DOMAIN, issue_id)
+
+    for subentry_id, placeholders in wanted.items():
+        raise_repair(
+            hass,
+            ISSUE_MODEL_RETIREMENT,
+            subentry_id,
+            translation_placeholders=placeholders,
+            severity=ir.IssueSeverity.WARNING,
+            learn_more_url=DEPRECATIONS_URL,
+        )

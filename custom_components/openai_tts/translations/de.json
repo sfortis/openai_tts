@@ -185,6 +185,10 @@
     "voice_deleted": {
       "title": "TTS-Stimme wurde beim Anbieter gelöscht",
       "description": "Die Stimme `{voice}` des TTS-Agenten `{profile}` existiert beim Anbieter nicht mehr. Öffnen Sie den Reconfigure-Dialog des Agenten und wählen Sie eine aktuelle Stimme."
+    },
+    "model_retirement": {
+      "title": "OpenAI stellt das Modell eines TTS-Agenten ein",
+      "description": "Der TTS-Agent `{profile}` verwendet `{model}`, das OpenAI ab dem {date} nicht mehr anbietet. Danach kann der Agent nicht mehr sprechen. OpenAI empfiehlt `gpt-realtime-2.1-mini` als Ersatz, dieses Modell läuft aber über die Realtime API von OpenAI, die diese Integration nicht verwendet, und für die Speech API hat OpenAI keinen Ersatz angekündigt. Bis dahin solltest du diesen Agenten auf einen anderen Anbieter umstellen."
     }
   },
   "selector": {

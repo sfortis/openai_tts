@@ -1,3 +1,7 @@
+## v3.10b5
+
+- Warn in Repairs about every profile that calls OpenAI with `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts`, which OpenAI stops serving on 2027-01-06
+
 ## v3.10b4
 
 - Name each profile's device and entity after the profile alone, without the model and voice, and show the provider as its manufacturer and the integration version as its software version

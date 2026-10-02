@@ -39,7 +39,12 @@ from .const import (
     UNIQUE_ID,
     migrating_flag,
 )
-from .repairs import clear_repairs_for_entry
+from .repairs import (
+    ISSUE_MODEL_RETIREMENT,
+    ISSUE_VOICE_DELETED,
+    clear_repairs_for_entry,
+    sync_model_retirement_issues,
+)
 from .services import async_setup_services
 from .tts import STORAGE_KEY, STORAGE_VERSION
 
@@ -67,6 +72,12 @@ async def async_remove_entry(hass: HomeAssistant, entry: ConfigEntry) -> None:
     for unique_id in unique_ids:
         _LOGGER.info("Removing stored state for %s", unique_id)
         await Store(hass, STORAGE_VERSION, f"{STORAGE_KEY}_{unique_id}").async_remove()
+
+    # The repairs of the entry's profiles would otherwise stay in the
+    # panel until some other entry is set up.
+    clear_repairs_for_entry(
+        hass, entry, tokens=(ISSUE_VOICE_DELETED, ISSUE_MODEL_RETIREMENT)
+    )
 
 
 async def _async_prune_orphaned_state_files(hass: HomeAssistant) -> None:
@@ -398,6 +409,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: ConfigEntry) -> bool:
         # Legacy entries create entities directly
         # Modern parents will have their subentries processed by the platform
         await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+        sync_model_retirement_issues(hass)
         
         if is_modern_parent:
             _LOGGER.info("Modern parent entry forwarded to platforms (will process subentries)")

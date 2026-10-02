@@ -185,6 +185,10 @@
     "voice_deleted": {
       "title": "TTS hlas byl smazán u poskytovatele",
       "description": "Hlas `{voice}` používaný TTS agentem `{profile}` již u poskytovatele neexistuje. Otevřete dialog Reconfigure tohoto agenta a vyberte aktuální hlas."
+    },
+    "model_retirement": {
+      "title": "OpenAI ukončuje model TTS agenta",
+      "description": "TTS agent `{profile}` používá model `{model}`, který OpenAI přestane poskytovat {date}. Po tomto datu agent přestane mluvit. OpenAI jako náhradu doporučuje `gpt-realtime-2.1-mini`, tento model ale běží přes Realtime API od OpenAI, které tato integrace nepoužívá, a pro své speech API OpenAI žádnou náhradu neohlásila. Do té doby zvažte převedení tohoto agenta na jiného poskytovatele."
     }
   },
   "selector": {
