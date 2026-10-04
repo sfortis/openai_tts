@@ -17,7 +17,7 @@
 
 ---
 
-OpenAI TTS turns text into speech inside Home Assistant. It began as a bridge to OpenAI's speech API, and it now works with cloud providers and self-hosted servers that implement the same API. Presets for the common providers fill in the endpoint, the model list and the voice list, and they hide or narrow the settings a provider is known to reject or ignore. The `openai_tts.say` action can announce on any media player, with an optional chime and loudness normalisation, and it restores the previous volume and music afterwards.
+OpenAI TTS is a text-to-speech integration for Home Assistant that works with any service implementing the OpenAI speech API, in the cloud or self-hosted. Presets for the common providers fill in the endpoint, the models and the voices.
 
 ## Contents
 
