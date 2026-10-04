@@ -694,7 +694,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         info: dict[str, Any] = {
             "identifiers": {(DOMAIN, device_unique_id)},
             "manufacturer": self._provider_title_name(),
-            "sw_version": async_get_loaded_integration(self.hass, DOMAIN).version,
+            "sw_version": str(async_get_loaded_integration(self.hass, DOMAIN).version),
         }
 
         if is_subentry(self._config):
