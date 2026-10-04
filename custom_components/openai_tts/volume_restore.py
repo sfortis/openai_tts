@@ -1902,19 +1902,34 @@ async def announce(
                 failed.extend(route.players)
             elif route.returns_before_playback:
                 returned_at.append(task.result())
+        # Without a managed route nobody else has looked for a failed
+        # generation beyond the short settle window, and a slow provider
+        # fails long after it. The sentinel was cleared before this
+        # attempt, so finding it now means nothing played.
+        generation_failed = False
         if returned_at:
+            loop = asyncio.get_running_loop()
+            # The clip cannot have started before the call returned, and
+            # it may start as late as the moment its length is known,
+            # when a chime or a format that does not stream makes Home
+            # Assistant wait for the whole clip. Holding from the later
+            # of the two keeps the next announcement off this one, at
+            # the cost of holding a little long on a streamed clip.
+            started_by = max(returned_at)
             if duration_ms is None:
                 duration_ms = await _wait_for_duration_ms(
                     hass, tts_entity, message, options, timeout_s=60.0,
                 )
+                generation_failed = duration_ms == DURATION_FAILED_SENTINEL
+                if duration_ms is not None and not generation_failed:
+                    started_by = max(started_by, loop.time())
             # The sentinel is zero, so test it before the fallback. It
             # means no audio was produced, and there is nothing to wait
             # for.
             if duration_ms != DURATION_FAILED_SENTINEL:
                 if duration_ms is None or duration_ms < 0:
                     duration_ms = _DEFAULT_FALLBACK_DURATION_MS
-                loop = asyncio.get_running_loop()
-                hold_until = max(returned_at) + (
+                hold_until = started_by + (
                     duration_ms + _NATIVE_HOLD_BUFFER_MS
                 ) / 1000.0
                 remaining = hold_until - loop.time()
@@ -1924,6 +1939,16 @@ async def announce(
                         "native announcement plays", remaining,
                     )
                     await asyncio.sleep(remaining)
+        elif duration_ms is None and len(failed) < len(native_tasks):
+            # Only routes that return once the clip has played, such as
+            # Music Assistant, so a failure has been written by now.
+            generation_failed = await _attempt_failed()
+        if generation_failed:
+            raise HomeAssistantError(
+                f"TTS generation failed for {tts_entity}; no audio was "
+                "delivered to the speakers. Check the integration log for "
+                "the provider error."
+            )
         if failed:
             raise HomeAssistantError(
                 "The announcement did not play on "

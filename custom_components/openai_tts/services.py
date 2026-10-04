@@ -17,8 +17,10 @@ from typing import Any
 
 import voluptuous as vol
 from homeassistant.components.media_player import DOMAIN as MP_DOMAIN
+from homeassistant.components.media_player import MediaPlayerEntityFeature
 from homeassistant.components.tts import DOMAIN as TTS_DOMAIN
 from homeassistant.config_entries import ConfigEntryState
+from homeassistant.const import ATTR_SUPPORTED_FEATURES, STATE_UNAVAILABLE
 from homeassistant.core import (
     HomeAssistant,
     ServiceCall,
@@ -194,6 +196,14 @@ def _media_players_from_target(
     kept. One named directly that is not a media player is reported,
     because the caller asked for it by name; one that came in through an
     area or a label is not, because areas hold all kinds of entities.
+
+    A player that came in through a device, area, floor or label and
+    cannot play media is left out, as Home Assistant's own actions do.
+    The announcement names every player explicitly in its ``play_media``
+    call, and Home Assistant refuses that whole call when one explicitly
+    named player lacks the feature, so a television without it on the
+    targeted floor would otherwise silence every speaker there. One
+    named directly stays, so the caller gets Home Assistant's error.
     """
     selected = async_extract_referenced_entity_ids(hass, TargetSelection(data))
     prefix = f"{MP_DOMAIN}."
@@ -205,11 +215,36 @@ def _media_players_from_target(
             )
     players = sorted(
         entity_id
-        for entity_id in selected.referenced | selected.indirectly_referenced
+        for entity_id in selected.referenced
+        | {
+            entity_id
+            for entity_id in selected.indirectly_referenced
+            if entity_id.startswith(prefix) and _can_play_media(hass, entity_id)
+        }
         if entity_id.startswith(prefix)
     )
     _LOGGER.debug("Media players from target: %s", players)
     return players
+
+
+def _can_play_media(hass: HomeAssistant, entity_id: str) -> bool:
+    """False for a media player that reports no ``PLAY_MEDIA`` feature.
+
+    An unavailable player reports no features at all. It is kept, so the
+    announcement skips it with the message it gives every unavailable
+    target, instead of it vanishing here without a word.
+    """
+    state = hass.states.get(entity_id)
+    if state is None or state.state == STATE_UNAVAILABLE:
+        return True
+    try:
+        features = int(state.attributes.get(ATTR_SUPPORTED_FEATURES) or 0)
+    except (TypeError, ValueError):
+        features = 0
+    if features & MediaPlayerEntityFeature.PLAY_MEDIA:
+        return True
+    _LOGGER.debug("Leaving out %s: it cannot play media", entity_id)
+    return False
 
 
 @callback

@@ -1,3 +1,12 @@
+## v3.10b7
+
+- Keep the cache of messages spoken before the update, instead of synthesising and billing every one of them again
+- Report a failed announcement when every target is a Sonos or Music Assistant speaker given a volume override, instead of reporting success
+- Leave out players that cannot play media when a device, area, floor or label is targeted, instead of failing the announcement on every speaker
+- Keep a profile's saved voice when its model changes, except on OpenRouter, whose voices depend on the model
+- Leave the voice empty when an OpenRouter profile's model lists no voices, instead of filling in an OpenAI voice
+- Keep a Sonos speaker reserved until an announcement that started late has finished, so the next one does not play over it
+
 ## v3.10b6
 
 - Show the OpenAI retirement warning from 2026-12-23, two weeks before the shutdown, instead of from the day it was announced

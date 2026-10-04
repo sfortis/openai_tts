@@ -655,21 +655,27 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         the content-type / extension mismatch.
         """
         audio_format = self._get_config_value(CONF_AUDIO_FORMAT, DEFAULT_AUDIO_FORMAT)
-        return {
+        options = {
             CONF_VOICE: self._get_config_value(CONF_VOICE) or self._engine._voice,
             CONF_MODEL: self._get_config_value(CONF_MODEL) or self._engine._model,
             CONF_SPEED: self._get_config_value(CONF_SPEED) or self._engine._speed,
             CONF_CHIME_ENABLE: self._get_config_value(CONF_CHIME_ENABLE, False),
             CONF_CHIME_SOUND: self._get_config_value(CONF_CHIME_SOUND, "threetone.mp3"),
             CONF_NORMALIZE_AUDIO: self._get_config_value(CONF_NORMALIZE_AUDIO, True),
-            CONF_GAIN_DB: clamp_gain_db(
-                self._get_config_value(CONF_GAIN_DB, DEFAULT_GAIN_DB)
-            ),
             CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
             CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
             CONF_AUDIO_FORMAT: audio_format,
             "preferred_format": audio_format,
         }
+        # The gain joins the key only when it changes the audio. Home
+        # Assistant hashes every key it is given, so listing a gain of
+        # zero would give every profile a new key on the upgrade from
+        # 3.9, and every message cached until then would be synthesised
+        # and billed again.
+        gain_db = clamp_gain_db(self._get_config_value(CONF_GAIN_DB, DEFAULT_GAIN_DB))
+        if gain_db:
+            options[CONF_GAIN_DB] = gain_db
+        return options
 
     @property
     def device_info(self) -> dict[str, Any]:

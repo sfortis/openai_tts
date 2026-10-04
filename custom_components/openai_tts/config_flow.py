@@ -902,9 +902,21 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             # or Mistral account with no cloned voices yet - let the
             # user type whatever the backend understands.
             voice_field = selector({"text": {}})
+            # OpenRouter's voices belong to the model, and this branch
+            # means the catalogue had none for it, either because the
+            # listing failed or because the model was typed. OpenAI's
+            # voice is no better a guess than any other there, and one
+            # submit of it would fail every call, so the field starts
+            # empty and the user has to type one.
+            if preset.get("catalogue_source") == CATALOGUE_OPENROUTER:
+                default_voice = None
 
         step2_fields: dict[Any, Any] = {
-            vol.Required(CONF_VOICE, default=default_voice): voice_field,
+            (
+                vol.Required(CONF_VOICE)
+                if default_voice is None
+                else vol.Required(CONF_VOICE, default=default_voice)
+            ): voice_field,
         }
         # ``speed`` is OpenAI-style (0.25-4.0). Mistral hard-rejects
         # any non-default value with HTTP 422 ``extra_forbidden``;
@@ -1174,16 +1186,19 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
             # decided before the ``(saved)`` row is added, because that
             # row's label differs from its value on purpose.
             #
-            # That only holds while the model is the same. On a
-            # provider whose voices depend on the model (OpenRouter), a
-            # voice saved under the previous model is simply wrong for
-            # the new one, and defaulting to it lets one careless
-            # submit break the profile. The new model's first voice is
-            # the default then.
+            # A model change keeps the saved voice too, such as a typed
+            # Kokoro voice mix, except on a provider whose voices
+            # depend on the model (OpenRouter). There a voice saved
+            # under the previous model is simply wrong for the new one,
+            # and defaulting to it lets one careless submit break the
+            # profile, so the new model's first voice is the default.
             options = list(remote_voices)
             allows_typing = voice_picker_allows_typing(options)
             if not any(opt["value"] == existing_voice for opt in options):
-                if self._step1_model == existing_data.get(CONF_MODEL):
+                if existing_voice and (
+                    self._step1_model == existing_data.get(CONF_MODEL)
+                    or preset.get("catalogue_source") != CATALOGUE_OPENROUTER
+                ):
                     options.append({
                         "value": existing_voice,
                         "label": f"{existing_voice} (saved)",
