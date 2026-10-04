@@ -1,3 +1,33 @@
+## v3.10
+
+- Add an OpenRouter preset, which lists the speech models OpenRouter offers and the voices each model accepts
+- Add a gain setting per profile, to raise or lower the speech volume with or without loudness correction
+- Hand a volume override to Sonos and Music Assistant speakers, which play the announcement at that level instead of being paused and restored
+- Stop breaking up a Music Assistant group when one of its speakers announces with a volume override
+- Log a warning when a requested Music Assistant announcement volume is outside its default range of 15 to 75 percent
+- Keep announcing on the other speakers of a call with a volume override when its Music Assistant, Sonos or remaining speakers fail, and report the failure
+- Accept floors and labels as targets of `openai_tts.say`, next to entities, devices and areas
+- Refuse an `openai_tts.say` call whose target names no media player, with a message that says so
+- Leave out players that cannot play media when a device, area, floor or label is targeted, instead of failing the announcement on every speaker
+- Let the voice picker take a typed voice when the provider lists voices by plain name, such as a Kokoro voice mix `am_michael(1)+am_eric(2)`
+- Offer the new model's voices when an OpenRouter profile changes model, instead of keeping a voice the new model does not accept
+- Read your own chime files from `/config/openai_tts/chime`, which an update does not touch
+- Refuse a chime name that is not a plain mp3 file name
+- Check API keys on every provider without producing audio, when an entry is created, when a key is re-entered and when `openai_tts.set_api_key` runs
+- Warn in Repairs from 2026-12-23 about every profile that calls OpenAI with `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts`, which OpenAI stops serving on 2027-01-06
+- Name new entries after the provider, mark self-hosted ones, and leave the hostname out of cloud provider titles
+- Stop repeating the provider name in an entry title when the account name is the same
+- Title an entry Custom instead of OpenAI when a reconfigure moves it off its preset to another endpoint
+- Name each profile's device and entity after the profile alone, without the model and voice, and show the provider as its manufacturer and the integration version as its software version
+- Offer the switch that stops sending the voice name only on the Custom and Chatterbox presets, and always send the voice to providers that require one
+- Pass the caller of `openai_tts.say` on to the announcement and to the pause, volume and resume commands, so the logbook shows who made it
+- Report a failed announcement as "TTS announcement failed" instead of "TTS speak failed"
+- Correct the descriptions of the language, announce, chime sound and volume fields
+- Let the update listener reload an entry after a reconfigure or a new API key, as Home Assistant 2026.12 will require, and stop reloading it twice after a new API key
+- Require sentence-stream as a minimum version instead of one exact version
+- Rename the HACS entry to OpenAI TTS & compatible providers
+- Require Home Assistant 2026.9.1 or later
+
 ## v3.10b7
 
 - Keep the cache of messages spoken before the update, instead of synthesising and billing every one of them again

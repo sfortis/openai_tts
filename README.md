@@ -45,26 +45,26 @@ Each integration entry starts from a preset. The preset fills in the endpoint, o
 | Mistral Voxtral | Cloud | The voices on your account, read live, up to a hundred | Required |
 | Groq (Orpheus) | Cloud | Six English Orpheus voices from a fixed list, or a typed name such as an Arabic voice | Required |
 | Lemonfox.ai (Kokoro) | Cloud | The English voices Lemonfox documents, from a fixed list, or a typed Kokoro voice name | Required |
-| OpenRouter (3.10 beta) | Cloud | The voices each speech model accepts, read live | Required |
+| OpenRouter | Cloud | The voices each speech model accepts, read live | Required |
 | Kokoro-FastAPI | Self-hosted | The voice packs installed on the server, read live | Optional |
 | Chatterbox | Self-hosted | The voices on the server, read live | Optional |
 | Custom | Cloud or self-hosted | Read live when the server lists its voices, typed otherwise | Optional |
 
 The names are shortened from the labels in the provider list.
 
-The **Custom** preset covers every other server that implements the OpenAI speech endpoint, such as LocalAI, pocket-tts or TTS Web UI. When the server publishes no voice list, the voice field is a text field that takes any name the backend understands. When it does publish one, the picker shows that list, and from 3.10 (beta) it also takes a typed name when the list holds plain names. The **audio format** selector helps with a backend that rejects mp3, and the **extra payload** field sends backend-specific JSON parameters with each request.
+The **Custom** preset covers every other server that implements the OpenAI speech endpoint, such as LocalAI, pocket-tts or TTS Web UI. When the server publishes no voice list, the voice field is a text field that takes any name the backend understands. When it does publish one, the picker shows that list, and it also takes a typed name when the list holds plain names. The **audio format** selector helps with a backend that rejects mp3, and the **extra payload** field sends backend-specific JSON parameters with each request.
 
 Speech is always requested through the OpenAI speech API. Voice and model lists are read from a provider's own listing endpoint where one exists. A provider that offers speech only through a different API of its own is not supported.
 
 On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-mini-tts` also takes speaking-style instructions. The voices are `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage` and `shimmer`, and `gpt-4o-mini-tts` adds `ballad`, `cedar`, `marin` and `verse`.
 
-> **OpenAI is retiring all three models.** OpenAI announced on 1 October 2026 that `tts-1`, `tts-1-hd` and every snapshot of `gpt-4o-mini-tts` stop working on 6 January 2027 ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)). The replacement OpenAI recommends, `gpt-realtime-2.1-mini`, runs on its Realtime API, which this integration does not use, and OpenAI has not announced a replacement for its speech API. Unless it does, OpenAI profiles stop speaking on that date, and moving them to another provider is the way to keep them working. From 3.10 (beta), every profile that calls OpenAI with one of these models raises a warning in **Settings > Repairs** two weeks before the shutdown, from 23 December 2026. Profiles on other providers are not affected, including self-hosted servers that accept `tts-1` as a model name.
+> **OpenAI is retiring all three models.** OpenAI announced on 1 October 2026 that `tts-1`, `tts-1-hd` and every snapshot of `gpt-4o-mini-tts` stop working on 6 January 2027 ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)). The replacement OpenAI recommends, `gpt-realtime-2.1-mini`, runs on its Realtime API, which this integration does not use, and OpenAI has not announced a replacement for its speech API. Unless it does, OpenAI profiles stop speaking on that date, and moving them to another provider is the way to keep them working. Every profile that calls OpenAI with one of these models raises a warning in **Settings > Repairs** two weeks before the shutdown, from 23 December 2026. Profiles on other providers are not affected, including self-hosted servers that accept `tts-1` as a model name.
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
 
-### Version 3.10 (beta)
+### Version 3.10
 
-Version 3.10 is a beta and needs Home Assistant 2026.9.1 or later. To try it, open the integration in HACS, choose **Redownload** and turn on **Show beta versions**.
+Version 3.10 needs Home Assistant 2026.9.1 or later.
 
 - **OpenRouter preset**: the model picker lists the speech models OpenRouter offers, and the voice picker lists the voices of the chosen model. A model that lists no voices takes a typed one. When a profile changes model, the voice defaults to one the new model accepts.
 - **Gain** per profile, from -12 to +12 dB in steps of 0.5 dB, to make a quiet voice louder or a loud one softer. It works with or without loudness normalisation, a limiter stops a boost from clipping, and the chime keeps its own level.
@@ -73,10 +73,11 @@ Version 3.10 is a beta and needs Home Assistant 2026.9.1 or later. To try it, op
 - **Typed voices**: when the provider lists voices by plain name, as Kokoro and OpenRouter do, the voice picker also accepts a name that is not in the list, such as the Kokoro voice mix `am_michael(1)+am_eric(2)`.
 - **Speaker failures stay separate**: with a volume override, a failure on the Music Assistant speakers, the Sonos speakers or the other speakers no longer cuts the announcement short on the rest. The action then reports the failure.
 - **Floor and label targets**: `openai_tts.say` now accepts floors and labels as targets, next to entities, devices and areas.
-- **Your own chimes survive updates**: mp3 files in `/config/openai_tts/chime` are listed next to the built-in sounds, and that folder is not touched by an update.
+- **Your own chimes survive updates**: mp3 files in `/config/openai_tts/chime` are listed next to the built-in sounds, and that folder is not touched by an update. Files kept in the integration's own `chime` folder are removed by the update to 3.10, so copy them out before updating.
 - **API keys are checked on every provider**, when an entry is created, when a key is re-entered and when `openai_tts.set_api_key` runs. The check produces no audio and costs nothing.
 - **Send the voice name** is offered only on the Custom and Chatterbox presets, because every hosted provider requires a voice.
 - **OpenAI retirement warning**: a profile that calls OpenAI with `tts-1`, `tts-1-hd` or `gpt-4o-mini-tts` raises a warning in **Settings > Repairs** from 23 December 2026, two weeks before OpenAI's shutdown on 6 January 2027.
+- **Clearer names**: a new entry is named after its provider, and each profile's device and entity are named after the profile alone, without the model and voice. Existing entry titles are kept.
 - **The logbook shows who made an announcement**, for the announcement itself and for the pause, volume and resume commands around it.
 
 ### Version 3.9
@@ -120,20 +121,20 @@ does while an announcement is playing.
 ### Speech
 
 - Several TTS agents under one entry, each with its own model, voice, speed, audio format and audio processing.
-- Audio in `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, chosen per profile. Some providers accept fewer formats, and the selector then offers only those: Groq accepts `wav`, Chatterbox accepts `mp3`, `opus` and `wav`, and OpenRouter (3.10 beta) accepts `mp3` and `pcm`.
+- Audio in `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, chosen per profile. Some providers accept fewer formats, and the selector then offers only those: Groq accepts `wav`, Chatterbox accepts `mp3`, `opus` and `wav`, and OpenRouter accepts `mp3` and `pcm`.
 - Streaming playback, so audio plays as it arrives instead of after the whole clip is written. Streaming works with `mp3`, `opus`, `aac` and `pcm`. A `wav` or `flac` file states its length in a header before any audio exists, so those two formats are always assembled in full first. A chime, or the **Stream the audio** switch turned off, also makes the integration assemble the whole clip before playback starts.
 - Sentence streaming for the voice assistant, off by default and set per profile. When the conversation agent streams its reply, speech starts on the first finished sentence rather than on the finished reply. It needs `mp3` or `pcm`, and the profile form refuses it together with a chime or with another format.
 - Loudness normalisation, on by default. It runs on the stream for `mp3`, `opus`, `aac` and `pcm`. For `wav` and `flac`, and whenever a chime is added, it runs on the finished clip instead.
-- A gain per profile, from -12 to +12 dB in steps of 0.5 dB, with a limiter so a boost cannot clip (3.10 beta). With normalisation on, a boost raises the level much less than it says, see [Known Limitations](#known-limitations).
-- A chime before the announcement, picked from five built-in sounds or from your own mp3 files. From 3.10 (beta) your own files go in `/config/openai_tts/chime`, which an update does not touch. On 3.9 they go in `config/custom_components/openai_tts/chime`, which a HACS update replaces, so keep a copy elsewhere.
+- A gain per profile, from -12 to +12 dB in steps of 0.5 dB, with a limiter so a boost cannot clip. With normalisation on, a boost raises the level much less than it says, see [Known Limitations](#known-limitations).
+- A chime before the announcement, picked from five built-in sounds or from your own mp3 files in `/config/openai_tts/chime`, which an update does not touch.
 - The entity declares 54 languages, so it can be chosen for an Assist pipeline in any of them. The provider speaks the language the text is written in, so what actually works depends on the provider, the model and the voice.
 
 ### Announcements
 
-- Announcements on any media player, targeted by entity, device or area, and from 3.10 (beta) by floor or label too.
+- Announcements on any media player, targeted by entity, device, area, floor or label.
 - When the call sets `volume`, each speaker plays the announcement at that level and returns to its own level afterwards. Without `volume`, the integration leaves every speaker's volume alone.
 - Speakers that cannot announce on their own are paused before the announcement and resumed after it, when they were playing. Speakers that can, which are Sonos, Music Assistant and any player that reports the announcement feature, duck or handle their own music instead. With `announce: false`, nothing is paused or resumed, so a Cast speaker's music is replaced by the announcement and does not come back.
-- With a volume override, every speaker is paused, set and restored, except Sonos and Music Assistant speakers from 3.10 (beta), which receive the level with the announcement and handle their own volume.
+- With a volume override, every speaker is paused, set and restored, except Sonos and Music Assistant speakers, which receive the level with the announcement and handle their own volume.
 - Speakers that are off are switched on together, and the announcement waits up to five seconds for all of them to wake, so a speaker that was off does not start noticeably later than one that was already on.
 
 ### Monitoring
@@ -144,7 +145,7 @@ does while an announcement is playing.
 
 ## Installation
 
-Version 3.10 (beta) needs Home Assistant 2026.9.1 or later. Version 3.9.2 needs Home Assistant 2025.7 or later.
+Version 3.10 needs Home Assistant 2026.9.1 or later. Version 3.9.2 needs Home Assistant 2025.7 or later.
 
 ### HACS (recommended)
 
@@ -174,21 +175,21 @@ Each integration entry stores the provider, the endpoint and the API key. Add on
 - **Voice instructions** for speaking style, shown only when the model is `gpt-4o-mini-tts`.
 - **Extra JSON payload** for backend-specific parameters, on the Custom and Chatterbox presets.
 - **Chime**, **chime sound** and **normalise audio** as defaults that the service call can override.
-- **Gain** (3.10 beta), from -12 to +12 dB, applied with or without normalisation.
+- **Gain**, from -12 to +12 dB, applied with or without normalisation.
 - **Sentence streaming** (off by default) to start speaking on the first finished
   sentence of an assistant reply instead of the finished reply.
 - **Stream the audio** (on by default). Turn it off for a backend whose streamed
   response will not decode while the same request read in one go is fine. It also
   turns sentence streaming off.
 - **Send the voice name** (on by default). Turn it off for a backend that rejects
-  the `voice` field, such as audio.cpp serving Chatterbox or VoxCPM2. From 3.10
-  (beta) it is offered only on the Custom and Chatterbox presets.
+  the `voice` field, such as audio.cpp serving Chatterbox or VoxCPM2. It is offered
+  only on the Custom and Chatterbox presets.
 
 > A chime turns streaming off for every request it is added to, because a chime has
 > to be attached to finished audio. A chime switched on in the profile therefore
 > turns streaming off for all of that profile's announcements and voice assistant
 > replies, unless the call sets `chime: false`. Loudness normalisation does not turn
-> streaming off, and from 3.10 (beta) neither does the gain: both run on the stream
+> streaming off, and neither does the gain: both run on the stream
 > for `mp3`, `opus`, `aac` and `pcm`.
 
 ## Using It With the Voice Assistant
@@ -227,8 +228,8 @@ target:
   entity_id: media_player.living_room_speaker
   # area_id: living_room
   # device_id: 12345abcde
-  # floor_id: ground_floor   (3.10 beta)
-  # label_id: announcements  (3.10 beta)
+  # floor_id: ground_floor
+  # label_id: announcements
 data:
   tts_entity: tts.openai_tts_living_room
   message: "Dinner is ready"
@@ -250,7 +251,7 @@ With `response_variable`, an error that happens while the announcement runs is r
 
 Some speakers appear in Home Assistant more than once. A speaker that Music Assistant plays to usually has a Music Assistant entity and a second entity from its own integration, such as ESPHome or Cast. Target the Music Assistant entity. The integration pauses a Cast entity before every announcement, and an ESPHome entity when a volume is given, and Music Assistant only hears about those pauses through the speaker itself. On a speaker in a Music Assistant group, this can stop the whole group.
 
-On 3.9, a volume override on a Music Assistant speaker makes the integration stop the speaker and resume it afterwards. Music Assistant passes a stop on a grouped speaker on to the group, so the whole group stops. From 3.10 (beta) the level is handed to Music Assistant instead. A speaker that plays announcements natively plays it over the group's music. Otherwise Music Assistant takes the speaker out of its group for the announcement and adds it back afterwards, while the rest of the group keeps playing. If the speaker leads the group, or the group cannot change its members, the group stops for the announcement.
+With a volume override on a Music Assistant speaker, the integration hands the level to Music Assistant instead of stopping the speaker and resuming it afterwards, because Music Assistant passes a stop on a grouped speaker on to the whole group. A speaker that plays announcements natively plays it over the group's music. Otherwise Music Assistant takes the speaker out of its group for the announcement and adds it back afterwards, while the rest of the group keeps playing. If the speaker leads the group, or the group cannot change its members, the group stops for the announcement.
 
 ## `openai_tts.set_api_key` action
 
@@ -262,13 +263,10 @@ run without a user are allowed.
 Before storing the key, the action checks it against the endpoint. If the
 endpoint refuses the key, or the check cannot complete for another reason, the
 old key stays in place and the action raises an error. A key that equals the
-stored one is neither checked nor written. From 3.10 (beta) the check sends a
-speech request with an empty text, which every provider refuses only after it
-has looked at the key, so the check works on every provider, produces no audio
-and costs nothing. On 3.9 the check is a real speech request with the model
-`tts-1` and the voice `alloy`, which most providers other than OpenAI answer with
-an error that says nothing about the key, so add `validate: false` there to store
-the key without checking it.
+stored one is neither checked nor written. The check sends a speech request
+with an empty text, which every provider refuses only after it has looked at the
+key, so the check works on every provider, produces no audio and costs nothing.
+Add `validate: false` to store the key without checking it.
 
 When the entry is loaded and Home Assistant is running, the entry reloads with
 the new key, so no restart is required. Otherwise the key takes effect the next
@@ -293,12 +291,12 @@ failed check raises an error instead of returning a response.
 
 ## Known Limitations
 
-- Music Assistant keeps announcement volume within a range set for each player, 15 to 75 percent by default, and changes a requested level outside that range. From 3.10 (beta) the integration logs a warning when the requested level is outside the default range. It cannot see a range changed in Music Assistant.
-- From 3.10 (beta), Music Assistant ignores the requested level on a player whose announcement volume strategy is set to **none**, and the announcement plays at the player's current volume.
-- A Sonos speaker without AudioClip support, which is older S1 hardware, falls back to ordinary playback. From 3.10 (beta) a volume override is then ignored on that speaker and its music does not come back. Home Assistant's Sonos integration also supports announcements only in `mp3` and `wav`.
+- Music Assistant keeps announcement volume within a range set for each player, 15 to 75 percent by default, and changes a requested level outside that range. The integration logs a warning when the requested level is outside the default range. It cannot see a range changed in Music Assistant.
+- Music Assistant ignores the requested level on a player whose announcement volume strategy is set to **none**, and the announcement plays at the player's current volume.
+- A Sonos speaker without AudioClip support, which is older S1 hardware, falls back to ordinary playback. A volume override is then ignored on that speaker, and its music does not come back. Home Assistant's Sonos integration also supports announcements only in `mp3` and `wav`.
 - The `announce` field changes nothing on speakers that announce on their own: Sonos, Music Assistant and any player that reports the announcement feature. On other speakers it decides whether they are paused and resumed, but only when the call sets no volume, because a volume override always pauses them.
 - A chime turns streaming off for every request it is added to, including every voice assistant reply of a profile that has the chime switched on.
-- From 3.10 (beta), with normalisation on, the audio is already close to full scale, so the limiter takes back most of a positive gain. In a measurement, +6 dB raised the loudness by about 4 dB and +12 dB by about 5 dB, while a cut was applied in full. For a large boost, turn normalisation off, and the gain is then applied as set.
+- With normalisation on, the audio is already close to full scale, so the limiter takes back most of a positive gain. In a measurement, +6 dB raised the loudness by about 4 dB and +12 dB by about 5 dB, while a cut was applied in full. For a large boost, turn normalisation off, and the gain is then applied as set.
 - All the speakers that the integration pauses and restores in one call share one playback request. When it fails on one of them, the announcement counts as failed for all of them, their volumes and music are restored straight away, and the action reports an error.
 - Groq accepts only `wav`, so a Groq profile never streams. A `wav` or `flac` profile never streams on any provider.
 - Audio that the integration processes, for a chime, loudness normalisation or gain, is written as 24 kHz mono, which is what every supported provider produces.
