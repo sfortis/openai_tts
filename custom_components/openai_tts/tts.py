@@ -83,6 +83,7 @@ from .exceptions import (
 )
 from .loudness import can_filter_stream, filter_stream
 from .openaitts_engine import OpenAITTSEngine
+from .pcm_wav import delivery_format, pcm_as_wav
 from .repairs import create_voice_deleted_issue
 from .streaming import (
     PIPELINEABLE_FORMATS,
@@ -665,7 +666,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             CONF_INSTRUCTIONS: self._get_config_value(CONF_INSTRUCTIONS),
             CONF_EXTRA_PAYLOAD: self._get_config_value(CONF_EXTRA_PAYLOAD),
             CONF_AUDIO_FORMAT: audio_format,
-            "preferred_format": audio_format,
+            "preferred_format": delivery_format(audio_format),
         }
         # The gain joins the key only when it changes the audio. Home
         # Assistant hashes every key it is given, so listing a gain of
@@ -1395,9 +1396,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 "mode: sentence-pipelined",
                 resolved["voice"], resolved["model"], pipeline_format,
             )
-            return TTSAudioResponse(
-                extension=pipeline_format,
-                data_gen=self._pipelined_stream(
+            return self._response(
+                pipeline_format,
+                self._pipelined_stream(
                     request.message_gen, resolved, pipeline_format
                 ),
             )
@@ -1423,11 +1424,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         )
 
         if can_stream:
-            return TTSAudioResponse(
-                extension=audio_format,
-                data_gen=self._validated_stream(
-                    full_text, resolved, audio_format
-                ),
+            return self._response(
+                audio_format,
+                self._validated_stream(full_text, resolved, audio_format),
             )
 
         # Atomic path: chime / normalize need the complete audio first.
@@ -1499,9 +1498,8 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             len(audio_data), duration_ms, delivered_format,
         )
 
-        return TTSAudioResponse(
-            extension=delivered_format,
-            data_gen=self._yield_in_chunks(audio_data),
+        return self._response(
+            delivered_format, self._yield_in_chunks(audio_data)
         )
 
     async def _stream_with_validation(
@@ -1652,6 +1650,21 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             yield audio_data[i : i + chunk_size]
 
     @staticmethod
+    def _response(
+        audio_format: str, data_gen: AsyncGenerator[bytes, None]
+    ) -> TTSAudioResponse:
+        """Wrap ``data_gen`` for Home Assistant in a format it can convert.
+
+        Raw PCM goes out as WAV: HA converts with ``ffmpeg -f <extension>``
+        and ffmpeg has no input format named ``pcm``. See ``pcm_wav``.
+        """
+        if audio_format == "pcm":
+            data_gen = pcm_as_wav(data_gen)
+        return TTSAudioResponse(
+            extension=delivery_format(audio_format), data_gen=data_gen
+        )
+
+    @staticmethod
     def _empty_response(audio_format: str) -> TTSAudioResponse:
         """Return a generator that raises so HA refuses to cache the failure.
 
@@ -1672,4 +1685,6 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
             )
             yield b""  # pragma: no cover - keeps this an async generator
 
-        return TTSAudioResponse(extension=audio_format, data_gen=_fail())
+        return TTSAudioResponse(
+            extension=delivery_format(audio_format), data_gen=_fail()
+        )
