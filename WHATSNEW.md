@@ -1,3 +1,8 @@
+## v3.10.1
+
+- Fix a new TTS agent failing to load and leaving an unnamed device behind
+- Measure the length of pcm clips, which was always recorded as zero
+
 ## v3.10
 
 - Add an OpenRouter preset, which lists the speech models OpenRouter offers and the voices each model accepts
