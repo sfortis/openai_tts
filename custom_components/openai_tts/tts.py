@@ -746,7 +746,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     # --- TTS generation ----------------------------------------------------
 
-    async def _get_audio_duration(self, audio_data: bytes) -> int:
+    async def _get_audio_duration(
+        self, audio_data: bytes, audio_format: str | None = None
+    ) -> int:
         """Return audio duration in milliseconds via ffprobe.
 
         The temporary file that ffprobe needs is written and deleted
@@ -755,7 +757,12 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         """
         _, ffprobe = resolve_ffmpeg_paths(self.hass)
         duration_seconds = await self.hass.async_add_executor_job(
-            partial(measure_audio_duration, audio_data, ffprobe=ffprobe)
+            partial(
+                measure_audio_duration,
+                audio_data,
+                ffprobe=ffprobe,
+                audio_format=audio_format,
+            )
         )
         return int(duration_seconds * 1000)
 
@@ -1152,7 +1159,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         audio_data: bytes,
         resolved: dict[str, Any] | None = None,
     ) -> int:
-        duration_ms = await self._get_audio_duration(audio_data)
+        duration_ms = await self._get_audio_duration(
+            audio_data, (resolved or {}).get("audio_format")
+        )
         self._last_duration_ms = duration_ms
         # Persist measured duration so volume_restore can look it up
         # even on subsequent HA-cache hits where the engine doesn't run.
@@ -1579,7 +1588,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         consumer the bytes that play are the filtered ones, and those
         are what the duration has to describe.
         """
-        duration_ms = await self._get_audio_duration(audio)
+        duration_ms = await self._get_audio_duration(
+            audio, (resolved or {}).get("audio_format")
+        )
         self._last_duration_ms = duration_ms
         r = resolved or {}
         self._duration_cache.store_duration(

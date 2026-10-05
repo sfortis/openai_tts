@@ -201,8 +201,18 @@ def get_media_duration(file_path: str, ffprobe: str = "ffprobe") -> float:
         return 0.0
 
 
+# Raw PCM has no header for ffprobe to read, so its length follows from
+# the byte count. Every pcm clip this integration handles has the same
+# layout: OpenAI documents 24 kHz 16-bit mono, and the ``pcm`` entry in
+# ``AUDIO_FORMAT_ENCODER`` writes post-processed audio the same way.
+_PCM_BYTES_PER_SECOND = 24000 * 2
+
+
 def measure_audio_duration(
-    audio_data: bytes, suffix: str = ".mp3", ffprobe: str = "ffprobe"
+    audio_data: bytes,
+    suffix: str = ".mp3",
+    ffprobe: str = "ffprobe",
+    audio_format: str | None = None,
 ) -> float:
     """Return the duration of an in-memory clip in seconds, or 0.0.
 
@@ -219,7 +229,12 @@ def measure_audio_duration(
             format by probing the content, so this only affects the file
             name.
         ffprobe: The ffprobe command, from ``resolve_ffmpeg_paths``.
+        audio_format: The clip's format when the caller knows it. Raw
+            ``pcm`` is measured from its length instead of being probed,
+            because ffprobe reports ``N/A`` for it.
     """
+    if audio_format == "pcm":
+        return len(audio_data) / _PCM_BYTES_PER_SECOND
     tmp_path: str | None = None
     try:
         with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as tmp_file:
