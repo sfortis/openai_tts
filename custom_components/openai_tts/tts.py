@@ -1499,7 +1499,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         )
 
         return self._response(
-            delivered_format, self._yield_in_chunks(audio_data)
+            delivered_format,
+            self._yield_in_chunks(audio_data),
+            data_size=len(audio_data),
         )
 
     async def _stream_with_validation(
@@ -1651,15 +1653,17 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
 
     @staticmethod
     def _response(
-        audio_format: str, data_gen: AsyncGenerator[bytes, None]
+        audio_format: str,
+        data_gen: AsyncGenerator[bytes, None],
+        data_size: int | None = None,
     ) -> TTSAudioResponse:
-        """Wrap ``data_gen`` for Home Assistant in a format it can convert.
+        """Wrap ``data_gen`` for HA in a format its ffmpeg can read; see ``pcm_wav``.
 
-        Raw PCM goes out as WAV: HA converts with ``ffmpeg -f <extension>``
-        and ffmpeg has no input format named ``pcm``. See ``pcm_wav``.
+        ``data_size`` is the clip's length when known, for a pcm WAV
+        header; streams leave it out.
         """
         if audio_format == "pcm":
-            data_gen = pcm_as_wav(data_gen)
+            data_gen = pcm_as_wav(data_gen, data_size)
         return TTSAudioResponse(
             extension=delivery_format(audio_format), data_gen=data_gen
         )
