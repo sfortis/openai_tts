@@ -1,3 +1,8 @@
+## v3.10.2
+
+- Fix pcm profiles failing on voice assistant satellites
+- Fix opus profiles failing on voice assistant satellites
+
 ## v3.10.1
 
 - Fix a new TTS agent failing to load and leaving an unnamed device behind
