@@ -60,6 +60,7 @@ from .const import (
     CONF_VOLUME_RESTORE,
     DEFAULT_ANNOUNCE_MODE,
 )
+from .repairs import warn_music_assistant_twins
 from .utils import (
     call_media_player_service,
     get_media_player_state,
@@ -1781,6 +1782,19 @@ async def announce(
         if needs_restorer
         else None
     )
+    if restorer is not None and pause_for_manual:
+        # These are the targets ``prepare()`` will pause. One that Music
+        # Assistant also plays to stops its whole group, so say which
+        # Music Assistant entity to target instead. The check only reads
+        # registries and must never cost the announcement.
+        native = set() if force_manual else _native_announce_targets(
+            hass, manual_players
+        )
+        paused = [eid for eid in manual_players if eid not in native]
+        try:
+            warn_music_assistant_twins(hass, paused)
+        except Exception:
+            _LOGGER.debug("Could not check for Music Assistant twins", exc_info=True)
 
     # Wait for any announcement already running on these speakers to
     # finish, so this one starts from the speaker's real volume rather

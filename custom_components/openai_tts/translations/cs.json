@@ -189,6 +189,10 @@
     "model_retirement": {
       "title": "OpenAI ukončuje model TTS agenta",
       "description": "TTS agent `{profile}` používá model `{model}`, který OpenAI přestane poskytovat {date}. Po tomto datu agent přestane mluvit. OpenAI jako náhradu doporučuje `gpt-realtime-2.1-mini`, tento model ale běží přes Realtime API od OpenAI, které tato integrace nepoužívá, a pro své speech API OpenAI žádnou náhradu neohlásila. Do té doby zvažte převedení tohoto agenta na jiného poskytovatele."
+    },
+    "music_assistant_twin": {
+      "title": "Hlášení míří na reproduktor, do kterého hraje i Music Assistant",
+      "description": "`{entity}` je stejný reproduktor jako entita Music Assistant `{ma_entity}`. Hlášení na `{entity}` reproduktor pozastaví a Music Assistant se o tom dozví jen přes reproduktor. Pokud je reproduktor ve skupině Music Assistant, zastaví se proto celá skupina a pokračuje jen tento reproduktor. V automatizacích a skriptech místo toho použijte `{ma_entity}`. Toto varování po restartu zmizí, jakmile se `{entity}` přestane pro hlášení používat."
     }
   },
   "selector": {
