@@ -1,3 +1,8 @@
+## v3.11b1
+
+- Warn in Repairs when an announcement targets a speaker that Music Assistant also plays to, and name the Music Assistant entity to use instead
+- Accept region language tags such as `en-US` and `de-DE`, which Music Assistant and other callers send
+
 ## v3.10.2
 
 - Fix pcm profiles failing on voice assistant satellites
