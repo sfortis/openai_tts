@@ -637,6 +637,81 @@ SUPPORTED_LANGUAGES = [
     "zh",  # Chinese
 ]
 
+# Region-qualified (BCP-47) tags accepted in addition to the base
+# ISO-639-1 codes above. Home Assistant validates a caller's language by
+# exact membership in ``supported_languages``, with no normalisation of
+# the tag (homeassistant/components/tts/__init__.py). A client that sends
+# a full tag, such as Music Assistant AI Radio sending the host language
+# "en-US", is otherwise rejected with ``Language 'en-US' not supported``,
+# although the backend detects the language from the text and never
+# receives the tag. Every tag maps to a base code already in the list,
+# so accepting them adds compatibility and no new capability.
+_REGION_TAGS: dict[str, tuple[str, ...]] = {
+    "af": ("af-ZA",),
+    "ar": ("ar-SA", "ar-EG", "ar-AE"),
+    "bg": ("bg-BG",),
+    "bn": ("bn-BD", "bn-IN"),
+    "bs": ("bs-BA",),
+    "ca": ("ca-ES",),
+    "cs": ("cs-CZ",),
+    "cy": ("cy-GB",),
+    "da": ("da-DK",),
+    "de": ("de-DE", "de-AT", "de-CH"),
+    "el": ("el-GR",),
+    "en": ("en-US", "en-GB", "en-AU", "en-CA", "en-IE", "en-IN", "en-NZ", "en-ZA"),
+    "es": ("es-ES", "es-MX", "es-AR", "es-US", "es-CO", "es-CL"),
+    "et": ("et-EE",),
+    "fa": ("fa-IR",),
+    "fi": ("fi-FI",),
+    "fr": ("fr-FR", "fr-CA", "fr-BE", "fr-CH"),
+    "gl": ("gl-ES",),
+    "he": ("he-IL",),
+    "hi": ("hi-IN",),
+    "hr": ("hr-HR",),
+    "hu": ("hu-HU",),
+    "id": ("id-ID",),
+    "is": ("is-IS",),
+    "it": ("it-IT", "it-CH"),
+    "ja": ("ja-JP",),
+    "kk": ("kk-KZ",),
+    "ko": ("ko-KR",),
+    "lt": ("lt-LT",),
+    "lv": ("lv-LV",),
+    "mk": ("mk-MK",),
+    "ml": ("ml-IN",),
+    "mr": ("mr-IN",),
+    "ms": ("ms-MY",),
+    "nb": ("nb-NO",),
+    "nl": ("nl-NL", "nl-BE"),
+    "pl": ("pl-PL",),
+    "pt": ("pt-BR", "pt-PT"),
+    "ro": ("ro-RO",),
+    "ru": ("ru-RU",),
+    "sk": ("sk-SK",),
+    "sl": ("sl-SI",),
+    "sr": ("sr-RS", "sr-Latn"),
+    "sv": ("sv-SE", "sv-FI"),
+    "sw": ("sw-KE", "sw-TZ"),
+    "ta": ("ta-IN", "ta-LK"),
+    "te": ("te-IN",),
+    "th": ("th-TH",),
+    "tl": ("tl-PH",),
+    "tr": ("tr-TR",),
+    "uk": ("uk-UA",),
+    "ur": ("ur-PK", "ur-IN"),
+    "vi": ("vi-VN",),
+    "zh": ("zh-CN", "zh-TW", "zh-HK", "zh-SG"),
+}
+
+# Base codes plus region-qualified variants, in stable order. Exposed so
+# the entity can advertise every tag Home Assistant will accept.
+SUPPORTED_LANGUAGES_WITH_REGIONS: list[str] = list(SUPPORTED_LANGUAGES)
+for _base, _variants in _REGION_TAGS.items():
+    for _tag in _variants:
+        if _tag not in SUPPORTED_LANGUAGES_WITH_REGIONS:
+            SUPPORTED_LANGUAGES_WITH_REGIONS.append(_tag)
+del _base, _variants, _tag
+
 CONF_CHIME_ENABLE = "chime"
 CONF_CHIME_SOUND = "chime_sound"
 CONF_NORMALIZE_AUDIO = "normalize_audio"
