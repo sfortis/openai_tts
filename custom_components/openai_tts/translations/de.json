@@ -188,11 +188,11 @@
     },
     "model_retirement": {
       "title": "OpenAI stellt das Modell eines TTS-Agenten ein",
-      "description": "Der TTS-Agent `{profile}` verwendet `{model}`, das OpenAI ab dem {date} nicht mehr anbietet. Danach kann der Agent nicht mehr sprechen. OpenAI empfiehlt `gpt-realtime-2.1-mini` als Ersatz, dieses Modell läuft aber über die Realtime API von OpenAI, die diese Integration nicht verwendet, und für die Speech API hat OpenAI keinen Ersatz angekündigt. Bis dahin solltest du diesen Agenten auf einen anderen Anbieter umstellen."
+      "description": "Der TTS-Agent `{profile}` verwendet `{model}`, das OpenAI ab dem {date} nicht mehr anbietet. Danach kann der Agent nicht mehr sprechen.\n\nOpenAI empfiehlt `gpt-realtime-2.1-mini` als Ersatz, dieses Modell läuft aber über die Realtime API von OpenAI, die diese Integration nicht verwendet. Für die Speech API hat OpenAI keinen Ersatz angekündigt.\n\nBis dahin solltest du diesen Agenten auf einen anderen Anbieter umstellen."
     },
     "music_assistant_twin": {
       "title": "Durchsagen zielen auf einen Lautsprecher, den auch Music Assistant bespielt",
-      "description": "`{entity}` ist derselbe Lautsprecher wie die Music-Assistant-Entität `{ma_entity}`. Eine Durchsage auf `{entity}` pausiert den Lautsprecher, und Music Assistant erfährt davon nur über den Lautsprecher. Ist er in einer Music-Assistant-Gruppe, stoppt deshalb die ganze Gruppe und nur dieser Lautsprecher spielt danach weiter. Verwende in deinen Automationen und Skripten stattdessen `{ma_entity}`. Diese Warnung verschwindet nach einem Neustart, sobald `{entity}` nicht mehr für Durchsagen verwendet wird."
+      "description": "`{entity}` und die Music-Assistant-Entität `{ma_entity}` sind derselbe Lautsprecher.\n\nEine Durchsage auf `{entity}` umgeht Music Assistant. Je nach Lautsprecher passiert eines von beidem:\n\n- die ganze Music-Assistant-Gruppe stoppt, oder\n- dieser Lautsprecher bleibt danach stumm, während Music Assistant ihn weiter als spielend anzeigt.\n\nVerwende zur Behebung in deinen Automationen und Skripten `{ma_entity}` statt `{entity}`.\n\nDiese Warnung verschwindet nach einem Neustart, sobald `{entity}` nicht mehr für Durchsagen verwendet wird."
     }
   },
   "selector": {

@@ -188,11 +188,11 @@
     },
     "model_retirement": {
       "title": "OpenAI is retiring the model of a TTS agent",
-      "description": "TTS agent `{profile}` uses `{model}`, which OpenAI stops serving on {date}. After that date the agent will fail to speak. OpenAI recommends `gpt-realtime-2.1-mini` as the replacement, but that model runs on OpenAI's Realtime API, which this integration does not use, and OpenAI has not announced a replacement for its speech API. Until it does, consider moving this agent to another provider."
+      "description": "TTS agent `{profile}` uses `{model}`, which OpenAI stops serving on {date}. After that date the agent will fail to speak.\n\nOpenAI recommends `gpt-realtime-2.1-mini` as the replacement, but that model runs on OpenAI's Realtime API, which this integration does not use. OpenAI has not announced a replacement for its speech API.\n\nUntil it does, consider moving this agent to another provider."
     },
     "music_assistant_twin": {
       "title": "Announcements target a speaker that Music Assistant also plays to",
-      "description": "`{entity}` is the same speaker as the Music Assistant entity `{ma_entity}`. An announcement on `{entity}` pauses the speaker, and Music Assistant only hears about it through the speaker, so when the speaker is in a Music Assistant group the whole group stops and only this speaker resumes. Target `{ma_entity}` instead in your automations and scripts. This warning disappears after a restart once `{entity}` is no longer used for announcements."
+      "description": "`{entity}` and the Music Assistant entity `{ma_entity}` are the same speaker.\n\nAn announcement on `{entity}` goes around Music Assistant. Depending on the speaker, one of two things happens:\n\n- the whole Music Assistant group stops, or\n- this speaker stays silent afterwards, while Music Assistant still shows it playing.\n\nTo fix this, target `{ma_entity}` instead of `{entity}` in your automations and scripts.\n\nThis warning disappears after a restart once `{entity}` is no longer used for announcements."
     }
   },
   "services": {

@@ -184,8 +184,11 @@ def warn_music_assistant_twins(
     ``entity_ids`` are the targets the manual flow is about to pause or
     set a volume on. A target whose device matches a Music Assistant
     player gets a warning that names the Music Assistant entity to use
-    instead, because Music Assistant hears of the pause only through
-    the speaker and stops the speaker's whole group. See ``ma_twins``.
+    instead. The announcement goes around Music Assistant: a pause
+    reaches it only through the speaker and stops the speaker's whole
+    group, and on Cast the announcement replaces Music Assistant's
+    receiver app, so the speaker stays silent afterwards while Music
+    Assistant still reports it playing. See ``ma_twins``.
 
     The issue is not persistent. It is raised on the first announcement
     to the target after each start, and an issue that already exists is
@@ -242,9 +245,10 @@ def warn_music_assistant_twins(
             continue
         _LOGGER.warning(
             "%s is the same speaker as the Music Assistant entity %s. "
-            "An announcement pauses %s, and Music Assistant then stops "
-            "its group. Target %s instead",
-            entity_id, twin, entity_id, twin,
+            "An announcement on it goes around Music Assistant, which "
+            "either stops the speaker's group or leaves the speaker "
+            "silent afterwards. Target %s instead",
+            entity_id, twin, twin,
         )
         raise_repair(
             hass,

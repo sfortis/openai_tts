@@ -188,11 +188,11 @@
     },
     "model_retirement": {
       "title": "Η OpenAI αποσύρει το model ενός TTS agent",
-      "description": "Ο TTS agent `{profile}` χρησιμοποιεί το `{model}`, που η OpenAI σταματά να διαθέτει στις {date}. Μετά από αυτή την ημερομηνία ο agent δεν θα μπορεί να μιλήσει. Η OpenAI προτείνει ως αντικατάσταση το `gpt-realtime-2.1-mini`, αλλά αυτό το model λειτουργεί μέσω του Realtime API της OpenAI, που αυτό το integration δεν χρησιμοποιεί, και η OpenAI δεν έχει ανακοινώσει αντικατάσταση για το speech API της. Μέχρι να το κάνει, σκεφτείτε να μεταφέρετε αυτόν τον agent σε άλλον provider."
+      "description": "Ο TTS agent `{profile}` χρησιμοποιεί το `{model}`, που η OpenAI σταματά να διαθέτει στις {date}. Μετά από αυτή την ημερομηνία ο agent δεν θα μπορεί να μιλήσει.\n\nΗ OpenAI προτείνει ως αντικατάσταση το `gpt-realtime-2.1-mini`, αλλά αυτό το model λειτουργεί μέσω του Realtime API της OpenAI, που αυτό το integration δεν χρησιμοποιεί. Η OpenAI δεν έχει ανακοινώσει αντικατάσταση για το speech API της.\n\nΜέχρι να το κάνει, σκεφτείτε να μεταφέρετε αυτόν τον agent σε άλλον provider."
     },
     "music_assistant_twin": {
       "title": "Ανακοινώσεις σε ηχείο που παίζει και το Music Assistant",
-      "description": "Το `{entity}` είναι το ίδιο ηχείο με το Music Assistant entity `{ma_entity}`. Μια ανακοίνωση στο `{entity}` κάνει pause στο ηχείο, και το Music Assistant το μαθαίνει μόνο μέσω του ηχείου. Αν το ηχείο είναι σε group του Music Assistant, σταματά όλο το group και συνεχίζει μόνο αυτό το ηχείο. Χρησιμοποίησε το `{ma_entity}` στα automations και τα scripts σου. Η προειδοποίηση φεύγει μετά από restart, όταν το `{entity}` δεν χρησιμοποιείται πια για ανακοινώσεις."
+      "description": "Το `{entity}` και το Music Assistant entity `{ma_entity}` είναι το ίδιο ηχείο.\n\nΜια ανακοίνωση στο `{entity}` παρακάμπτει το Music Assistant. Ανάλογα με το ηχείο, συμβαίνει ένα από τα δύο:\n\n- σταματά όλο το group του Music Assistant, ή\n- το ηχείο μένει βουβό μετά, ενώ το Music Assistant το δείχνει ακόμα να παίζει.\n\nΓια να διορθωθεί, χρησιμοποίησε το `{ma_entity}` αντί για το `{entity}` στα automations και τα scripts σου.\n\nΗ προειδοποίηση φεύγει μετά από restart, όταν το `{entity}` δεν χρησιμοποιείται πια για ανακοινώσεις."
     }
   },
   "selector": {
