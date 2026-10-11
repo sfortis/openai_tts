@@ -1,12 +1,8 @@
-## v3.11b2
-
-- Say in the Music Assistant warning that the speaker can also be left silent, not only its group stopped
-- Lay out the Repairs warnings in paragraphs
-
-## v3.11b1
+## v3.11
 
 - Warn in Repairs when an announcement targets a speaker that Music Assistant also plays to, and name the Music Assistant entity to use instead
 - Accept region language tags such as `en-US` and `de-DE`, which Music Assistant and other callers send
+- Lay out the Repairs warnings in paragraphs
 
 ## v3.10.2
 
