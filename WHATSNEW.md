@@ -1,3 +1,7 @@
+## v3.11.1b1
+
+- Show the Music Assistant warning also for announcements made with announce mode off
+
 ## v3.11
 
 - Warn in Repairs when an announcement targets a speaker that Music Assistant also plays to, and name the Music Assistant entity to use instead
