@@ -64,7 +64,7 @@ On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-
 
 ### Version 3.11
 
-- **Music Assistant twin warning**: when an announcement targets a speaker's own entity, such as its Cast or ESPHome entity, and Music Assistant also plays to that speaker, a warning in **Settings > Repairs** names the Music Assistant entity to target instead. See [Choosing the Target Speaker](#choosing-the-target-speaker).
+- **Music Assistant twin warning**: when an `openai_tts.say` announcement targets a speaker's own entity, such as its Cast or ESPHome entity, and Music Assistant also plays to that speaker, a warning in **Settings > Repairs** names the Music Assistant entity to target instead. See [Choosing the Target Speaker](#choosing-the-target-speaker).
 - **Region language tags**: the entity also accepts tags such as `en-US`, `de-DE` and `pt-BR`. Music Assistant and other callers send these, and Home Assistant used to refuse their calls.
 
 ### Version 3.10
@@ -256,7 +256,7 @@ With `response_variable`, an error that happens while the announcement runs is r
 
 Some speakers appear in Home Assistant more than once. A speaker that Music Assistant plays to usually has a Music Assistant entity and a second entity from its own integration, such as ESPHome or Cast. Target the Music Assistant entity. The integration pauses a Cast entity before every announcement, and an ESPHome entity when a volume is given, and Music Assistant only hears about those pauses through the speaker itself. On a speaker in a Music Assistant group, this can stop the whole group. On a Cast speaker, the announcement can also replace Music Assistant's playback on the device, and the speaker then stays silent afterwards while Music Assistant still shows it playing.
 
-In these cases the integration raises a warning in **Settings > Repairs** that names the Music Assistant entity of the same speaker. The warning goes away after a restart once the entity is no longer used for announcements.
+When `openai_tts.say` announces on such an entity, the integration raises a warning in **Settings > Repairs** that names the Music Assistant entity of the same speaker. Announcements made through `tts.speak` or a voice assistant are not checked. The warning goes away after a restart once the entity is no longer used for announcements.
 
 With a volume override on a Music Assistant speaker, the integration hands the level to Music Assistant instead of stopping the speaker and resuming it afterwards, because Music Assistant passes a stop on a grouped speaker on to the whole group. A speaker that plays announcements natively plays it over the group's music. Otherwise Music Assistant takes the speaker out of its group for the announcement and adds it back afterwards, while the rest of the group keeps playing. If the speaker leads the group, or the group cannot change its members, the group stops for the announcement.
 
