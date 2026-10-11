@@ -181,8 +181,9 @@ def warn_music_assistant_twins(
 ) -> None:
     """Warn about targets that Music Assistant also plays to.
 
-    ``entity_ids`` are the targets the manual flow is about to pause or
-    set a volume on. A target whose device matches a Music Assistant
+    ``entity_ids`` are the targets of the managed route that do not
+    announce natively, so Home Assistant plays the announcement on them
+    and may pause them first. A target whose device matches a Music Assistant
     player gets a warning that names the Music Assistant entity to use
     instead. The announcement goes around Music Assistant: a pause
     reaches it only through the speaker and stops the speaker's whole
