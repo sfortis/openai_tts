@@ -24,6 +24,7 @@ from realtime_protocol import (
     clamp_speed,
     error_kind,
     parse_event,
+    redact_keys,
     session_url,
     transcript_matches,
     wrap_text,
@@ -188,3 +189,12 @@ def test_transcript_comparison_catches_missing_words():
         "Did anyone close the garage door?", "Did anyone close the door?"
     )
     assert not transcript_matches("Did anyone close the garage door?", "")
+
+
+def test_key_fragments_are_masked_in_error_messages():
+    assert redact_keys(
+        "Incorrect API key provided: sk-proj-ab12***********cd34. Check it."
+    ) == "Incorrect API key provided: sk-***. Check it."
+    assert redact_keys("Rate limit reached for gpt-realtime-2.1-mini") == (
+        "Rate limit reached for gpt-realtime-2.1-mini"
+    )

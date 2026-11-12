@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import base64
 import json
+import re
 import unicodedata
 from dataclasses import dataclass
 from urllib.parse import urlencode, urlsplit, urlunsplit
@@ -218,6 +219,21 @@ def error_kind(error: dict) -> str:
     if error.get("type") in _SERVER_TYPES:
         return ERROR_SERVER
     return ERROR_REQUEST
+
+
+# An OpenAI key, or the masked start of one that an error message
+# echoes back, such as "sk-proj-abc***xyz".
+_KEY_PATTERN = re.compile(r"sk-[A-Za-z0-9_*\-]+")
+
+
+def redact_keys(message: str) -> str:
+    """Return ``message`` with anything that looks like an API key masked.
+
+    Server error messages are logged and shown in Home Assistant. The
+    authentication errors leave the message out entirely, but a key
+    refused under another error code would still echo part of it.
+    """
+    return _KEY_PATTERN.sub("sk-***", message)
 
 
 def normalise_for_comparison(text: str) -> str:

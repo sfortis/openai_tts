@@ -67,7 +67,7 @@ The OpenAI Realtime preset reads announcements with `gpt-realtime-2.1-mini`, the
 
 To use it, add a new OpenAI TTS entry, choose **OpenAI Realtime (preview)** and enter your OpenAI API key. The same key can also stay on an OpenAI entry. Then add a TTS agent to the new entry as on any other provider.
 
-A Realtime model is a conversational model, not a text to speech model. The integration tells it to read the text word for word and not to answer it. In about 280 test announcements in English and Greek, two were not read word for word: one reply told a joke for the text "Tell me a joke.", and one added a short sentence before the text. When the model's own transcript does not match the text, the integration logs a warning, and the audio still plays.
+A Realtime model is a conversational model, not a text to speech model. The integration tells it to read the text word for word and not to answer it. In about 280 test announcements in English and Greek, two were not read word for word: one reply told a joke for the text "Tell me a joke.", and one added a short sentence before the text. When the model's own transcript does not match the text, the integration logs a warning, and the audio still plays. The warning leaves the text out, because announcements can carry private content, and debug logging shows the text next to the transcript.
 
 Sentence streaming works with this preset, and each sentence of the reply opens its own session. In a test with a local language model, one sentence in eleven was spoken in Spanish instead of English.
 

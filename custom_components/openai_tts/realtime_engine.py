@@ -51,6 +51,7 @@ from .realtime_protocol import (
     clamp_speed,
     error_kind,
     parse_event,
+    redact_keys,
     session_url,
     transcript_matches,
 )
@@ -95,7 +96,9 @@ def _error_from_server(error: dict) -> OpenAITTSError:
         return OpenAIAuthError(
             "Realtime authentication failed. Check your API key."
         )
-    message = str(error.get("message") or error.get("code") or "unknown error")
+    message = redact_keys(
+        str(error.get("message") or error.get("code") or "unknown error")
+    )
     if kind == ERROR_QUOTA:
         return OpenAIQuotaExceededError(f"Realtime quota exhausted: {message}")
     if kind == ERROR_RATE_LIMIT:
@@ -338,8 +341,16 @@ class OpenAIRealtimeEngine:
 
         spoken = "".join(transcript)
         if not transcript_matches(text, spoken):
+            # The warning leaves the words out, because an announcement
+            # can carry private content and warnings reach the log
+            # without debug logging. The words follow at debug level.
             _LOGGER.warning(
-                "The Realtime model did not read the text word for word. "
+                "The Realtime model did not read the text word for word: "
+                "%d words in the text, %d spoken. Turn on debug logging "
+                "to see both",
+                len(text.split()), len(spoken.split()),
+            )
+            _LOGGER.debug(
                 "Text: %r. Spoken: %r",
                 text[:_LOG_TEXT_CHARS], spoken[:_LOG_TEXT_CHARS],
             )

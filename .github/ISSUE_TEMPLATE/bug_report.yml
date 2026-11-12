@@ -107,7 +107,7 @@ body:
     attributes:
       label: Debug log
       description: |
-        Turn on debug logging, reproduce the problem and paste the lines that name `openai_tts`. With the OpenAI Realtime preview, include any line that says the model did not read the text word for word.
+        Turn on debug logging, reproduce the problem and paste the lines that name `openai_tts`. With the OpenAI Realtime preview, include any line that says the model did not read the text word for word. Debug lines contain the text of your announcements, so remove anything private before you paste them.
 
         ```yaml
         logger:
