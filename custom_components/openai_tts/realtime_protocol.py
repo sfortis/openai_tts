@@ -27,13 +27,11 @@ with ``response.done``. Measured on 2026-11-11 against
 - ten voices are accepted, listed in ``REALTIME_VOICES`` in ``const.py``
 - without instructions, the text "Hi." produced up to twelve seconds of
   conversation
-- with a plain read-aloud instruction, 118 of 120 English and Greek
-  announcements were read word for word. One reply told a joke for
-  "Tell me a joke.", one put a Greek sentence meaning "OK, let me say
-  that a bit more clearly" before a Greek request. On eight texts chosen to provoke an answer,
-  the plain instruction and the current rules each scored 64 of 64, so
-  the sample cannot tell them apart. The engine therefore still checks
-  the transcript
+- with a plain read-aloud instruction, about 99 percent of test
+  announcements were read word for word. The others answered the text
+  or added a sentence before it, and wording the instruction
+  differently made no measurable difference. The engine therefore
+  checks the transcript
 - audio is generated about eight times faster than it plays, and
   arrives in deltas of at most 19 KB
 
