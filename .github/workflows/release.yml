@@ -36,6 +36,23 @@ jobs:
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "prerelease=$prerelease" >> "$GITHUB_OUTPUT"
 
+      - name: Check release notes
+        # WHATSNEW.md holds the notes of the current release only, and
+        # the whole file becomes the release description. Refuse a file
+        # that still carries an older section or lacks this version.
+        run: |
+          expected="## v${{ steps.version.outputs.version }}"
+          if [ ! -f WHATSNEW.md ]; then
+            echo "::error::WHATSNEW.md is missing"
+            exit 1
+          fi
+          headings=$(grep '^## ' WHATSNEW.md || true)
+          if [ "$headings" != "$expected" ]; then
+            echo "::error::WHATSNEW.md must contain exactly one section, '$expected'. Found:"
+            echo "$headings"
+            exit 1
+          fi
+
       - name: Build release zip
         # HACS counts downloads only when the integration is delivered as
         # a release asset (matching ``filename`` in ``hacs.json``).
@@ -63,15 +80,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          flags=(--title "v${{ steps.version.outputs.version }}")
-          # Prefer WHATSNEW.md when present so the description reads as
-          # human-curated release notes; fall back to GitHub's auto
-          # commit-based notes otherwise.
-          if [ -f WHATSNEW.md ]; then
-            flags+=(--notes-file WHATSNEW.md)
-          else
-            flags+=(--generate-notes)
-          fi
+          flags=(--title "v${{ steps.version.outputs.version }}" --notes-file WHATSNEW.md)
           if [ "${{ steps.version.outputs.prerelease }}" = "true" ]; then
             flags+=(--prerelease)
           fi
