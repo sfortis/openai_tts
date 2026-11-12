@@ -344,7 +344,7 @@ failed check raises an error instead of returning a response.
 
 ## Troubleshooting
 
-Turn on debug logging for the integration to see each request to the provider, which speakers are paused and how the volume is set and restored:
+Turn on debug logging for the integration to see each request to the provider, which speakers are paused and how the volume is set and restored. Open **Settings > Devices & services > OpenAI TTS**, open the ⋮ menu and choose **Enable debug logging**. Reproduce the problem, then choose **Disable debug logging** in the same menu, and Home Assistant downloads the log file. To keep debug logging on across restarts, add this to `configuration.yaml` instead:
 
 ```yaml
 logger:

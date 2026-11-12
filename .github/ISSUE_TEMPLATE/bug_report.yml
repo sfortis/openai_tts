@@ -107,13 +107,12 @@ body:
     attributes:
       label: Debug log
       description: |
-        Turn on debug logging, reproduce the problem and paste the lines that name `openai_tts`. With the OpenAI Realtime preview, include any line that says the model did not read the text word for word. Debug lines contain the text of your announcements, so remove anything private before you paste them.
+        1. Open Settings > Devices & services > OpenAI TTS, open the ⋮ menu and choose **Enable debug logging**.
+        2. Reproduce the problem.
+        3. Choose **Disable debug logging** in the same menu. Home Assistant then downloads the log file.
+        4. Paste the lines that name `openai_tts` here.
 
-        ```yaml
-        logger:
-          logs:
-            custom_components.openai_tts: debug
-        ```
+        With the OpenAI Realtime preview, include any line that says the model did not read the text word for word. Debug lines contain the text of your announcements, so remove anything private before you paste them.
       render: text
 
   - type: textarea
