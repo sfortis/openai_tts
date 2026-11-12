@@ -37,11 +37,12 @@ OpenAI TTS is a text-to-speech integration for Home Assistant that works with an
 
 ## Supported Providers
 
-Each integration entry starts from a preset. The preset fills in the endpoint, offers the models the provider is known to serve and decides where the voice list comes from. It hides the speed slider on Mistral, which rejects it, and on Groq, which ignores it. It shows the extra payload field only on the Custom and Chatterbox presets, and it limits the audio formats on Groq, Chatterbox and OpenRouter. The model field also accepts a typed model name on every preset.
+Each integration entry starts from a preset. The preset fills in the endpoint, offers the models the provider is known to serve and decides where the voice list comes from. It hides the speed slider on Mistral, which rejects it, and on Groq, which ignores it, and it stops the slider at 1.5 on OpenAI Realtime. It shows the extra payload field only on the Custom and Chatterbox presets, and it limits the audio formats on Groq, Chatterbox, OpenRouter and OpenAI Realtime. The model field also accepts a typed model name on every preset.
 
 | Provider | Where it runs | Voices in the picker | API key |
 |---|---|---|---|
 | OpenAI | Cloud | OpenAI's voices, filtered by model | Required |
+| OpenAI Realtime (preview) | Cloud | The ten voices of OpenAI's Realtime models | Required |
 | Mistral Voxtral | Cloud | The voices on your account, read live, up to a hundred | Required |
 | Groq (Orpheus) | Cloud | Six English Orpheus voices from a fixed list, or a typed name such as an Arabic voice | Required |
 | Lemonfox.ai (Kokoro) | Cloud | The English voices Lemonfox documents, from a fixed list, or a typed Kokoro voice name | Required |
@@ -54,13 +55,42 @@ The names are shortened from the labels in the provider list.
 
 The **Custom** preset covers every other server that implements the OpenAI speech endpoint, such as LocalAI, pocket-tts or TTS Web UI. When the server publishes no voice list, the voice field is a text field that takes any name the backend understands. When it does publish one, the picker shows that list, and it also takes a typed name when the list holds plain names. The **audio format** selector helps with a backend that rejects mp3, and the **extra payload** field sends backend-specific JSON parameters with each request.
 
-Speech is always requested through the OpenAI speech API. Voice and model lists are read from a provider's own listing endpoint where one exists. A provider that offers speech only through a different API of its own is not supported.
+Speech is requested through the OpenAI speech API, except on the OpenAI Realtime preset, which uses OpenAI's Realtime API and is described below. Voice and model lists are read from a provider's own listing endpoint where one exists. A provider that offers speech only through a different API of its own is not supported.
 
 On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-mini-tts` also takes speaking-style instructions. The voices are `alloy`, `ash`, `coral`, `echo`, `fable`, `nova`, `onyx`, `sage` and `shimmer`, and `gpt-4o-mini-tts` adds `ballad`, `cedar`, `marin` and `verse`.
 
-> **OpenAI is retiring all three models.** OpenAI announced on 1 October 2026 that `tts-1`, `tts-1-hd` and every snapshot of `gpt-4o-mini-tts` stop working on 6 January 2027 ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)). The replacement OpenAI recommends, `gpt-realtime-2.1-mini`, runs on its Realtime API, which this integration does not use, and OpenAI has not announced a replacement for its speech API. Unless it does, OpenAI profiles stop speaking on that date, and moving them to another provider is the way to keep them working. Every profile that calls OpenAI with one of these models raises a warning in **Settings > Repairs** two weeks before the shutdown, from 23 December 2026. Profiles on other providers are not affected, including self-hosted servers that accept `tts-1` as a model name.
+> **OpenAI is retiring all three models.** OpenAI announced on 1 October 2026 that `tts-1`, `tts-1-hd` and every snapshot of `gpt-4o-mini-tts` stop working on 6 January 2027 ([OpenAI deprecations](https://developers.openai.com/api/docs/deprecations)). The replacement OpenAI recommends, `gpt-realtime-2.1-mini`, runs on its Realtime API, and OpenAI has not announced a replacement for its speech API. OpenAI profiles therefore stop speaking on that date. To keep them working, move them to the [OpenAI Realtime preset](#openai-realtime-preview) or to another provider. Every profile that calls OpenAI with one of these models raises a warning in **Settings > Repairs** two weeks before the shutdown, from 23 December 2026. Profiles on other providers are not affected, including self-hosted servers that accept `tts-1` as a model name.
+
+### OpenAI Realtime (preview)
+
+The OpenAI Realtime preset reads announcements with `gpt-realtime-2.1-mini`, the model OpenAI names as the replacement for its speech models. The preset also offers `gpt-realtime-2.1`, `gpt-realtime-2` and `gpt-realtime-1.5`. These models are served only over OpenAI's Realtime API, so each announcement opens its own Realtime session and closes it when the audio has arrived.
+
+To use it, add a new OpenAI TTS entry, choose **OpenAI Realtime (preview)** and enter your OpenAI API key. The same key can also stay on an OpenAI entry. Then add a TTS agent to the new entry as on any other provider.
+
+A Realtime model is a conversational model, not a text to speech model. The integration tells it to read the text word for word and not to answer it. In about 280 test announcements in English and Greek, two were not read word for word: one reply told a joke for the text "Tell me a joke.", and one added a short sentence before the text. When the model's own transcript does not match the text, the integration logs a warning, and the audio still plays.
+
+Sentence streaming works with this preset, and each sentence of the reply opens its own session. In a test with a local language model, one sentence in eleven was spoken in Spanish instead of English.
+
+The preset differs from the OpenAI preset in these ways:
+
+- The voices are `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer` and `verse`. The voices `fable`, `nova` and `onyx` are not available.
+- The audio format is `pcm` only, because the Realtime API produces nothing else.
+- The speed goes from 0.25 to 1.5. A higher speed in an `openai_tts.say` call is reduced to 1.5.
+- Voice instructions are accepted on every Realtime model and describe the delivery, not the words.
+- The first audio arrives about 1.5 seconds after the request, of which about one second is the setup of the session.
+- The audio cost about $0.024 per minute on `gpt-realtime-2.1-mini` in our measurements.
+
+The preset is a preview, so its models, defaults and limits may change in a later release. Feedback is welcome, including reports that it works well: open a [bug report](https://github.com/sfortis/openai_tts/issues/new?template=bug_report.yml) and choose **OpenAI Realtime (preview)** as the provider.
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
+
+### Version 3.12
+
+- **OpenAI Realtime preset (preview)**: reads announcements with `gpt-realtime-2.1-mini`, the replacement OpenAI names for the speech models it retires on 6 January 2027. See [OpenAI Realtime (preview)](#openai-realtime-preview). It is a preview, and feedback is welcome in a [bug report](https://github.com/sfortis/openai_tts/issues/new?template=bug_report.yml).
+- **The OpenAI retirement warning** in **Settings > Repairs** now explains how to move a profile to the Realtime preset.
+- **The Music Assistant twin warning** is also raised for announcements made with announce mode off.
+- **The same API key on two entries**: an entry can use a key that another entry already uses with a different endpoint.
+- **Fewer refused pcm clips**: a valid `pcm` clip was sometimes refused as an error response, and the announcement failed.
 
 ### Version 3.11
 
@@ -126,7 +156,7 @@ does while an announcement is playing.
 ### Speech
 
 - Several TTS agents under one entry, each with its own model, voice, speed, audio format and audio processing.
-- Audio in `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, chosen per profile. Some providers accept fewer formats, and the selector then offers only those: Groq accepts `wav`, Chatterbox accepts `mp3`, `opus` and `wav`, and OpenRouter accepts `mp3` and `pcm`.
+- Audio in `mp3`, `opus`, `aac`, `flac`, `wav` or `pcm`, chosen per profile. Some providers accept fewer formats, and the selector then offers only those: Groq accepts `wav`, Chatterbox accepts `mp3`, `opus` and `wav`, OpenRouter accepts `mp3` and `pcm`, and OpenAI Realtime accepts `pcm`.
 - Streaming playback, so audio plays as it arrives instead of after the whole clip is written. Streaming works with `mp3`, `opus`, `aac` and `pcm`. A `wav` or `flac` file states its length in a header before any audio exists, so those two formats are always assembled in full first. A chime, or the **Stream the audio** switch turned off, also makes the integration assemble the whole clip before playback starts.
 - Sentence streaming for the voice assistant, off by default and set per profile. When the conversation agent streams its reply, speech starts on the first finished sentence rather than on the finished reply. It needs `mp3` or `pcm`, and the profile form refuses it together with a chime or with another format.
 - Loudness normalisation, on by default. It runs on the stream for `mp3`, `opus`, `aac` and `pcm`. For `wav` and `flac`, and whenever a chime is added, it runs on the finished clip instead.
@@ -175,9 +205,9 @@ Each integration entry stores the provider, the endpoint and the API key. Add on
 
 - **Profile name**, which also names the TTS entity.
 - **Model** and **voice**. On OpenAI the voice list follows the model.
-- **Speed**, from 0.25 to 4.0. It is hidden on Mistral, which rejects the field, and on Groq, which ignores it.
-- **Audio format**, `mp3` by default (`wav` on Groq), limited to what the provider accepts.
-- **Voice instructions** for speaking style, shown only when the model is `gpt-4o-mini-tts`.
+- **Speed**, from 0.25 to 4.0, or to 1.5 on OpenAI Realtime. It is hidden on Mistral, which rejects the field, and on Groq, which ignores it.
+- **Audio format**, `mp3` by default (`wav` on Groq, `pcm` on OpenAI Realtime), limited to what the provider accepts.
+- **Voice instructions** for speaking style, shown only when the model is `gpt-4o-mini-tts` or a Realtime model.
 - **Extra JSON payload** for backend-specific parameters, on the Custom and Chatterbox presets.
 - **Chime**, **chime sound** and **normalise audio** as defaults that the service call can override.
 - **Gain**, from -12 to +12 dB, applied with or without normalisation.
@@ -310,6 +340,7 @@ failed check raises an error instead of returning a response.
 - The language of a call is not sent to the provider. The provider speaks the language the message is written in.
 - An OpenAI message longer than 4096 characters is refused by `openai_tts.say`. `tts.speak` and the voice assistant do not check this.
 - Mistral voice lists are read up to a hundred voices.
+- An OpenAI Realtime model can occasionally add words to the text, answer it or translate it instead of reading it. The integration logs a warning when that happens, but it cannot stop the audio.
 
 ## Troubleshooting
 
@@ -329,7 +360,9 @@ When you open an issue, attach the diagnostics file from *Settings → Devices &
 
 ## Contributing
 
-Bug reports, backend reports and pull requests are all welcome. Pull
+Bug reports, backend reports and pull requests are all welcome. Open an
+issue with the **Bug report** or **Feature request** form, and ask questions
+in [Discussions](https://github.com/sfortis/openai_tts/discussions). Pull
 requests target the `dev` branch. For anything larger than a small fix, open
 an issue or a discussion first, so that the approach can be agreed before you
 write the code. [CONTRIBUTING.md](CONTRIBUTING.md) has the details.
@@ -339,4 +372,4 @@ in an issue is useful on its own, even without a patch.
 
 ## API Keys and Costs
 
-Cloud providers need an API key, and on paid providers the account needs available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>. The entry's API status sensor shows `quota_exceeded` when the provider reports that the balance has run out.
+Cloud providers need an API key, and on paid providers the account needs available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>. The OpenAI Realtime preset is billed as audio output of the Realtime model, which came to about $0.024 per minute of speech on `gpt-realtime-2.1-mini`. The entry's API status sensor shows `quota_exceeded` when the provider reports that the balance has run out.

@@ -15,6 +15,8 @@ from typing import Any
 from homeassistant.const import CONF_API_KEY as CONF_API_KEY
 from homeassistant.const import CONF_URL as CONF_URL
 
+from .realtime_protocol import SPEED_MAX as REALTIME_SPEED_MAX
+
 DOMAIN = "openai_tts"
 CONF_MODEL = "model"
 CONF_VOICE = "voice"
@@ -46,6 +48,12 @@ DEFAULT_SEND_VOICE = True
 CONF_PROVIDER = "provider"  # provider preset key, e.g. "openai", "mistral", "custom"
 DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 
+# The speed range of the profile slider, which is what OpenAI's speech
+# endpoint accepts. A preset whose backend accepts less sets
+# ``speed_max``.
+SPEED_MIN = 0.25
+SPEED_MAX = 4.0
+
 # Provider presets shown in the parent-entry config flow as a single
 # dropdown so a user picks "OpenAI" / "Mistral" / "Custom" instead of
 # typing the right URL, voice-field name, and audio_format defaults
@@ -59,7 +67,10 @@ DEFAULT_URL = "https://api.openai.com/v1/audio/speech"
 # engine reads none of it; request shaping there is provider-agnostic.
 # Add new providers by
 # extending this dict; nothing else in the codebase should need a
-# branch on the provider key.
+# branch on the provider key. The one exception is ``engine``: a preset
+# that sets it to ``ENGINE_REALTIME`` is served by ``realtime_engine``
+# instead of the speech endpoint client, and ``tts.py`` reads it to pick
+# the engine.
 PROVIDER_OPENAI = "openai"
 PROVIDER_MISTRAL = "mistral"
 PROVIDER_GROQ = "groq"
@@ -67,8 +78,27 @@ PROVIDER_LEMONFOX = "lemonfox"
 PROVIDER_KOKORO = "kokoro"
 PROVIDER_CHATTERBOX = "chatterbox"
 PROVIDER_OPENROUTER = "openrouter"
+PROVIDER_OPENAI_REALTIME = "openai_realtime"
 PROVIDER_CUSTOM = "custom"
 DEFAULT_PROVIDER = PROVIDER_OPENAI
+
+# Value of a preset's ``engine`` key for the Realtime engine. A preset
+# without the key uses the speech endpoint.
+ENGINE_REALTIME = "realtime"
+
+# Models of the Realtime API, newest and cheapest first. The voices were
+# measured on 2026-11-11: the session refuses ``fable``, ``nova`` and
+# ``onyx`` and names these ten.
+REALTIME_MODELS = [
+    "gpt-realtime-2.1-mini",
+    "gpt-realtime-2.1",
+    "gpt-realtime-2",
+    "gpt-realtime-1.5",
+]
+REALTIME_VOICES = [
+    "alloy", "ash", "ballad", "cedar", "coral", "echo", "marin", "sage",
+    "shimmer", "verse",
+]
 
 PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
     PROVIDER_OPENAI: {
@@ -373,6 +403,36 @@ PROVIDER_PRESETS: dict[str, dict[str, Any]] = {
         "supports_voice_listing": True,
     },
 
+    PROVIDER_OPENAI_REALTIME: {
+        # OpenAI's own replacement for the speech models it retires on
+        # 2027-01-06, served over a Realtime session instead of
+        # ``/v1/audio/speech``. See ``realtime_protocol`` for what was
+        # measured. A prototype: whether the model reads every text word
+        # for word is what it exists to find out.
+        "label": "OpenAI Realtime (preview)",
+        "title_name": "OpenAI Realtime",
+        "self_hosted": False,
+        "title_shows_host": False,
+        "engine": ENGINE_REALTIME,
+        "url": "wss://api.openai.com/v1/realtime",
+        "default_model": "gpt-realtime-2.1-mini",
+        "model_catalog": REALTIME_MODELS,
+        "default_format": "pcm",
+        # The voices come from ``VOICES_BY_MODEL``, as on OpenAI.
+        "voice_catalog": None,
+        "requires_api_key": True,
+        # The Realtime API sends 24 kHz pcm and nothing else.
+        "allowed_formats": ["pcm"],
+        "max_text_length": 4096,
+        "supports_streaming": True,
+        # The Realtime API refuses a speed above 1.5. The engine also
+        # clamps it, for an ``openai_tts.say`` override up to 4.0.
+        "supports_speed": True,
+        "speed_max": REALTIME_SPEED_MAX,
+        "supports_extra_payload": False,
+        "supports_voice_listing": False,
+    },
+
     PROVIDER_CUSTOM: {
         # Catch-all preset for any OpenAI-compatible TTS endpoint we
         # don't have a dedicated preset for. Covers self-hosted servers
@@ -468,17 +528,19 @@ VOICES_BY_MODEL: dict[str, list[str]] = {
     "tts-1": _LEGACY_TTS_VOICES,
     "tts-1-hd": _LEGACY_TTS_VOICES,
     "gpt-4o-mini-tts": VOICES,  # 13 voices, supports all
+    **dict.fromkeys(REALTIME_MODELS, REALTIME_VOICES),
 }
 
-# Models that accept the OpenAI ``instructions`` parameter on the
-# speech endpoint. Today only ``gpt-4o-mini-tts``; ``tts-1`` /
+# Models that accept the OpenAI ``instructions`` parameter: on the
+# speech endpoint only ``gpt-4o-mini-tts``, and every Realtime model,
+# where the engine appends them to its own read-aloud rule. ``tts-1`` /
 # ``tts-1-hd`` ignore the field, and other providers (Mistral
 # Voxtral, Groq Orpheus, ...) don't speak this dialect at all -
 # Orpheus has its own bracketed vocal-direction syntax in the
 # ``input`` text instead. The config flow uses this set to show
 # the instructions input only on supported models so users don't
 # fill in a field that the backend will silently drop.
-INSTRUCTIONS_MODELS: frozenset[str] = frozenset({"gpt-4o-mini-tts"})
+INSTRUCTIONS_MODELS: frozenset[str] = frozenset({"gpt-4o-mini-tts", *REALTIME_MODELS})
 
 
 def model_supports_instructions(model: str | None) -> bool:
@@ -528,23 +590,25 @@ def voices_for_model(model: str | None) -> list[str]:
     return VOICES_BY_MODEL.get(model, VOICES)
 
 
-# Human-readable suffixes shown in voice pickers so users can spot at
-# a glance which voices need ``gpt-4o-mini-tts`` and which two are
-# OpenAI's "best quality" recommendation.
+# Human-readable suffixes shown in voice pickers, including which two
+# are OpenAI's "best quality" recommendation. They no longer say which
+# model a voice needs: every picker that uses them is already filtered
+# through ``voices_for_model``, and "gpt-4o-mini-tts only" was wrong on
+# the Realtime models, which take most of the same voices.
 _VOICE_DESCRIPTIONS: dict[str, str] = {
     "alloy": "Neutral",
     "ash": "Calm",
-    "ballad": "Warm · gpt-4o-mini-tts only",
-    "cedar": "Recommended · gpt-4o-mini-tts only",
+    "ballad": "Warm",
+    "cedar": "Recommended",
     "coral": "Friendly",
     "echo": "Smooth",
     "fable": "Expressive",
-    "marin": "Recommended · gpt-4o-mini-tts only",
+    "marin": "Recommended",
     "nova": "Energetic",
     "onyx": "Authoritative",
     "sage": "Thoughtful",
     "shimmer": "Gentle",
-    "verse": "Versatile · gpt-4o-mini-tts only",
+    "verse": "Versatile",
 }
 
 

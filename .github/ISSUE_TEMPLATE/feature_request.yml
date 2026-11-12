@@ -1,0 +1,53 @@
+name: Feature request
+description: Suggest a new feature or a change to an existing one.
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [existing issues](https://github.com/sfortis/openai_tts/issues) first. For a larger change, a [discussion](https://github.com/sfortis/openai_tts/discussions) is a good place to agree on the approach before anyone writes code.
+
+        The integration speaks the OpenAI speech API, and OpenAI's own Realtime API through the OpenAI Realtime preset. A server that offers speech only through an API of its own is not supported.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What you are trying to do, and what stops you today.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: How you would like it to work.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives you considered
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider it concerns
+      options:
+        - Any provider
+        - OpenAI
+        - OpenAI Realtime (preview)
+        - Mistral Voxtral
+        - Groq (Orpheus)
+        - Lemonfox.ai (Kokoro)
+        - OpenRouter
+        - Kokoro-FastAPI
+        - Chatterbox
+        - Custom
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links to the provider's documentation, examples or screenshots.

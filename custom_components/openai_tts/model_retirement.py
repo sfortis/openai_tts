@@ -6,8 +6,9 @@ unit tested without a Home Assistant installation.
 On 2026-10-01 OpenAI announced that ``tts-1``, ``tts-1-hd`` and every
 snapshot of ``gpt-4o-mini-tts`` stop working on 2027-01-06. Its
 recommended replacement, ``gpt-realtime-2.1-mini``, runs on the Realtime
-API, which this integration does not use, and no replacement model was
-announced for the speech endpoint.
+API, and no replacement model was announced for the speech endpoint.
+The warning points users to the "OpenAI Realtime (preview)" preset,
+served by ``realtime_engine``.
 
 The warning appears ``WARNING_LEAD`` before the shutdown and stays after
 it, because from then on the profile no longer speaks. Raising it on the

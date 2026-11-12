@@ -23,6 +23,7 @@ from a wrong address, and the caller decides what that is worth.
 from __future__ import annotations
 
 import logging
+from urllib.parse import urlsplit, urlunsplit
 
 import aiohttp
 from homeassistant.core import HomeAssistant
@@ -56,6 +57,22 @@ _KEY_ACCEPTED_STATUSES = frozenset({400, 422})
 
 _TIMEOUT_S = 10
 
+# A Realtime endpoint is a WebSocket, which cannot take the probe. Its
+# sibling ``client_secrets`` answers the same way the speech endpoint
+# does, measured on 2026-11-11: 401 for a bad key and 400 for a good one
+# with a body it does not understand, so nothing is created.
+_WEBSOCKET_SCHEMES = {"wss": "https", "ws": "http"}
+
+
+def probe_url_for(url: str) -> str:
+    """Return the URL the key probe is sent to for endpoint ``url``."""
+    parts = urlsplit(url)
+    scheme = _WEBSOCKET_SCHEMES.get(parts.scheme)
+    if scheme is None:
+        return url
+    path = parts.path.rstrip("/") + "/client_secrets"
+    return urlunsplit((scheme, parts.netloc, path, "", ""))
+
 
 async def async_validate_api_key(
     hass: HomeAssistant, api_key: str, url: str, model: str | None = None
@@ -74,7 +91,7 @@ async def async_validate_api_key(
     session = async_get_clientsession(hass)
     try:
         async with session.post(
-            url,
+            probe_url_for(url),
             json={**_PROBE_PAYLOAD, "model": model or _PROBE_MODEL},
             headers=headers,
             timeout=aiohttp.ClientTimeout(total=_TIMEOUT_S),

@@ -64,6 +64,8 @@ from .const import (
     PROVIDER_CUSTOM,
     PROVIDER_OPENAI,
     PROVIDER_PRESETS,
+    SPEED_MAX,
+    SPEED_MIN,
     UNIQUE_ID,
     audio_format_options_for,
     is_openai_endpoint,
@@ -93,6 +95,23 @@ def _gain_selector() -> Any:
             "max": GAIN_DB_MAX,
             "step": GAIN_DB_STEP,
             "unit_of_measurement": "dB",
+            "mode": "slider",
+        }
+    })
+
+
+def _speed_max(preset: dict[str, Any]) -> float:
+    """The highest speed the preset's backend accepts."""
+    return float(preset.get("speed_max", SPEED_MAX))
+
+
+def _speed_selector(preset: dict[str, Any]) -> Any:
+    """The speed slider shared by the create and the reconfigure forms."""
+    return selector({
+        "number": {
+            "min": SPEED_MIN,
+            "max": _speed_max(preset),
+            "step": 0.05,
             "mode": "slider",
         }
     })
@@ -283,8 +302,15 @@ class OpenAITTSConfigFlow(ConfigFlow, domain=DOMAIN):
                 # Generate unique ID
                 import hashlib
                 if api_key:
-                    # Use API key hash for unique ID
-                    api_key_hash = hashlib.sha256(api_key.encode()).hexdigest()[:16]
+                    # Hash the key together with the endpoint. A hash of
+                    # the key alone aborted a second entry that uses the
+                    # same key at another endpoint, which the duplicate
+                    # check above deliberately allows: one OpenAI key
+                    # serves both the speech preset and the Realtime one.
+                    # Entries created earlier keep the unique ID they have.
+                    api_key_hash = hashlib.sha256(
+                        f"{api_key}\n{api_url}".encode()
+                    ).hexdigest()[:16]
                     unique_id = f"openai_tts_{api_key_hash}"
                 else:
                     # Use URL hash for custom endpoints without API key
@@ -924,9 +950,7 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # Either way the slider is misleading on those backends, so
         # the preset gates it.
         if preset.get("supports_speed", True):
-            step2_fields[vol.Optional(CONF_SPEED, default=1.0)] = selector({
-                "number": {"min": 0.25, "max": 4.0, "step": 0.05, "mode": "slider"}
-            })
+            step2_fields[vol.Optional(CONF_SPEED, default=1.0)] = _speed_selector(preset)
         # ``instructions`` only goes on the wire for models that
         # actually accept it (gpt-4o-mini-tts today). Hiding the field
         # for the others keeps the form honest - and stops users
@@ -1238,11 +1262,14 @@ class OpenAITTSProfileSubentryFlow(ConfigSubentryFlow):
         # harmless on the request side because the engine drops
         # ``speed=1.0`` from the payload anyway.
         if preset.get("supports_speed", True):
+            # A saved speed above the preset's maximum is shown at the
+            # maximum, which is also what the engine sends.
+            speed_default = min(
+                float(existing_data.get(CONF_SPEED, 1.0)), _speed_max(preset)
+            )
             step2_fields[
-                vol.Optional(CONF_SPEED, default=existing_data.get(CONF_SPEED, 1.0))
-            ] = selector({
-                "number": {"min": 0.25, "max": 4.0, "step": 0.05, "mode": "slider"}
-            })
+                vol.Optional(CONF_SPEED, default=speed_default)
+            ] = _speed_selector(preset)
         if model_supports_instructions(self._step1_model):
             step2_fields[
                 vol.Optional(

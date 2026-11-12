@@ -1,0 +1,131 @@
+name: Bug report
+description: Something does not work as documented, including feedback on the OpenAI Realtime preview.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [Troubleshooting](https://github.com/sfortis/openai_tts#troubleshooting) section of the README and the [existing issues](https://github.com/sfortis/openai_tts/issues) first. Questions belong in [Discussions](https://github.com/sfortis/openai_tts/discussions).
+
+        Feedback on the **OpenAI Realtime (preview)** provider is welcome here, including reports that it works. Choose it as the provider below.
+
+  - type: input
+    id: version
+    attributes:
+      label: Integration version
+      description: Shown in HACS, or in `manifest.json`.
+      placeholder: "3.12"
+    validations:
+      required: true
+
+  - type: input
+    id: ha_version
+    attributes:
+      label: Home Assistant version
+      description: Shown in Settings > About.
+      placeholder: "2026.11.1"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - OpenAI
+        - OpenAI Realtime (preview)
+        - Mistral Voxtral
+        - Groq (Orpheus)
+        - Lemonfox.ai (Kokoro)
+        - OpenRouter
+        - Kokoro-FastAPI
+        - Chatterbox
+        - Custom
+    validations:
+      required: true
+
+  - type: input
+    id: model_voice
+    attributes:
+      label: Model and voice
+      placeholder: "gpt-realtime-2.1-mini, marin"
+
+  - type: dropdown
+    id: audio_format
+    attributes:
+      label: Audio format of the TTS agent
+      options:
+        - mp3
+        - opus
+        - aac
+        - flac
+        - wav
+        - pcm
+
+  - type: dropdown
+    id: trigger
+    attributes:
+      label: How the speech was requested
+      multiple: true
+      options:
+        - openai_tts.say
+        - tts.speak
+        - Voice assistant (Assist)
+        - Other
+
+  - type: input
+    id: speakers
+    attributes:
+      label: Target speakers
+      description: The media player and the integration it belongs to, for example Sonos, Google Cast, Music Assistant or ESPHome.
+      placeholder: "media_player.kitchen (Music Assistant)"
+
+  - type: textarea
+    id: what_happened
+    attributes:
+      label: What happened
+      description: For the OpenAI Realtime preview, also say which language the text was in, and whether the speech matched the text.
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What you expected
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: The action call or automation that triggers the problem, with the API key removed.
+      render: yaml
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Debug log
+      description: |
+        Turn on debug logging, reproduce the problem and paste the lines that name `openai_tts`. With the OpenAI Realtime preview, include any line that says the model did not read the text word for word.
+
+        ```yaml
+        logger:
+          logs:
+            custom_components.openai_tts: debug
+        ```
+      render: text
+
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Diagnostics file
+      description: Settings > Devices & services > OpenAI TTS > ⋮ > Download diagnostics, for the entry that has the problem. Drag the file here.
+
+  - type: checkboxes
+    id: secrets
+    attributes:
+      label: Secrets
+      options:
+        - label: I removed API keys and any other secret from everything above.
+          required: true

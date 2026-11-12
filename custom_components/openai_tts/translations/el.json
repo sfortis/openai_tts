@@ -188,7 +188,7 @@
     },
     "model_retirement": {
       "title": "Η OpenAI αποσύρει το model ενός TTS agent",
-      "description": "Ο TTS agent `{profile}` χρησιμοποιεί το `{model}`, που η OpenAI σταματά να διαθέτει στις {date}. Μετά από αυτή την ημερομηνία ο agent δεν θα μπορεί να μιλήσει.\n\nΗ OpenAI προτείνει ως αντικατάσταση το `gpt-realtime-2.1-mini`, αλλά αυτό το model λειτουργεί μέσω του Realtime API της OpenAI, που αυτό το integration δεν χρησιμοποιεί. Η OpenAI δεν έχει ανακοινώσει αντικατάσταση για το speech API της.\n\nΜέχρι να το κάνει, σκεφτείτε να μεταφέρετε αυτόν τον agent σε άλλον provider."
+      "description": "Ο TTS agent `{profile}` χρησιμοποιεί το `{model}`, που η OpenAI σταματά να διαθέτει στις {date}. Μετά από αυτή την ημερομηνία ο agent δεν θα μπορεί να μιλήσει.\n\nΗ OpenAI προτείνει ως αντικατάσταση το `gpt-realtime-2.1-mini`. Αυτό το model λειτουργεί μέσω του Realtime API της OpenAI, που αυτό το integration προσφέρει ως provider \"OpenAI Realtime (preview)\".\n\nΓια να μεταφέρετε αυτόν τον agent:\n1. Προσθέστε νέο entry του OpenAI TTS, επιλέξτε \"OpenAI Realtime (preview)\" και δώστε το OpenAI API key σας.\n2. Προσθέστε σε αυτό το entry έναν TTS agent με τη φωνή που θέλετε.\n3. Χρησιμοποιήστε τον νέο agent όπου χρησιμοποιείται αυτός, και μετά διαγράψτε αυτόν.\n\nΟ Realtime provider παράγει ήχο μόνο σε pcm και δέχεται speed έως 1.5. Οι φωνές fable, nova και onyx δεν υπάρχουν εκεί."
     },
     "music_assistant_twin": {
       "title": "Ανακοινώσεις σε ηχείο που παίζει και το Music Assistant",

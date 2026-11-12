@@ -1,0 +1,5 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Questions and ideas
+    url: https://github.com/sfortis/openai_tts/discussions
+    about: Ask how to set something up, or talk through an idea before it becomes a feature request.

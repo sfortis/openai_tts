@@ -4,11 +4,15 @@ Thank you for your interest in contributing to the OpenAI TTS custom component f
 
 ## Reporting Issues
 
-Before opening an issue:
-1. Check [existing issues](https://github.com/sfortis/openai_tts/issues) to avoid duplicates
-2. Include your Home Assistant version
-3. Include the integration version (from HACS or manifest.json)
-4. Provide relevant logs from Home Assistant
+Open an issue with the **Bug report** or **Feature request** form. The
+forms ask for the versions, the provider and the logs that a report
+needs. Check the [existing issues](https://github.com/sfortis/openai_tts/issues)
+first to avoid duplicates, and ask questions in
+[Discussions](https://github.com/sfortis/openai_tts/discussions).
+
+Feedback on the OpenAI Realtime preview goes in a bug report with
+**OpenAI Realtime (preview)** chosen as the provider, including reports
+that it works well.
 
 ## Before you start
 
@@ -78,4 +82,4 @@ If adding or modifying user-facing strings:
 
 ## Questions?
 
-Feel free to open a [discussion](https://github.com/sfortis/openai_tts/discussions) or issue if you have questions.
+Ask in [Discussions](https://github.com/sfortis/openai_tts/discussions).

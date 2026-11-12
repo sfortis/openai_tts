@@ -188,7 +188,7 @@
     },
     "model_retirement": {
       "title": "OpenAI is retiring the model of a TTS agent",
-      "description": "TTS agent `{profile}` uses `{model}`, which OpenAI stops serving on {date}. After that date the agent will fail to speak.\n\nOpenAI recommends `gpt-realtime-2.1-mini` as the replacement, but that model runs on OpenAI's Realtime API, which this integration does not use. OpenAI has not announced a replacement for its speech API.\n\nUntil it does, consider moving this agent to another provider."
+      "description": "TTS agent `{profile}` uses `{model}`, which OpenAI stops serving on {date}. After that date the agent will fail to speak.\n\nOpenAI recommends `gpt-realtime-2.1-mini` as the replacement. It runs on OpenAI's Realtime API, which this integration offers as the provider \"OpenAI Realtime (preview)\".\n\nTo move this agent:\n1. Add a new OpenAI TTS entry, choose \"OpenAI Realtime (preview)\" and enter your OpenAI API key.\n2. Add a TTS agent to that entry with the voice you want.\n3. Use the new agent wherever this one is used, then delete this one.\n\nThe Realtime provider produces pcm audio only and accepts speeds up to 1.5. The voices fable, nova and onyx are not available there."
     },
     "music_assistant_twin": {
       "title": "Announcements target a speaker that Music Assistant also plays to",

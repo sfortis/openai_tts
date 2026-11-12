@@ -188,7 +188,7 @@
     },
     "model_retirement": {
       "title": "OpenAI stellt das Modell eines TTS-Agenten ein",
-      "description": "Der TTS-Agent `{profile}` verwendet `{model}`, das OpenAI ab dem {date} nicht mehr anbietet. Danach kann der Agent nicht mehr sprechen.\n\nOpenAI empfiehlt `gpt-realtime-2.1-mini` als Ersatz, dieses Modell läuft aber über die Realtime API von OpenAI, die diese Integration nicht verwendet. Für die Speech API hat OpenAI keinen Ersatz angekündigt.\n\nBis dahin solltest du diesen Agenten auf einen anderen Anbieter umstellen."
+      "description": "Der TTS-Agent `{profile}` verwendet `{model}`, das OpenAI ab dem {date} nicht mehr anbietet. Danach kann der Agent nicht mehr sprechen.\n\nOpenAI empfiehlt `gpt-realtime-2.1-mini` als Ersatz. Dieses Modell läuft über die Realtime API von OpenAI, die diese Integration als Anbieter \"OpenAI Realtime (preview)\" anbietet.\n\nSo stellst du diesen Agenten um:\n1. Füge einen neuen OpenAI TTS-Eintrag hinzu, wähle \"OpenAI Realtime (preview)\" und gib deinen OpenAI API key ein.\n2. Füge diesem Eintrag einen TTS-Agenten mit der gewünschten Stimme hinzu.\n3. Verwende den neuen Agenten überall dort, wo dieser verwendet wird, und lösche diesen danach.\n\nDer Realtime-Anbieter liefert Audio nur im Format pcm und akzeptiert Geschwindigkeiten bis 1.5. Die Stimmen fable, nova und onyx gibt es dort nicht."
     },
     "music_assistant_twin": {
       "title": "Durchsagen zielen auf einen Lautsprecher, den auch Music Assistant bespielt",

@@ -409,6 +409,11 @@ class OpenAITTSEngine:
         self._hass = hass
         self._builder = _RequestBuilder(api_key, voice, model, speed)
 
+    @staticmethod
+    def blocking_timeout_s(text: str) -> float:
+        """How long the blocking path may take to synthesise ``text``."""
+        return float(DEFAULT_TIMEOUT_SECONDS)
+
     def get_tts(
         self,
         text: str,

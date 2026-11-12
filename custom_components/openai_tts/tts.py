@@ -62,6 +62,7 @@ from .const import (
     DEFAULT_SEND_VOICE,
     DEFAULT_STREAM_AUDIO,
     DOMAIN,
+    ENGINE_REALTIME,
     PROVIDER_CUSTOM,
     PROVIDER_OPENAI,
     PROVIDER_PRESETS,
@@ -84,6 +85,7 @@ from .exceptions import (
 from .loudness import can_filter_stream, filter_stream
 from .openaitts_engine import OpenAITTSEngine
 from .pcm_wav import delivery_format, pcm_as_wav
+from .realtime_engine import OpenAIRealtimeEngine
 from .repairs import create_voice_deleted_issue
 from .streaming import (
     PIPELINEABLE_FORMATS,
@@ -118,6 +120,31 @@ STORAGE_KEY = "openai_tts_state"
 MIN_STREAMING_TEXT_LENGTH = 1
 
 
+def _create_engine(
+    hass: HomeAssistant,
+    config_entry: ConfigEntry,
+    voice: str,
+    model: str,
+    speed: float,
+) -> OpenAITTSEngine | OpenAIRealtimeEngine:
+    """Return the engine for the endpoint of ``config_entry``.
+
+    The preset decides, and so does a WebSocket URL. Reconfiguring an
+    entry to another URL drops its preset, for example when a Realtime
+    entry is pointed at a proxy, and the speech engine cannot post to a
+    ``wss://`` address. An entry without a provider and with an HTTP URL
+    was created before the presets existed and uses the speech endpoint.
+    """
+    api_key = config_entry.data.get(CONF_API_KEY)
+    url = config_entry.data.get(CONF_URL) or ""
+    preset = preset_for(config_entry.data.get(CONF_PROVIDER))
+    if preset.get("engine") == ENGINE_REALTIME or url.lower().startswith(
+        ("ws://", "wss://")
+    ):
+        return OpenAIRealtimeEngine(api_key, voice, model, speed, url, hass=hass)
+    return OpenAITTSEngine(api_key, voice, model, speed, url, hass=hass)
+
+
 def _resolve_health_tracker(
     hass: HomeAssistant, parent_entry_id: str | None
 ) -> OpenAITTSHealthTracker | None:
@@ -149,13 +176,11 @@ async def async_setup_entry(
 
     if is_legacy:
         _LOGGER.info("Creating TTS entity for legacy entry: %s", config_entry.title)
-        api_key = config_entry.data.get(CONF_API_KEY)
-        url = config_entry.data.get(CONF_URL)
         model = config_entry.options.get(CONF_MODEL, config_entry.data.get(CONF_MODEL))
         voice = config_entry.options.get(CONF_VOICE, config_entry.data.get(CONF_VOICE))
         speed = config_entry.options.get(CONF_SPEED, config_entry.data.get(CONF_SPEED, 1.0))
 
-        engine = OpenAITTSEngine(api_key, voice, model, speed, url, hass=hass)
+        engine = _create_engine(hass, config_entry, voice, model, speed)
         async_add_entities([OpenAITTSEntity(hass, config_entry, engine)])
 
     if not has_subentries:
@@ -174,8 +199,6 @@ async def async_setup_entry(
         if getattr(subentry, "subentry_type", None) != SUBENTRY_TYPE_PROFILE:
             continue
 
-        api_key = config_entry.data.get(CONF_API_KEY)
-        url = config_entry.data.get(CONF_URL)
         model = subentry.data.get(CONF_MODEL, "tts-1")
         voice = subentry.data.get(CONF_VOICE, "shimmer")
         speed = subentry.data.get(CONF_SPEED, 1.0)
@@ -192,7 +215,7 @@ async def async_setup_entry(
                     len(existing), unique_id,
                 )
 
-        engine = OpenAITTSEngine(api_key, voice, model, speed, url, hass=hass)
+        engine = _create_engine(hass, config_entry, voice, model, speed)
         entity = OpenAITTSEntity(hass, subentry, engine, config_entry)
         async_add_entities([entity], config_subentry_id=subentry_id)
 
@@ -230,7 +253,7 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
         self,
         hass: HomeAssistant,
         config: ConfigEntry,
-        engine: OpenAITTSEngine,
+        engine: OpenAITTSEngine | OpenAIRealtimeEngine,
         parent_entry: ConfigEntry | None = None,
     ) -> None:
         self.hass = hass
@@ -1091,7 +1114,9 @@ class OpenAITTSEntity(TextToSpeechEntity, RestoreEntity):
                 response_format=resolved.get("audio_format", DEFAULT_AUDIO_FORMAT),
             )
         )
-        audio_response = await asyncio.wait_for(audio_task, timeout=30.0)
+        audio_response = await asyncio.wait_for(
+            audio_task, timeout=self._engine.blocking_timeout_s(text)
+        )
 
         if not audio_response or not audio_response.content:
             raise OpenAIInvalidResponseError("Empty audio response")

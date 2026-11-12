@@ -108,6 +108,11 @@ _FLAC_MAGIC: Tuple[bytes, ...] = (b"fLaC",)
 # to plausibly contain real audio (a JSON `{"error":...}` is ~50 bytes).
 _DEFAULT_MIN_AUDIO_BYTES = 256
 
+# How a JSON or HTML error body starts, as opposed to raw pcm.
+_PCM_ERROR_BODY_STARTS = (
+    b'{"', b"{\n", b"{\r", b"{ ", b"[{", b"[]", b'["', b"<!", b"<?", b"<h", b"<H",
+)
+
 
 def is_valid_audio(
     audio_data: Optional[bytes],
@@ -151,9 +156,12 @@ def is_valid_audio(
     if fmt == "flac":
         return audio_data.startswith(_FLAC_MAGIC)
     if fmt == "pcm":
-        # Raw PCM has no header; only reject obvious JSON/HTML error bodies.
-        first = audio_data[:1]
-        return first not in (b"{", b"<", b"[")
+        # Raw PCM has no header, so only an obvious JSON or HTML error
+        # body is rejected. Two bytes are compared, not one: the first
+        # byte of pcm is the low byte of a sample and takes any value,
+        # so a one byte test refused every valid clip whose first
+        # sample happened to start with {, < or [.
+        return not audio_data.startswith(_PCM_ERROR_BODY_STARTS)
 
     # Unknown format: reject obvious text/JSON/HTML payloads.
     first = audio_data[:1]
