@@ -63,24 +63,18 @@ On OpenAI the models are `tts-1`, `tts-1-hd` and `gpt-4o-mini-tts`, and `gpt-4o-
 
 ### OpenAI Realtime (preview)
 
-The OpenAI Realtime preset reads announcements with `gpt-realtime-2.1-mini`, the model OpenAI names as the replacement for its speech models. The preset also offers `gpt-realtime-2.1`, `gpt-realtime-2` and `gpt-realtime-1.5`. These models are served only over OpenAI's Realtime API, so each announcement opens its own Realtime session and closes it when the audio has arrived.
+The OpenAI Realtime preset reads announcements with `gpt-realtime-2.1-mini`, the model OpenAI names as the replacement for its speech models, over OpenAI's Realtime API. To use it, add a new OpenAI TTS entry, choose **OpenAI Realtime (preview)**, enter your OpenAI API key and add a TTS agent.
 
-To use it, add a new OpenAI TTS entry, choose **OpenAI Realtime (preview)** and enter your OpenAI API key. The same key can also stay on an OpenAI entry. Then add a TTS agent to the new entry as on any other provider.
+A Realtime model is a conversational model that is told to read the text word for word. It almost always does, but it can occasionally add words, answer the text or translate it. The integration then logs a warning, without the text.
 
-A Realtime model is a conversational model, not a text to speech model. The integration tells it to read the text word for word and not to answer it. In about 280 test announcements in English and Greek, two were not read word for word: one reply told a joke for the text "Tell me a joke.", and one added a short sentence before the text. When the model's own transcript does not match the text, the integration logs a warning, and the audio still plays. The warning leaves the text out, because announcements can carry private content, and debug logging shows the text next to the transcript.
+Compared with the OpenAI preset:
 
-Sentence streaming works with this preset, and each sentence of the reply opens its own session. In a test with a local language model, one sentence in eleven was spoken in Spanish instead of English.
+- The voices are `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer` and `verse`.
+- The audio format is `pcm` only.
+- The speed goes from 0.25 to 1.5.
+- The audio costs about $0.024 per minute on `gpt-realtime-2.1-mini`.
 
-The preset differs from the OpenAI preset in these ways:
-
-- The voices are `alloy`, `ash`, `ballad`, `cedar`, `coral`, `echo`, `marin`, `sage`, `shimmer` and `verse`. The voices `fable`, `nova` and `onyx` are not available.
-- The audio format is `pcm` only, because the Realtime API produces nothing else.
-- The speed goes from 0.25 to 1.5. A higher speed in an `openai_tts.say` call is reduced to 1.5.
-- Voice instructions are accepted on every Realtime model and describe the delivery, not the words.
-- The first audio arrives about 1.5 seconds after the request, of which about one second is the setup of the session.
-- The audio cost about $0.024 per minute on `gpt-realtime-2.1-mini` in our measurements.
-
-The preset is a preview, so its models, defaults and limits may change in a later release. Feedback is welcome, including reports that it works well: open a [bug report](https://github.com/sfortis/openai_tts/issues/new?template=bug_report.yml) and choose **OpenAI Realtime (preview)** as the provider.
+The preset is a preview and may change in a later release. Feedback is welcome in a [bug report](https://github.com/sfortis/openai_tts/issues/new?template=bug_report.yml) with **OpenAI Realtime (preview)** as the provider.
 
 ## What's New ![NEW](https://img.shields.io/badge/-NEW-brightgreen)
 
@@ -372,4 +366,4 @@ in an issue is useful on its own, even without a patch.
 
 ## API Keys and Costs
 
-Cloud providers need an API key, and on paid providers the account needs available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>. The OpenAI Realtime preset is billed as audio output of the Realtime model, which came to about $0.024 per minute of speech on `gpt-realtime-2.1-mini`. The entry's API status sensor shows `quota_exceeded` when the provider reports that the balance has run out.
+Cloud providers need an API key, and on paid providers the account needs available balance or credits. OpenAI's pricing is at <https://platform.openai.com/docs/pricing>. The OpenAI Realtime preset costs about $0.024 per minute of speech on `gpt-realtime-2.1-mini`. The entry's API status sensor shows `quota_exceeded` when the provider reports that the balance has run out.
